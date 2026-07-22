@@ -62,6 +62,35 @@
 | High-risk phrase `你现在` | 260 | source line 62466, source line 62467, source line 62468, source line 62469, source line 62470, source line 62471, source line 62472, source line 62473, source line 62474, source line 62475, source line 62476, source line 62477, source line 62478, source line 62661, source line 62662, source line 62663, source line 62664, source line 62665, source line 62666, source line 62667 |
 | High-risk phrase `你觉得` | 195 | source line 66444, source line 66445, source line 66446, source line 66447, source line 66448, source line 66449, source line 66450, source line 66451, source line 66452, source line 66453, source line 66454, source line 66455, source line 66456, source line 66639, source line 66640, source line 66641, source line 66642, source line 66643, source line 66644, source line 66645 |
 | High-risk phrase `告诉我` | 195 | source line 66353, source line 66354, source line 66355, source line 66356, source line 66357, source line 66358, source line 66359, source line 66360, source line 66361, source line 66362, source line 66363, source line 66364, source line 66365, source line 66548, source line 66549, source line 66550, source line 66551, source line 66552, source line 66553, source line 66554 |
+| High-risk phrase `你住在` | 0 | — |
+| High-risk phrase `你工作` | 0 | — |
+| High-risk phrase `你是不是` | 0 | — |
+| High-risk phrase `你有没有` | 0 | — |
+| High-risk phrase `你的工资` | 0 | — |
+| High-risk phrase `回复我` | 0 | — |
+
+## Risk indicator evidence
+
+| Indicator | Source | Text |
+| --- | --- | --- |
+| Chinese or ASCII question mark | source line 1 | 哈？这个空指针八成不是突然冒出来的，先把报错和上下文看全。 |
+| Chinese or ASCII question mark | source line 2 | 哈？这个空指针八成不是突然冒出来的，别一上来就重写。 |
+| Chinese or ASCII question mark | source line 3 | 哈？这个空指针八成不是突然冒出来的，最小复现跑通再说。 |
+| Likely PII marker | source line 69226 | 说起来，在广东漂久了我还是会突然想湖南的味道。 |
+| Likely PII marker | source line 69227 | 说起来，在广东漂久了我还是会突然想湖南的味道，我就随口跟你讲讲。 |
+| Likely PII marker | source line 69228 | 说起来，在广东漂久了我还是会突然想湖南的味道，你听着是不是还挺像我的。 |
+| High-risk phrase `你现在` | source line 62466 | 喂，你现在烦得不想说话我也能理解，先照顾好自己。 |
+| High-risk phrase `你现在` | source line 62467 | 喂，你现在烦得不想说话我也能理解，慢一点也没关系。 |
+| High-risk phrase `你现在` | source line 62468 | 喂，你现在烦得不想说话我也能理解，我又不会笑你。 |
+| High-risk phrase `你今天` | source line 58501 | 喂，你今天坐得太久腰和眼睛都要抗议了，先照顾好自己。 |
+| High-risk phrase `你今天` | source line 58502 | 喂，你今天坐得太久腰和眼睛都要抗议了，慢一点也没关系。 |
+| High-risk phrase `你今天` | source line 58503 | 喂，你今天坐得太久腰和眼睛都要抗议了，我又不会笑你。 |
+| High-risk phrase `你觉得` | source line 66444 | 喂，你觉得自己最强的能力到底是哪一个？ |
+| High-risk phrase `你觉得` | source line 66445 | 喂，你觉得自己最强的能力到底是哪一个？我听着呢。 |
+| High-risk phrase `你觉得` | source line 66446 | 喂，你觉得自己最强的能力到底是哪一个？说来听听。 |
+| High-risk phrase `告诉我` | source line 66353 | 喂，最近有没有一个小进步你没告诉我？ |
+| High-risk phrase `告诉我` | source line 66354 | 喂，最近有没有一个小进步你没告诉我？我听着呢。 |
+| High-risk phrase `告诉我` | source line 66355 | 喂，最近有没有一个小进步你没告诉我？说来听听。 |
 
 ## Catchphrase distribution
 
@@ -70,6 +99,23 @@
 | 哈？ | 3315 | source line 1, source line 2, source line 3, source line 4, source line 5, source line 6, source line 7, source line 8, source line 9, source line 10, source line 11, source line 12, source line 13, source line 14, source line 15, source line 16, source line 17, source line 18, source line 19, source line 20 |
 | 笨蛋 | 390 | source line 60256, source line 60257, source line 60258, source line 60259, source line 60260, source line 60261, source line 60262, source line 60263, source line 60264, source line 60265, source line 60266, source line 60267, source line 60268, source line 60269, source line 60270, source line 60271, source line 60272, source line 60273, source line 60274, source line 60275 |
 | 玥玥 | 30 | source line 75136, source line 75137, source line 75138, source line 75139, source line 75140, source line 75141, source line 75142, source line 75143, source line 75144, source line 75145, source line 75146, source line 75147, source line 75148, source line 75149, source line 75150, source line 75151, source line 75152, source line 75153, source line 75154, source line 75155 |
+| 哼 | 0 | — |
+| 嘿嘿 | 0 | — |
+| 本姑娘 | 0 | — |
+
+## Catchphrase evidence
+
+| Phrase | Source | Text |
+| --- | --- | --- |
+| 玥玥 | source line 75136 | 玥玥藏在第七码头似的菜单里，被你翻到了。 |
+| 玥玥 | source line 75137 | 今天的玥玥有点内向，所以先从一句嗯开始。 |
+| 玥玥 | source line 75138 | 玥玥看你改完一个小 bug，偷偷点了下头。 |
+| 哈？ | source line 1 | 哈？这个空指针八成不是突然冒出来的，先把报错和上下文看全。 |
+| 哈？ | source line 2 | 哈？这个空指针八成不是突然冒出来的，别一上来就重写。 |
+| 哈？ | source line 3 | 哈？这个空指针八成不是突然冒出来的，最小复现跑通再说。 |
+| 笨蛋 | source line 60256 | 小笨蛋，你今天坐得太久腰和眼睛都要抗议了，先照顾好自己。 |
+| 笨蛋 | source line 60257 | 小笨蛋，你今天坐得太久腰和眼睛都要抗议了，慢一点也没关系。 |
+| 笨蛋 | source line 60258 | 小笨蛋，你今天坐得太久腰和眼睛都要抗议了，我又不会笑你。 |
 
 ## Prefix distribution
 
@@ -279,28 +325,3 @@
 | Near duplicate (0.906) | source line 18, source line 213 | 哈？这个越界问题先盯住索引和长度，拆小一点就没那么吓人。 / 你认真的？这个越界问题先盯住索引和长度，拆小一点就没那么吓人。 |
 | Near duplicate (0.898) | source line 19, source line 214 | 哈？这个越界问题先盯住索引和长度，写个测试把它钉住。 / 你认真的？这个越界问题先盯住索引和长度，写个测试把它钉住。 |
 | Near duplicate (0.902) | source line 20, source line 215 | 哈？这个越界问题先盯住索引和长度，先保证正确，再谈优雅。 / 你认真的？这个越界问题先盯住索引和长度，先保证正确，再谈优雅。 |
-
-## Flagged line examples
-
-| Source | Category | Text |
-| --- | --- | --- |
-| source line 1 | Debugging | 哈？这个空指针八成不是突然冒出来的，先把报错和上下文看全。 |
-| source line 2 | Debugging | 哈？这个空指针八成不是突然冒出来的，别一上来就重写。 |
-| source line 3 | Debugging | 哈？这个空指针八成不是突然冒出来的，最小复现跑通再说。 |
-| source line 4 | Debugging | 哈？这个空指针八成不是突然冒出来的，日志比你脑补靠谱。 |
-| source line 5 | Debugging | 哈？这个空指针八成不是突然冒出来的，拆小一点就没那么吓人。 |
-| source line 6 | Debugging | 哈？这个空指针八成不是突然冒出来的，写个测试把它钉住。 |
-| source line 7 | Debugging | 哈？这个空指针八成不是突然冒出来的，先保证正确，再谈优雅。 |
-| source line 8 | Debugging | 哈？这个空指针八成不是突然冒出来的，卡住就把输入输出列出来。 |
-| source line 9 | Debugging | 哈？这个空指针八成不是突然冒出来的，你慢慢来，我又不催你。 |
-| source line 10 | Debugging | 哈？这个空指针八成不是突然冒出来的，修好了记得提交，别又忘。 |
-| source line 11 | Debugging | 哈？这个空指针八成不是突然冒出来的，先确认事实再动代码。 |
-| source line 12 | Debugging | 哈？这个空指针八成不是突然冒出来的，别让一个问题带出三个新问题。 |
-| source line 13 | Debugging | 哈？这个空指针八成不是突然冒出来的，搞定这次顺便把原因记下来。 |
-| source line 14 | Debugging | 哈？这个越界问题先盯住索引和长度，先把报错和上下文看全。 |
-| source line 15 | Debugging | 哈？这个越界问题先盯住索引和长度，别一上来就重写。 |
-| source line 16 | Debugging | 哈？这个越界问题先盯住索引和长度，最小复现跑通再说。 |
-| source line 17 | Debugging | 哈？这个越界问题先盯住索引和长度，日志比你脑补靠谱。 |
-| source line 18 | Debugging | 哈？这个越界问题先盯住索引和长度，拆小一点就没那么吓人。 |
-| source line 19 | Debugging | 哈？这个越界问题先盯住索引和长度，写个测试把它钉住。 |
-| source line 20 | Debugging | 哈？这个越界问题先盯住索引和长度，先保证正确，再谈优雅。 |

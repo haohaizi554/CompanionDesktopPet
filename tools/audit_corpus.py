@@ -39,6 +39,20 @@ def _line_refs(line_numbers: Iterable[int]) -> str:
     return ", ".join(f"source line {line_number}" for line_number in values) or "—"
 
 
+def _evidence_rows(
+    by_source_line: Mapping[int, LegacyLine],
+    indicators: Iterable[tuple[str, Iterable[int]]],
+    per_indicator: int = 3,
+) -> list[tuple[str, str, str]]:
+    rows: list[tuple[str, str, str]] = []
+    for indicator, line_numbers in indicators:
+        for line_number in list(line_numbers)[:per_indicator]:
+            line = by_source_line.get(line_number)
+            if line is not None:
+                rows.append((indicator, f"source line {line_number}", line.text))
+    return rows
+
+
 def _length_buckets(lines: Sequence[LegacyLine]) -> Counter[str]:
     buckets: Counter[str] = Counter()
     for line in lines:
@@ -130,6 +144,25 @@ def render_report(
         )
     )
 
+    risk_evidence = [
+        ("Chinese or ASCII question mark", result.question_examples),
+        ("Likely PII marker", result.likely_pii_examples),
+    ]
+    risk_evidence.extend(
+        (
+            f"High-risk phrase `{pattern}`",
+            result.high_risk_examples.get(pattern, ()),
+        )
+        for pattern in result.high_risk_patterns
+    )
+    report.extend(["", "## Risk indicator evidence", ""])
+    report.extend(
+        _table(
+            ("Indicator", "Source", "Text"),
+            _evidence_rows(by_source_line, risk_evidence),
+        )
+    )
+
     report.extend(["", "## Catchphrase distribution", ""])
     report.extend(
         _table(
@@ -142,6 +175,18 @@ def render_report(
                 )
                 for phrase, count in _top(result.catchphrase_counts, 100)
             ),
+        )
+    )
+
+    catchphrase_evidence = [
+        (phrase, result.catchphrase_examples.get(phrase, ()))
+        for phrase in result.catchphrase_counts
+    ]
+    report.extend(["", "## Catchphrase evidence", ""])
+    report.extend(
+        _table(
+            ("Phrase", "Source", "Text"),
+            _evidence_rows(by_source_line, catchphrase_evidence),
         )
     )
 
@@ -181,25 +226,7 @@ def render_report(
         else ["No duplicate examples found."]
     )
 
-    report.extend(["", "## Flagged line examples", ""])
-    flagged = dict.fromkeys(result.question_examples + result.likely_pii_examples)
-    for examples in result.high_risk_examples.values():
-        flagged.update(dict.fromkeys(examples))
-    report.extend(
-        _table(
-            ("Source", "Category", "Text"),
-            (
-                (
-                    f"source line {line_number}",
-                    by_source_line[line_number].category,
-                    by_source_line[line_number].text,
-                )
-                for line_number in list(flagged)[:20]
-            ),
-        )
-        if flagged
-        else ["No flagged examples found."]
-    )
+
     report.append("")
     return "\n".join(report)
 

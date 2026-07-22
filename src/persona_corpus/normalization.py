@@ -158,9 +158,9 @@ def audit_legacy(lines: Sequence[LegacyLine]) -> AuditResult:
     prefix_counts = {length: Counter() for length in PREFIX_LENGTHS}
     suffix_counts = {length: Counter() for length in SUFFIX_LENGTHS}
     text_length_counts: Counter[int] = Counter()
-    high_risk_patterns: Counter[str] = Counter()
+    high_risk_patterns: Counter[str] = Counter({pattern: 0 for pattern in HIGH_RISK_PATTERNS})
     high_risk_examples: dict[str, list[int]] = defaultdict(list)
-    catchphrase_counts: Counter[str] = Counter()
+    catchphrase_counts: Counter[str] = Counter({phrase: 0 for phrase in CATCHPHRASES})
     catchphrase_examples: dict[str, list[int]] = defaultdict(list)
     question_examples: list[int] = []
     likely_pii_examples: list[int] = []

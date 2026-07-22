@@ -64,9 +64,15 @@ class LoaderTests(CorpusTestCase):
             load_legacy(path)
 
     def test_malformed_quoted_row_reports_actual_line_number(self) -> None:
-        path = self.write_fixture('Debugging\tok\n"unterminated\ttext\n')
+        path = self.write_fixture('Debugging\tok\n"unterminated\n')
 
         with self.assertRaisesRegex(CorpusFormatError, r"line 2"):
+            load_legacy(path)
+
+    def test_legacy_rejects_valid_quoted_multiline_on_physical_line(self) -> None:
+        path = self.write_fixture('Debugging\tok\nLife\t"first\ncontinued"\n')
+
+        with self.assertRaisesRegex(CorpusFormatError, r"line 3"):
             load_legacy(path)
 
     def test_sha256_file_hashes_source_bytes(self) -> None:
@@ -115,6 +121,17 @@ class LoaderTests(CorpusTestCase):
         with self.assertRaisesRegex(CorpusFormatError, r"line 2"):
             load_v2(path)
 
+    def test_v2_rejects_valid_quoted_multiline_on_physical_line(self) -> None:
+        row = (
+            "line-1\tLife\tcharacter_life\treading\treading-window\tself_talk\t"
+            "idle\tany\twarm\t1\t2.5\t8\t3\t1.25\tfalse\ttrue\tstandalone text\t"
+            "rewrite\tlegacy:1\t\"first\ncontinued\""
+        )
+        path = self.write_fixture(f"{V2_HEADER}\n{row}\n")
+
+        with self.assertRaisesRegex(CorpusFormatError, r"line 3"):
+            load_v2(path)
+
 
 class AuditTests(unittest.TestCase):
     def test_normalize_text_uses_nfkc_and_strips_punctuation_whitespace(self) -> None:
@@ -130,6 +147,8 @@ class AuditTests(unittest.TestCase):
 
         self.assertEqual(2, result.question_count)
         self.assertEqual(2, result.high_risk_patterns["你现在"])
+        self.assertEqual(0, result.high_risk_patterns["回复我"])
+        self.assertEqual(0, result.catchphrase_counts["嘿嘿"])
         self.assertEqual(1, result.normalized_duplicate_count)
 
     def test_audit_counts_distributions_patterns_pii_and_examples(self) -> None:
@@ -173,6 +192,16 @@ class AuditCliTests(CorpusTestCase):
         self.assertIn("## Suffix distribution", report)
         self.assertIn("source line 1", report)
         self.assertIn("source line 2", report)
+        self.assertIn("| High-risk phrase `回复我` | 0 | — |", report)
+        self.assertIn("| 嘿嘿 | 0 | — |", report)
+        self.assertIn(
+            "| Likely PII marker | source line 2 | 玥玥今天在湖南长沙散步。 |",
+            report,
+        )
+        self.assertIn(
+            "| High-risk phrase `你现在` | source line 1 | 你现在做什么？ |",
+            report,
+        )
 
 
 if __name__ == "__main__":

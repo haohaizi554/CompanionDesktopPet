@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import csv
 import hashlib
 import math
 from pathlib import Path
@@ -48,17 +47,24 @@ def _rows(path: Path):
     except (OSError, UnicodeError) as error:
         raise CorpusFormatError(path, 1, str(error)) from error
     with stream:
-        reader = csv.reader(stream, delimiter="\t", strict=True)
+        line_number = 1
         try:
-            yield from reader
-        except (csv.Error, UnicodeError) as error:
-            raise CorpusFormatError(path, max(1, reader.line_num), str(error)) from error
+            for line_number, physical_line in enumerate(stream, start=1):
+                if physical_line.endswith("\n"):
+                    physical_line = physical_line[:-1]
+                    if physical_line.endswith("\r"):
+                        physical_line = physical_line[:-1]
+                elif physical_line.endswith("\r"):
+                    physical_line = physical_line[:-1]
+                yield line_number, physical_line.split("\t")
+        except UnicodeError as error:
+            raise CorpusFormatError(path, line_number, str(error)) from error
 
 
 def load_legacy(path: Path) -> list[LegacyLine]:
     path = Path(path)
     result: list[LegacyLine] = []
-    for line_number, row in enumerate(_rows(path), start=1):
+    for line_number, row in _rows(path):
         if len(row) != 2:
             raise CorpusFormatError(
                 path, line_number, f"expected 2 columns, found {len(row)}"
@@ -107,16 +113,16 @@ def load_v2(path: Path, enabled_only: bool = False) -> list[CorpusLine]:
     path = Path(path)
     rows = iter(_rows(path))
     try:
-        header = next(rows)
+        header_line, header = next(rows)
     except StopIteration as error:
         raise CorpusFormatError(path, 1, "missing v2 header") from error
     if tuple(header) != V2_HEADER:
         raise CorpusFormatError(
-            path, 1, "expected exact v2 header: " + ",".join(V2_HEADER)
+            path, header_line, "expected exact v2 header: " + ",".join(V2_HEADER)
         )
 
     result: list[CorpusLine] = []
-    for line_number, row in enumerate(rows, start=2):
+    for line_number, row in rows:
         if len(row) != len(V2_HEADER):
             raise CorpusFormatError(
                 path,
