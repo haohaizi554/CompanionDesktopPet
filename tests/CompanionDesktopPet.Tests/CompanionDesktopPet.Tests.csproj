@@ -23,4 +23,13 @@
     <ProjectReference Include="..\..\src\CompanionDesktopPet\CompanionDesktopPet.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="..\..\src\CompanionDesktopPet\Assets\character.png"
+          Link="Assets\character.png"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\src\CompanionDesktopPet\Assets\pet.ico"
+          Link="Assets\pet.ico"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

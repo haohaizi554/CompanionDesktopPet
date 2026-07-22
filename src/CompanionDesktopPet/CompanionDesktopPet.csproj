@@ -9,6 +9,12 @@
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>CompanionDesktopPet</AssemblyName>
     <RootNamespace>CompanionDesktopPet</RootNamespace>
+    <ApplicationIcon>Assets\pet.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Remove="Assets\character.png;Assets\pet.ico" />
+    <Resource Include="Assets\character.png;Assets\pet.ico" />
+  </ItemGroup>
 
 </Project>
