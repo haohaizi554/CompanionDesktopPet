@@ -1,23 +1,26 @@
-﻿using System.Text;
 using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Data;
-using System.Windows.Documents;
-using System.Windows.Input;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
-using System.Windows.Navigation;
-using System.Windows.Shapes;
+using CompanionDesktopPet.Models;
+using CompanionDesktopPet.Services;
+using CompanionDesktopPet.UI;
 
 namespace CompanionDesktopPet;
 
-/// <summary>
-/// Interaction logic for MainWindow.xaml
-/// </summary>
 public partial class MainWindow : Window
 {
-    public MainWindow()
+    private readonly PetSettings _settings;
+    private readonly SettingsService _settingsService;
+    private readonly AnimationController _animation;
+
+    public MainWindow(PetSettings settings, SettingsService settingsService)
     {
         InitializeComponent();
+        _settings = settings;
+        _settingsService = settingsService;
+        _animation = new AnimationController(
+            BreathingScale,
+            SwayRotation,
+            FloatingOffset,
+            ReactionScale,
+            ReactionRotation);
     }
 }

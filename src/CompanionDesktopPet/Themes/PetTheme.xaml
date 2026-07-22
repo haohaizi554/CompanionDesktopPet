@@ -1,0 +1,22 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Color x:Key="CreamColor">#FFFFF8EE</Color>
+  <Color x:Key="BlushColor">#FFFFD6DF</Color>
+  <Color x:Key="RoseColor">#FFE98FA4</Color>
+  <Color x:Key="CocoaColor">#FF543A3F</Color>
+  <Color x:Key="MenuHoverColor">#FFFFE8ED</Color>
+
+  <SolidColorBrush x:Key="CreamBrush" Color="{StaticResource CreamColor}" />
+  <SolidColorBrush x:Key="BlushBrush" Color="{StaticResource BlushColor}" />
+  <SolidColorBrush x:Key="RoseBrush" Color="{StaticResource RoseColor}" />
+  <SolidColorBrush x:Key="CocoaBrush" Color="{StaticResource CocoaColor}" />
+  <SolidColorBrush x:Key="MenuHoverBrush" Color="{StaticResource MenuHoverColor}" />
+
+  <Style TargetType="ContextMenu">
+    <Setter Property="Background" Value="{StaticResource CreamBrush}" />
+    <Setter Property="Foreground" Value="{StaticResource CocoaBrush}" />
+    <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="Padding" Value="4" />
+  </Style>
+</ResourceDictionary>
