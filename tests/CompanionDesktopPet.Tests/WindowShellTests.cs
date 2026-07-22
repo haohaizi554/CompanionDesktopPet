@@ -1,3 +1,4 @@
+using System.IO;
 using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Windows;
@@ -16,7 +17,8 @@ public sealed class WindowShellTests
         {
             var app = System.Windows.Application.Current as App ?? new App();
             app.InitializeComponent();
-            var window = new MainWindow(PetSettings.Default, new SettingsService());
+            var settingsDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+            var window = new MainWindow(PetSettings.Default, new SettingsService(settingsDirectory));
 
             Assert.Equal(WindowStyle.None, window.WindowStyle);
             Assert.True(window.AllowsTransparency);
@@ -29,7 +31,36 @@ public sealed class WindowShellTests
             Assert.NotNull(image.Source);
             Assert.NotNull(image.ContextMenu);
             Assert.True(image.ContextMenu.Items.Count >= 8);
+
+            window.Show();
+            window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+            var bubble = Assert.IsAssignableFrom<FrameworkElement>(window.FindName("SpeechBubble"));
+            var speech = Assert.IsType<TextBlock>(window.FindName("SpeechText"));
+            Assert.Equal(Visibility.Visible, bubble.Visibility);
+            Assert.False(string.IsNullOrWhiteSpace(speech.Text));
+
+            var say = Assert.IsType<MenuItem>(image.ContextMenu.Items[0]);
+            say.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            Assert.False(string.IsNullOrWhiteSpace(speech.Text));
+
+            var pause = Assert.IsType<MenuItem>(image.ContextMenu.Items[1]);
+            pause.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            Assert.Equal("继续动画", pause.Header);
+
+            var size = Assert.IsType<MenuItem>(image.ContextMenu.Items[3]);
+            var large = Assert.IsType<MenuItem>(size.Items[2]);
+            large.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            Assert.Equal(390, image.Width);
+
+            var topmost = Assert.IsType<MenuItem>(image.ContextMenu.Items[4]);
+            topmost.IsChecked = false;
+            topmost.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            Assert.False(window.Topmost);
             window.Close();
+            if (Directory.Exists(settingsDirectory))
+            {
+                Directory.Delete(settingsDirectory, true);
+            }
         });
     }
 

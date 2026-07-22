@@ -71,9 +71,9 @@
           <MenuItem x:Name="PauseMenuItem" Header="暂停动画" />
           <Separator />
           <MenuItem Header="大小">
-            <MenuItem x:Name="SmallSizeMenuItem" Header="小巧" Tag="Small" />
-            <MenuItem x:Name="NormalSizeMenuItem" Header="刚刚好" Tag="Normal" IsChecked="True" />
-            <MenuItem x:Name="LargeSizeMenuItem" Header="大一点" Tag="Large" />
+            <MenuItem x:Name="SmallSizeMenuItem" Header="小巧" Tag="Small" IsCheckable="True" />
+            <MenuItem x:Name="NormalSizeMenuItem" Header="刚刚好" Tag="Normal" IsCheckable="True" IsChecked="True" />
+            <MenuItem x:Name="LargeSizeMenuItem" Header="大一点" Tag="Large" IsCheckable="True" />
           </MenuItem>
           <MenuItem x:Name="TopmostMenuItem"
                     Header="保持置顶"
