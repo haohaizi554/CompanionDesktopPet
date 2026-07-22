@@ -1,7 +1,7 @@
 # Companion Desktop Pet — Design Specification
 
 **Date:** 2026-07-22  
-**Status:** Approved design, pending written-spec review  
+**Status:** Approved  
 **Target:** Windows 10/11 x64, single-file executable
 
 ## 1. Goal
@@ -63,7 +63,7 @@ Initial behavior:
 - saved position takes precedence when it remains visible on a current monitor;
 - an invalid or off-screen saved position is clamped back into the nearest work area.
 
-The speech bubble appears above or beside the character depending on available screen space. It uses a rounded, high-contrast light surface, dark text, subtle shadow, and a small pointer. The bubble automatically disappears after approximately five seconds.
+The overall styling is intentionally cute without altering the person's appearance. The speech bubble appears above or beside the character depending on available screen space. It uses a plump rounded shape, a warm cream-to-blush palette, dark cocoa text, a soft pink border, subtle shadow, and a small heart-like pointer. The bubble automatically disappears after approximately five seconds.
 
 ## 5. Character Asset Processing
 
@@ -88,7 +88,7 @@ Pressing and dragging the visible character moves the window. A small movement t
 
 A normal left click:
 
-1. plays a short squash-and-bounce response;
+1. plays a short, soft squash-and-bounce response with a tiny cheerful tilt;
 2. chooses a local phrase that avoids immediate repetition;
 3. displays the phrase in the speech bubble.
 
@@ -123,6 +123,8 @@ Dialogue is stored locally in categorized phrase lists:
 - encouragement;
 - break and hydration reminders;
 - neutral friendly observations.
+
+Copy stays short, warm, and lightly playful. Small Unicode decorations such as `♡` may be used sparingly, but the pet never claims to be the photographed person or imitates a real person's identity.
 
 On startup, the pet selects a greeting based on local time. After that, a timer schedules the next bubble with randomized intervals between five and ten minutes. The timer resets after a manual click so automatic and manual bubbles do not overlap.
 
@@ -184,4 +186,3 @@ Completion requires evidence for every item below:
 10. Exit removes the process completely, and a second launch cannot create a duplicate pet.
 
 Verification will include automated tests, build/publish output inspection, process/window checks, and a real GUI smoke test with screenshots.
-
