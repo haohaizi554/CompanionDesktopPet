@@ -104,6 +104,8 @@ Set `src/CompanionDesktopPet/CompanionDesktopPet.csproj` to:
 </Project>
 ```
 
+Set the test project's `<TargetFramework>` to `net9.0-windows`, add `<UseWPF>true</UseWPF>`, and add the application `ProjectReference` before compiling tests. A plain `net9.0` test project cannot reference a `net9.0-windows` WPF project.
+
 - [ ] **Step 3: Write failing dialogue tests**
 
 Create `tests/CompanionDesktopPet.Tests/DialogueServiceTests.cs`:
