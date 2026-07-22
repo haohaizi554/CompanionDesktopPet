@@ -1,7 +1,7 @@
 # Companion Desktop Pet — Design Specification
 
 **Date:** 2026-07-22  
-**Status:** Approved  
+**Status:** Approved
 **Target:** Windows 10/11 x64, single-file executable
 
 ## 1. Goal
