@@ -10,7 +10,11 @@ public sealed class SettingsService
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
-        Converters = { new JsonStringEnumConverter() }
+        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+        Converters =
+        {
+            new JsonStringEnumConverter(allowIntegerValues: false)
+        }
     };
 
     private readonly string _directory;
@@ -34,11 +38,18 @@ public sealed class SettingsService
             }
 
             await using var stream = File.OpenRead(SettingsPath);
-            return await JsonSerializer.DeserializeAsync<PetSettings>(stream, JsonOptions)
-                ?? PetSettings.Default;
+            var settings = await JsonSerializer.DeserializeAsync<PetSettings>(
+                stream,
+                JsonOptions);
+            return PetSettings.IsValid(settings)
+                ? settings!
+                : PetSettings.Default;
         }
         catch (Exception exception) when (
-            exception is IOException or UnauthorizedAccessException or JsonException)
+            exception is IOException
+                or UnauthorizedAccessException
+                or JsonException
+                or NotSupportedException)
         {
             return PetSettings.Default;
         }
@@ -46,6 +57,14 @@ public sealed class SettingsService
 
     public async Task SaveAsync(PetSettings settings)
     {
+        ArgumentNullException.ThrowIfNull(settings);
+        if (!PetSettings.IsValid(settings))
+        {
+            throw new ArgumentException(
+                "Only complete settings with finite, plausible coordinates can be saved.",
+                nameof(settings));
+        }
+
         Directory.CreateDirectory(_directory);
         var temporaryPath = SettingsPath + ".tmp";
 

@@ -134,9 +134,6 @@ public static class PersonaCorpus
         "time:afternoon", "time:evening", "time:late_night", "season:spring", "season:summer",
         "season:autumn", "season:winter", "date:holiday", "date:month_boundary"
     };
-    private static readonly string[] ForbiddenPiiMarkers =
-        ["雷琳玥", "小玥", "玥玥", "湖南", "长沙", "广东", "月薪", "工资", "打零工"];
-
     public static IReadOnlyList<DialogueLine> All => Snapshot.Value.All;
 
     public static IReadOnlyList<DialogueLine> Regular => Snapshot.Value.Regular;
@@ -252,11 +249,6 @@ public static class PersonaCorpus
             if (requiresReply || text.Contains('?') || text.Contains('？'))
             {
                 throw Error(lineNumber, "enabled rows cannot ask a question or require a reply");
-            }
-
-            if (ForbiddenPiiMarkers.Any(marker => text.Contains(marker, StringComparison.Ordinal)))
-            {
-                throw Error(lineNumber, "enabled row contains a reviewed personal marker");
             }
 
             var normalized = Normalize(text);

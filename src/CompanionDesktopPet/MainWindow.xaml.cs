@@ -20,10 +20,16 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _automaticTimer = new();
     private readonly DispatcherTimer _bubbleTimer = new() { Interval = TimeSpan.FromSeconds(5) };
     private readonly DispatcherTimer _memoryTimer = new() { Interval = TimeSpan.FromSeconds(2) };
+    private readonly DispatcherTimer _eventTimer = new() { Interval = TimeSpan.FromSeconds(30) };
+    private readonly IIdleTimeProvider _idleTimeProvider;
+    private readonly bool _suppressApplicationShutdownOnClose;
+    private readonly Action _shutdownApplication;
+    private CompanionEventPump? _eventPump;
     private PetSettings _settings;
     private PetScale _scale;
     private bool _paused;
     private bool _dragged;
+    private bool _shutdownRequested;
     private System.Windows.Point _mouseDown;
     private double _lastDragLeft;
 
@@ -33,12 +39,19 @@ public partial class MainWindow : Window
         PetSettings settings,
         SettingsService settingsService,
         AgentMemoryService? agentMemoryService = null,
-        AgentMemorySnapshot? agentMemory = null)
+        AgentMemorySnapshot? agentMemory = null,
+        IIdleTimeProvider? idleTimeProvider = null,
+        bool suppressApplicationShutdownOnClose = false,
+        Action? shutdownApplication = null)
     {
         InitializeComponent();
         _settings = settings;
         _settingsService = settingsService;
         _agentMemoryService = agentMemoryService;
+        _idleTimeProvider = idleTimeProvider ?? new WindowsIdleTimeProvider();
+        _suppressApplicationShutdownOnClose = suppressApplicationShutdownOnClose;
+        _shutdownApplication = shutdownApplication
+            ?? (() => System.Windows.Application.Current?.Shutdown());
         _dialogue = new DialogueService(agentMemory);
         _scheduler = new DialogueScheduler(_random);
         _animation = new AnimationController(
@@ -68,6 +81,7 @@ public partial class MainWindow : Window
         _bubbleTimer.Tick += BubbleTimer_Tick;
         _automaticTimer.Tick += AutomaticTimer_Tick;
         _memoryTimer.Tick += MemoryTimer_Tick;
+        _eventTimer.Tick += EventTimer_Tick;
     }
 
     private void Window_Loaded(object sender, RoutedEventArgs e)
@@ -86,7 +100,50 @@ public partial class MainWindow : Window
 
         UpdatePauseLabel();
         ShowEventBubble(CompanionEvent.Startup);
+        _eventPump = new CompanionEventPump(DateTime.Now, _idleTimeProvider.GetIdleTime());
+        _eventTimer.Start();
         ScheduleNextPhrase();
+    }
+
+    public bool TryVerifySmokeReadiness(out string failure)
+    {
+        if (!IsLoaded || !IsVisible)
+        {
+            failure = "The main window has not rendered.";
+            return false;
+        }
+
+        if (PetImage.Source is null
+            || !PetImage.IsVisible
+            || PetImage.ActualWidth <= 0
+            || PetImage.ActualHeight <= 0)
+        {
+            failure = "The pet image is not visible.";
+            return false;
+        }
+
+        if (LastReply is not
+            {
+                Trigger: CompanionEvent.Startup,
+                ShouldDisplayText: true,
+                SourceLine.Enabled: true
+            } reply)
+        {
+            failure = "The startup reply is not ready.";
+            return false;
+        }
+
+        if (SpeechBubble.Visibility != Visibility.Visible
+            || !SpeechBubble.IsVisible
+            || string.IsNullOrWhiteSpace(SpeechText.Text)
+            || !string.Equals(SpeechText.Text, reply.Text, StringComparison.Ordinal))
+        {
+            failure = "The startup reply is not visible in the speech bubble.";
+            return false;
+        }
+
+        failure = string.Empty;
+        return true;
     }
 
     private void PlaceOnScreen()
@@ -189,7 +246,13 @@ public partial class MainWindow : Window
 
     private void BubbleTimer_Tick(object? sender, EventArgs e)
     {
+        HideBubble();
+    }
+
+    private void HideBubble()
+    {
         _bubbleTimer.Stop();
+        SpeechText.Text = string.Empty;
         SpeechBubble.Visibility = Visibility.Collapsed;
     }
 
@@ -206,28 +269,42 @@ public partial class MainWindow : Window
         ScheduleNextPhrase();
     }
 
+    private void EventTimer_Tick(object? sender, EventArgs e)
+    {
+        var now = DateTime.Now;
+        _eventPump ??= new CompanionEventPump(now, _idleTimeProvider.GetIdleTime());
+        var companionEvent = _eventPump.Poll(
+            now,
+            _idleTimeProvider.GetIdleTime(),
+            _dialogue.NextStoryDueAt);
+        if (companionEvent is { } trigger)
+        {
+            ShowEventBubble(trigger);
+        }
+    }
+
     private void ShowEventBubble(CompanionEvent trigger)
     {
         var reply = _dialogue.GetReply(trigger, DateTime.Now, _random);
         LastReply = reply;
-        if (reply.AnimationCue == "heart" && trigger != CompanionEvent.Click)
-        {
-            _animation.PlayClickReaction();
-        }
-        else if (reply.AnimationCue is "soft_sway" or "small_nod" or "look_around")
-        {
-            _animation.PlayAmbientGesture();
-        }
-
-        if (reply.ShouldDisplayText)
-        {
-            ShowBubble(reply.Text);
-        }
+        PresentReply(reply);
 
         if (_agentMemoryService is not null)
         {
             _memoryTimer.Stop();
             _memoryTimer.Start();
+        }
+    }
+
+    private void PresentReply(AgentReply reply)
+    {
+        if (reply.ShouldDisplayText)
+        {
+            ShowBubble(reply.Text);
+        }
+        else if (reply.Trigger == CompanionEvent.Click)
+        {
+            HideBubble();
         }
     }
 
@@ -316,7 +393,7 @@ public partial class MainWindow : Window
     {
         await SaveSettingsAsync();
         await SaveAgentMemoryAsync();
-        System.Windows.Application.Current.Shutdown();
+        Close();
     }
 
     private async Task SaveAgentMemoryAsync()
@@ -352,5 +429,11 @@ public partial class MainWindow : Window
         _automaticTimer.Stop();
         _bubbleTimer.Stop();
         _memoryTimer.Stop();
+        _eventTimer.Stop();
+        if (!_suppressApplicationShutdownOnClose && !_shutdownRequested)
+        {
+            _shutdownRequested = true;
+            _shutdownApplication();
+        }
     }
 }

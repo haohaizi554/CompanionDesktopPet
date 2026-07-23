@@ -76,6 +76,7 @@ python tools/simulate_persona.py `
   --seeds 10 `
   --report reports/simulation-report.md
 
+dotnet restore CompanionDesktopPet.sln -r win-x64
 dotnet test CompanionDesktopPet.sln -c Release --no-restore
 ```
 
@@ -85,6 +86,7 @@ dotnet test CompanionDesktopPet.sln -c Release --no-restore
 
 ```powershell
 Remove-Item publish -Recurse -Force -ErrorAction SilentlyContinue
+dotnet restore src/CompanionDesktopPet/CompanionDesktopPet.csproj -r win-x64
 dotnet publish src/CompanionDesktopPet/CompanionDesktopPet.csproj `
   -c Release -r win-x64 --self-contained true --no-restore -o publish
 Copy-Item publish/CompanionDesktopPet.exe outputs/CompanionDesktopPet/佳怡桌宠.exe -Force
@@ -92,12 +94,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
   -ExePath outputs/CompanionDesktopPet/佳怡桌宠.exe
 ```
 
-验证器拒绝额外 EXE 和 DLL/PDB/JSON 等运行时 sidecar，核对 publish 与交付 EXE 的 SHA-256，把交付 EXE 单独复制到 `outputs/verify/`，只跟踪本次启动的 PID，并确保退出后不残留进程。
+验证器拒绝额外 EXE 和 DLL/PDB/JSON 等运行时 sidecar，核对 publish 与交付 EXE 的 SHA-256，并扫描最终 EXE 原始字节中的 UTF-8/UTF-16 复核禁用 PII marker。随后它把 EXE 单独复制到 `outputs/verify/`，以 `--smoke-test` 启动并只跟踪本次 PID；只有应用在时限内完成真实 WPF 资源与启动气泡初始化、正常关闭并自行以退出码 0 结束才算成功。超时后的强制终止仅用于清理且仍判失败，非零退出同样失败。
 
 ## 数据、隐私与限制
 
 - `src/CompanionDesktopPet/Assets/persona-corpus.tsv` 与 `data/source/persona-corpus.original.tsv` 是不可变审计证据，不原地覆盖。
 - 禁用内容进入 archive；不确定内容与 PII 进入 review；改写内容保留来源引用和原因。
+- 具体 PII marker 不编入运行时程序集；安全性由语料构建/测试门禁及最终 EXE UTF-8/UTF-16 原始字节扫描共同保证。
 - IDE 前台、连续活跃、空闲返回和全屏等未来信号默认未知，不猜测用户状态。
 - 自动检查不能替代人物授权、虚构身份、关系边界和再分发权利的人工审批。
 

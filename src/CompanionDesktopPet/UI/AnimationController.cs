@@ -108,35 +108,6 @@ public sealed class AnimationController(
             (520, 1));
     }
 
-    public void PlayAmbientGesture()
-    {
-        ResetActionBase();
-        BeginFrames(
-            actionRotation,
-            RotateTransform.AngleProperty,
-            900,
-            (0, 0),
-            (280, -2.4),
-            (590, 1.5),
-            (900, 0));
-        BeginFrames(
-            actionOffset,
-            TranslateTransform.YProperty,
-            900,
-            (0, 0),
-            (280, -4),
-            (590, -1),
-            (900, 0));
-        BeginFrames(
-            actionScale,
-            ScaleTransform.ScaleYProperty,
-            900,
-            (0, 1),
-            (280, 1.012),
-            (590, 0.994),
-            (900, 1));
-    }
-
     private void PlayHearts()
     {
         for (var index = 0; index < hearts.Count; index++)

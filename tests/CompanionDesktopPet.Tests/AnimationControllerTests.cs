@@ -10,6 +10,12 @@ namespace CompanionDesktopPet.Tests;
 public sealed class AnimationControllerTests
 {
     [Fact]
+    public void AnimationController_ExposesNoCorpusDrivenAmbientGesture()
+    {
+        Assert.Null(typeof(AnimationController).GetMethod("PlayAmbientGesture"));
+    }
+
+    [Fact]
     public void IdlePauseResumeAndClick_ManageAnimationState()
     {
         RunOnStaThread(() =>
@@ -55,11 +61,6 @@ public sealed class AnimationControllerTests
             Assert.Equal(-8, actionRotation.Angle);
 
             controller.PlayLanding();
-            Assert.True(actionRotation.HasAnimatedProperties);
-            Assert.True(actionOffset.HasAnimatedProperties);
-
-            controller.PlayAmbientGesture();
-            Assert.True(actionScale.HasAnimatedProperties);
             Assert.True(actionRotation.HasAnimatedProperties);
             Assert.True(actionOffset.HasAnimatedProperties);
         });

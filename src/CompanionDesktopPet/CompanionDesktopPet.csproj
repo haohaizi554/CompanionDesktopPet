@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>CompanionDesktopPet</AssemblyName>
     <RootNamespace>CompanionDesktopPet</RootNamespace>
     <ApplicationIcon>Assets\pet.ico</ApplicationIcon>
@@ -29,4 +30,8 @@
     <Compile Remove="Services/PersonaCorpus.EasterEggs.cs;Services/PersonaCorpus.Growth.cs;Services/PersonaCorpus.Life.cs;Services/PersonaCorpus.Technical.cs" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Using Remove="System.Drawing" />
+    <Using Remove="System.Windows.Forms" />
+  </ItemGroup>
 </Project>

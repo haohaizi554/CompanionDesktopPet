@@ -59,9 +59,7 @@ public static class SceneCatalog
             Priority: (int)Math.Round(DialogueForest.CategoryGroupWeights[first.CategoryGroup] * 100),
             Cooldown: first.Cooldown,
             InterruptionCost: first.InterruptionCost,
-            AnimationCue: first.CategoryGroup == DialogueCategoryGroup.EasterEgg
-                ? "heart"
-                : expression == SceneExpression.Ambient ? "look_around" : "small_nod",
+            AnimationCue: "none",
             Variants: lines.Select(line => line.Text).ToArray(),
             Lines: lines,
             CategoryGroup: first.CategoryGroup,

@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace CompanionDesktopPet.Services;
 
 public enum SceneExpression
@@ -44,17 +46,17 @@ public sealed record SceneContext(
     DialogueCategory? PreviousCategory = null);
 
 public sealed record SceneHistoryEntry(
-    string SceneId,
-    string SemanticGroup,
-    DateTime PlayedAt,
-    string Variant,
-    string DialogueLineId = "",
-    DialogueCategory Category = DialogueCategory.CharacterLife,
-    DialogueCategoryGroup CategoryGroup = DialogueCategoryGroup.CharacterLife,
-    DialogueOutputMode OutputMode = DialogueOutputMode.SelfTalk,
-    DialogueTrigger DialogueTrigger = DialogueTrigger.Any,
-    int InterruptionCost = 0,
-    DateOnly? PlayedLocalDate = null);
+    [property: JsonRequired] string SceneId,
+    [property: JsonRequired] string SemanticGroup,
+    [property: JsonRequired] DateTime PlayedAt,
+    [property: JsonRequired] string Variant,
+    [property: JsonRequired] string DialogueLineId = "",
+    [property: JsonRequired] DialogueCategory Category = DialogueCategory.CharacterLife,
+    [property: JsonRequired] DialogueCategoryGroup CategoryGroup = DialogueCategoryGroup.CharacterLife,
+    [property: JsonRequired] DialogueOutputMode OutputMode = DialogueOutputMode.SelfTalk,
+    [property: JsonRequired] DialogueTrigger DialogueTrigger = DialogueTrigger.Any,
+    [property: JsonRequired] int InterruptionCost = 0,
+    [property: JsonRequired] DateOnly? PlayedLocalDate = null);
 
 public sealed class SceneHistory
 {
@@ -276,7 +278,11 @@ public static class InterruptionBudget
 
 public sealed class SceneScheduler
 {
-    public SceneDefinition? Select(SceneContext context, SceneHistory history, Random random)
+    public SceneDefinition? Select(
+        SceneContext context,
+        SceneHistory history,
+        Random random,
+        bool bypassInterruptionBudget = false)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(history);
@@ -297,7 +303,12 @@ public sealed class SceneScheduler
 
         var candidates = SceneCatalog.All
             .Where(scene => scene.StoryArcId is null || (scene.StoryNode == 0 && context.State.ActiveStories.Count == 0))
-            .Where(scene => CanSelect(scene, context, history, ignoreTrigger: false))
+            .Where(scene => CanSelect(
+                scene,
+                context,
+                history,
+                ignoreTrigger: false,
+                bypassInterruptionBudget))
             .Select(scene => Score(scene, history))
             .ToArray();
         if (candidates.Length == 0)
@@ -324,13 +335,15 @@ public sealed class SceneScheduler
         SceneDefinition scene,
         SceneContext context,
         SceneHistory history,
-        bool ignoreTrigger) =>
+        bool ignoreTrigger,
+        bool bypassInterruptionBudget = false) =>
         (ignoreTrigger || (scene.Triggers.Contains(context.Trigger) && TriggerMatches(scene, context, history)))
         && ContextMatches(scene, context)
         && !history.IsSemanticGroupCoolingDown(scene, context.Now)
         && history.MeetsAdjacencyAndRecentQuotas(scene)
         && history.EligibleLines(scene, context.Now).Count > 0
-        && InterruptionBudget.CanPlay(scene, context.Now, history, context.IsFullscreen);
+        && (bypassInterruptionBudget
+            || InterruptionBudget.CanPlay(scene, context.Now, history, context.IsFullscreen));
 
     private static bool TriggerMatches(SceneDefinition scene, SceneContext context, SceneHistory history)
     {

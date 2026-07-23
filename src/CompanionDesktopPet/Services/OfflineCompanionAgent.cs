@@ -46,6 +46,10 @@ public sealed class OfflineCompanionAgent
 
     public SceneHistory History => _history;
 
+    public DateTime? NextStoryDueAt => _state?.ActiveStories.Count > 0
+        ? _state.ActiveStories.Min(story => story.DueAt)
+        : null;
+
     public AgentMemorySnapshot CreateSnapshot()
     {
         _state ??= CharacterState.Create(DateTime.Now);
@@ -70,7 +74,11 @@ public sealed class OfflineCompanionAgent
             _state,
             PreferredTree: preferredTree.Kind,
             PreviousCategory: _lastCategory);
-        var scene = _scheduler.Select(context, _history, random);
+        var scene = _scheduler.Select(
+            context,
+            _history,
+            random,
+            bypassInterruptionBudget: trigger == CompanionEvent.Click);
         TurnCount++;
         if (scene is null)
         {

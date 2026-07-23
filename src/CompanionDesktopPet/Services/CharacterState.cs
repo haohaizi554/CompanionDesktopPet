@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace CompanionDesktopPet.Services;
 
 public enum PetMood
@@ -23,26 +25,38 @@ public enum PetActivity
     Sleeping
 }
 
-public sealed record StoryProgress(string ArcId, int NodeIndex, DateTime DueAt);
+public sealed record StoryProgress(
+    [property: JsonRequired] string ArcId,
+    [property: JsonRequired] int NodeIndex,
+    [property: JsonRequired] DateTime DueAt);
 
 public sealed class CharacterState
 {
+    [JsonRequired]
     public double Energy { get; set; }
 
+    [JsonRequired]
     public double Sociability { get; set; }
 
+    [JsonRequired]
     public double Boredom { get; set; }
 
+    [JsonRequired]
     public PetMood Mood { get; set; }
 
+    [JsonRequired]
     public PetActivity Activity { get; set; }
 
+    [JsonRequired]
     public DateTime InstalledAt { get; set; }
 
+    [JsonRequired]
     public DateTime LastUpdatedAt { get; set; }
 
+    [JsonRequired]
     public int AttachmentDays { get; set; }
 
+    [JsonRequired]
     public List<StoryProgress> ActiveStories { get; set; } = [];
 
     public static CharacterState Create(DateTime now) => new()

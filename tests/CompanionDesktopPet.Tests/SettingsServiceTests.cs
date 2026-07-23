@@ -6,13 +6,29 @@ namespace CompanionDesktopPet.Tests;
 
 public sealed class SettingsServiceTests : IDisposable
 {
-    private readonly string _directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+    private const string CompleteJson =
+        """{"Left":120,"Top":240,"Scale":"Large","AnimationPaused":true,"AlwaysOnTop":false}""";
+
+    private readonly string _directory = Path.Combine(
+        Path.GetTempPath(),
+        Guid.NewGuid().ToString("N"));
+
+    public static TheoryData<string> IncompatibleJson => new()
+    {
+        """{}""",
+        """{"Left":120,"Top":240,"Scale":"Large","AnimationPaused":true}""",
+        """{"Left":120,"Top":240,"Scale":"Large","AnimationPaused":true,"AlwaysOnTop":false,"FutureField":1}""",
+        """{"Left":120,"Top":240,"Scale":2,"AnimationPaused":true,"AlwaysOnTop":false}""",
+        """{"Left":120,"Top":240,"Scale":"Huge","AnimationPaused":true,"AlwaysOnTop":false}""",
+        """{"Left":1000001,"Top":240,"Scale":"Large","AnimationPaused":true,"AlwaysOnTop":false}""",
+        """{"Left":"NaN","Top":240,"Scale":"Large","AnimationPaused":true,"AlwaysOnTop":false}"""
+    };
 
     [Fact]
     public async Task SaveAndLoad_RoundTripsEveryField()
     {
         var service = new SettingsService(_directory);
-        var expected = new PetSettings(120, 240, PetScale.Large, true, false);
+        var expected = new PetSettings(-120, 240, PetScale.Large, true, false);
 
         await service.SaveAsync(expected);
 
@@ -23,10 +39,34 @@ public sealed class SettingsServiceTests : IDisposable
     [Fact]
     public async Task Load_MalformedJson_ReturnsDefaults()
     {
-        Directory.CreateDirectory(_directory);
-        await File.WriteAllTextAsync(Path.Combine(_directory, "settings.json"), "{broken");
+        await WriteSettingsAsync("{broken");
 
         Assert.Equal(PetSettings.Default, await new SettingsService(_directory).LoadAsync());
+    }
+
+    [Theory]
+    [MemberData(nameof(IncompatibleJson))]
+    public async Task Load_IncompleteOrIncompatibleJson_ReturnsDefaults(string json)
+    {
+        await WriteSettingsAsync(json);
+
+        Assert.Equal(PetSettings.Default, await new SettingsService(_directory).LoadAsync());
+    }
+
+    [Fact]
+    public async Task Load_CompleteCompatibleJson_LoadsSettings()
+    {
+        await WriteSettingsAsync(CompleteJson);
+
+        Assert.Equal(
+            new PetSettings(120, 240, PetScale.Large, true, false),
+            await new SettingsService(_directory).LoadAsync());
+    }
+
+    private async Task WriteSettingsAsync(string json)
+    {
+        Directory.CreateDirectory(_directory);
+        await File.WriteAllTextAsync(Path.Combine(_directory, "settings.json"), json);
     }
 
     public void Dispose()

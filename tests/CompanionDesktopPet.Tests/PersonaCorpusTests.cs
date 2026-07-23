@@ -46,6 +46,20 @@ public sealed class PersonaCorpusTests
     }
 
     [Fact]
+    public void ApplicationAssembly_DoesNotEmbedReviewedPiiMarkers()
+    {
+        var assemblyBytes = File.ReadAllBytes(typeof(PersonaCorpus).Assembly.Location);
+        var piiMarkers = new[] { "雷琳玥", "小玥", "玥玥", "湖南", "长沙", "广东", "月薪", "工资", "打零工" };
+        Encoding[] encodings = [Encoding.UTF8, Encoding.Unicode, Encoding.BigEndianUnicode];
+
+        Assert.All(piiMarkers, marker =>
+            Assert.All(encodings, encoding =>
+                Assert.False(
+                    ContainsBytes(assemblyBytes, encoding.GetBytes(marker)),
+                    $"Application assembly embeds reviewed PII marker bytes ({encoding.WebName}).")));
+    }
+
+    [Fact]
     public void Corpus_ExposesCompleteSafeV2Metadata()
     {
         var properties = typeof(DialogueLine)
@@ -277,5 +291,23 @@ public sealed class PersonaCorpusTests
         }
 
         return builder.ToString();
+    }
+
+    private static bool ContainsBytes(byte[] source, byte[] candidate)
+    {
+        if (candidate.Length == 0 || candidate.Length > source.Length)
+        {
+            return false;
+        }
+
+        for (var offset = 0; offset <= source.Length - candidate.Length; offset++)
+        {
+            if (source.AsSpan(offset, candidate.Length).SequenceEqual(candidate))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

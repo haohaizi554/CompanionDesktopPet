@@ -13,6 +13,8 @@ public sealed class DialogueService
 
     public AgentMemorySnapshot CreateSnapshot() => _agent.CreateSnapshot();
 
+    public DateTime? NextStoryDueAt => _agent.NextStoryDueAt;
+
     public AgentReply GetReply(CompanionEvent trigger, DateTime localTime, Random random)
     {
         ArgumentNullException.ThrowIfNull(random);

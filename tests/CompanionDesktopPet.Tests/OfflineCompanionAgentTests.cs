@@ -5,6 +5,47 @@ namespace CompanionDesktopPet.Tests;
 public sealed class OfflineCompanionAgentTests
 {
     [Fact]
+    public void SceneCatalog_AllScenesDisableCorpusDrivenAnimationCues()
+    {
+        Assert.All(SceneCatalog.All, scene => Assert.Equal("none", scene.AnimationCue));
+    }
+
+    [Fact]
+    public void NextStoryDueAt_ExposesTheEarliestPendingStoryWithoutMutation()
+    {
+        var now = new DateTime(2026, 7, 22, 15, 0, 0, DateTimeKind.Local);
+        var state = CharacterState.Create(now);
+        state.ActiveStories.Add(new StoryProgress(StoryArcCatalog.All[0].Id, 1, now.AddHours(6)));
+        state.ActiveStories.Add(new StoryProgress(StoryArcCatalog.All[1].Id, 1, now.AddHours(3)));
+        var snapshot = new AgentMemorySnapshot(state, [], 0, null, []);
+        var agent = new OfflineCompanionAgent(snapshot);
+        var service = new DialogueService(snapshot);
+
+        Assert.Equal(now.AddHours(3), agent.NextStoryDueAt);
+        Assert.Equal(now.AddHours(3), service.NextStoryDueAt);
+        Assert.Equal(2, state.ActiveStories.Count);
+    }
+
+    [Fact]
+    public void Respond_ClickImmediatelyAfterStartup_BypassesOnlyTheProactiveInterruptionBudget()
+    {
+        var now = new DateTime(2026, 7, 22, 15, 0, 0, DateTimeKind.Local);
+        var agent = new OfflineCompanionAgent();
+        var random = new Random(20260724);
+        var startup = agent.Respond(CompanionEvent.Startup, now, random);
+
+        var click = agent.Respond(CompanionEvent.Click, now.AddSeconds(1), random);
+
+        Assert.True(startup.ShouldDisplayText);
+        Assert.True(click.ShouldDisplayText);
+        Assert.NotNull(click.SourceLine);
+        Assert.NotEqual(startup.SourceLine!.Id, click.SourceLine!.Id);
+        Assert.DoesNotContain(
+            click.SourceLine.CategoryGroup,
+            DialogueForest.BlockAdjacentCategoryGroups.Where(group => group == startup.SourceLine.CategoryGroup));
+    }
+
+    [Fact]
     public void Respond_EmitsOnlyEnabledV2LinesWithProvenanceAcrossEveryRoute()
     {
         var enabledById = PersonaCorpus.All.ToDictionary(line => line.Id);
@@ -35,6 +76,7 @@ public sealed class OfflineCompanionAgentTests
             Assert.Equal(reply.SourceLine.Text, reply.Text);
             Assert.Equal(reply.SourceLine.Category, reply.Category);
             Assert.Equal(reply.SourceLine.SemanticGroup, reply.SemanticGroup);
+            Assert.Equal("none", reply.AnimationCue);
         }
     }
 
