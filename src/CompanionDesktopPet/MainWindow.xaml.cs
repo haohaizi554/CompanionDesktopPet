@@ -53,24 +53,24 @@ public partial class MainWindow : Window
         : this(
             settings,
             settingsService,
-            new AmbientActionScheduler(),
             agentMemoryService,
             agentMemory,
             idleTimeProvider,
             suppressApplicationShutdownOnClose,
-            shutdownApplication)
+            shutdownApplication,
+            new AmbientActionScheduler())
     {
     }
 
-    public MainWindow(
+    internal MainWindow(
         PetSettings settings,
         SettingsService settingsService,
-        AmbientActionScheduler ambientScheduler,
-        AgentMemoryService? agentMemoryService = null,
-        AgentMemorySnapshot? agentMemory = null,
-        IIdleTimeProvider? idleTimeProvider = null,
-        bool suppressApplicationShutdownOnClose = false,
-        Action? shutdownApplication = null)
+        AgentMemoryService? agentMemoryService,
+        AgentMemorySnapshot? agentMemory,
+        IIdleTimeProvider? idleTimeProvider,
+        bool suppressApplicationShutdownOnClose,
+        Action? shutdownApplication,
+        AmbientActionScheduler ambientScheduler)
     {
         InitializeComponent();
         _settings = settings;

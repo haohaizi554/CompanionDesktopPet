@@ -382,35 +382,50 @@ public sealed class WindowShellTests
     public void MainWindow_PreservesLegacyConstructorAndExposesSchedulerInjection()
     {
         var publicConstructors = typeof(MainWindow).GetConstructors();
-        Assert.Contains(
-            publicConstructors,
-            constructor => constructor.GetParameters()
-                .Select(parameter => parameter.ParameterType)
-                .SequenceEqual(
-                [
-                    typeof(PetSettings),
-                    typeof(SettingsService),
-                    typeof(AgentMemoryService),
-                    typeof(AgentMemorySnapshot),
-                    typeof(IIdleTimeProvider),
-                    typeof(bool),
-                    typeof(Action)
-                ]));
-        Assert.Contains(
-            publicConstructors,
-            constructor => constructor.GetParameters()
-                .Select(parameter => parameter.ParameterType)
-                .SequenceEqual(
-                [
-                    typeof(PetSettings),
-                    typeof(SettingsService),
-                    typeof(AmbientActionScheduler),
-                    typeof(AgentMemoryService),
-                    typeof(AgentMemorySnapshot),
-                    typeof(IIdleTimeProvider),
-                    typeof(bool),
-                    typeof(Action)
-                ]));
+        var publicConstructor = Assert.Single(publicConstructors);
+        Assert.Equal(
+        [
+            typeof(PetSettings),
+            typeof(SettingsService),
+            typeof(AgentMemoryService),
+            typeof(AgentMemorySnapshot),
+            typeof(IIdleTimeProvider),
+            typeof(bool),
+            typeof(Action)
+        ], publicConstructor.GetParameters().Select(parameter => parameter.ParameterType));
+
+        var injectionConstructor = Assert.Single(
+            typeof(MainWindow).GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic));
+        Assert.Equal(
+        [
+            typeof(PetSettings),
+            typeof(SettingsService),
+            typeof(AgentMemoryService),
+            typeof(AgentMemorySnapshot),
+            typeof(IIdleTimeProvider),
+            typeof(bool),
+            typeof(Action),
+            typeof(AmbientActionScheduler)
+        ], injectionConstructor.GetParameters().Select(parameter => parameter.ParameterType));
+        Assert.DoesNotContain(
+            injectionConstructor.GetParameters(),
+            parameter => parameter.HasDefaultValue);
+    }
+
+    [Fact]
+    public void MainWindow_LegacyNullAgentMemoryServiceCallRemainsUnambiguous()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var window = new MainWindow(
+                PetSettings.Default,
+                new SettingsService(settingsDirectory),
+                null);
+
+            Assert.NotNull(window);
+            DeleteSettingsDirectory(settingsDirectory);
+        });
     }
 
     [Fact]
@@ -683,12 +698,35 @@ public sealed class WindowShellTests
 
     private static MainWindow CreateWindowWithScheduler(
         string settingsDirectory,
-        AmbientActionScheduler ambientScheduler) =>
-        new(
+        AmbientActionScheduler ambientScheduler)
+    {
+        var constructor = typeof(MainWindow).GetConstructor(
+            BindingFlags.Instance | BindingFlags.NonPublic,
+            binder: null,
+            [
+                typeof(PetSettings),
+                typeof(SettingsService),
+                typeof(AgentMemoryService),
+                typeof(AgentMemorySnapshot),
+                typeof(IIdleTimeProvider),
+                typeof(bool),
+                typeof(Action),
+                typeof(AmbientActionScheduler)
+            ],
+            modifiers: null);
+        Assert.NotNull(constructor);
+        return Assert.IsType<MainWindow>(constructor!.Invoke(
+        [
             PetSettings.Default,
             new SettingsService(settingsDirectory),
-            ambientScheduler: ambientScheduler,
-            suppressApplicationShutdownOnClose: true);
+            null,
+            null,
+            null,
+            true,
+            null,
+            ambientScheduler
+        ]));
+    }
 
     private static T GetPrivateField<T>(MainWindow window, string fieldName)
     {
