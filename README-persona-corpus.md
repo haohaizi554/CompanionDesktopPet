@@ -174,7 +174,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
 
 ## 19. 桌宠交互与隐私
 
-保留左键点击爱心、拖拽时倾斜和松手落地回弹；自然闭眼图层叠加式眨眼不压缩整张人物图。启动后会在本地显示一次“嗨♡”，右键菜单也提供 `打个招呼♡`；这两种打招呼都只使用固定的本地 UI，不从语料生成。仍不提供 wink 或假手挥手，没有旧 `GetGreeting`，也没有语料驱动的 `AnimationCue`/`PlayAmbientGesture`。桌宠完全离线，不读取键盘输入内容、剪贴板、文件名或窗口标题；本机状态写入 `%LOCALAPPDATA%\CompanionDesktopPet`。具体 PII marker 不进入运行时程序集，语料构建/测试门禁和最终 EXE 原始字节扫描负责阻止其进入交付物。
+保留左键点击爱心、拖拽时倾斜和松手落地回弹；自然闭眼图层叠加式眨眼不压缩整张人物图。启动后会在本地显示一次“嗨♡”，右键菜单也提供 `打个招呼♡`；这两种打招呼都只使用固定的本地 UI，不从语料生成。`暂停动画` 只暂停并复位待机动作、自动眨眼和问候，点击爱心、拖动/落地和台词仍可使用。仍不提供 wink 或假手挥手，没有旧 `GetGreeting`，也没有语料驱动的 `AnimationCue`/`PlayAmbientGesture`。桌宠完全离线，不读取键盘输入内容、剪贴板、文件名或窗口标题；本机状态写入 `%LOCALAPPDATA%\CompanionDesktopPet`。具体 PII marker 不进入运行时程序集，语料构建/测试门禁和最终 EXE 原始字节扫描负责阻止其进入交付物。
 
 ## 20. 限制与发布政策
 
