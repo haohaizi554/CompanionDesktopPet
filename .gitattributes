@@ -1,0 +1,8 @@
+# Preserve immutable legacy inputs byte-for-byte while keeping textual diffs.
+/data/source/persona-corpus.original.tsv -text diff whitespace=cr-at-eol
+/src/CompanionDesktopPet/Assets/persona-corpus.tsv -text diff whitespace=cr-at-eol
+
+# Generated and intermediate TSVs are deterministic LF artifacts.
+/data/intermediate/*.tsv text eol=lf
+/data/optimized/*.tsv text eol=lf
+/reports/*.tsv text eol=lf

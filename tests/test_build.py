@@ -36,6 +36,10 @@ SOURCE_PATH = REPOSITORY_ROOT / "data/source/persona-corpus.original.tsv"
 MAPPING_PATH = REPOSITORY_ROOT / "data/intermediate/source-line-map.tsv"
 SPEC_PATH = REPOSITORY_ROOT / "docs/superpowers/specs/2026-07-22-persona-corpus-v2-design.md"
 REPORT_PATH = REPOSITORY_ROOT / ".superpowers/sdd/task-3-report.md"
+ATTRIBUTES_PATH = REPOSITORY_ROOT / ".gitattributes"
+IMMUTABLE_SOURCE_SHA256 = "3fd7356845df838c652f7a7668013f2b15b0e91ddfa5d784b2b71a514a2c7534"
+IMMUTABLE_SOURCE_BYTES = 7_961_787
+IMMUTABLE_SOURCE_CRLF = 75_375
 
 
 def mapping(line: LegacyLine, topic_id: str | None = None) -> SourceMapping:
@@ -298,6 +302,45 @@ class BuildContractTests(unittest.TestCase):
             ).ratio()
             self.assertLessEqual(similarity, 0.55, (variant_id, similarity))
 
+    def test_all_retained_observation_practice_pairs_are_semantically_distinct(self) -> None:
+        from src.persona_corpus.content_catalog import CONTENT_CATALOG
+        from src.persona_corpus.normalization import normalize_text
+
+        entries = {entry.variant_id: entry for entry in CONTENT_CATALOG}
+        offenders = []
+        for variant_id, practice in entries.items():
+            if not variant_id.endswith(".practice"):
+                continue
+            observation_id = variant_id.removesuffix(".practice") + ".observation"
+            observation = entries.get(observation_id)
+            if observation is None:
+                continue
+            similarity = SequenceMatcher(
+                None,
+                normalize_text(observation.text),
+                normalize_text(practice.text),
+            ).ratio()
+            if similarity > 0.55:
+                offenders.append((variant_id, round(similarity, 4)))
+        self.assertEqual([], sorted(offenders))
+
+    def test_second_pass_authored_entries_declare_monotonic_cooldowns(self) -> None:
+        from src.persona_corpus.content_catalog import CONTENT_CATALOG
+
+        entries = [
+            entry
+            for entry in CONTENT_CATALOG
+            if entry.source_reference
+            == "catalog:second-editorial-pass:independent-life-care-reflection"
+        ]
+        self.assertEqual(29, len(entries))
+        for entry in entries:
+            self.assertGreaterEqual(
+                entry.semantic_cooldown_hours,
+                entry.cooldown_hours,
+                entry.variant_id,
+            )
+
     def test_design_spec_lists_exact_archive_and_review_headers(self) -> None:
         spec = SPEC_PATH.read_text(encoding="utf-8")
         archive = (
@@ -538,6 +581,41 @@ class RealCorpusBuildTests(unittest.TestCase):
         )
         self.assertTrue(SOURCE_PATH.is_file())
 
+    def test_exact_newline_policy_preserves_source_and_generated_bytes(self) -> None:
+        self.assertTrue(ATTRIBUTES_PATH.is_file(), "root .gitattributes is required")
+        attributes = {
+            line.strip()
+            for line in ATTRIBUTES_PATH.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        }
+        self.assertTrue(
+            {
+                "/data/source/persona-corpus.original.tsv -text diff whitespace=cr-at-eol",
+                "/src/CompanionDesktopPet/Assets/persona-corpus.tsv -text diff whitespace=cr-at-eol",
+                "/data/intermediate/*.tsv text eol=lf",
+                "/data/optimized/*.tsv text eol=lf",
+                "/reports/*.tsv text eol=lf",
+            }.issubset(attributes)
+        )
+
+        source = SOURCE_PATH.read_bytes()
+        self.assertEqual(IMMUTABLE_SOURCE_BYTES, len(source))
+        self.assertEqual(IMMUTABLE_SOURCE_SHA256, hashlib.sha256(source).hexdigest())
+        self.assertEqual(IMMUTABLE_SOURCE_CRLF, source.count(b"\r\n"))
+        self.assertEqual(IMMUTABLE_SOURCE_CRLF, source.count(b"\n"))
+        self.assertNotIn(b"\n", source.replace(b"\r\n", b""))
+
+        legacy_asset = REPOSITORY_ROOT / "src/CompanionDesktopPet/Assets/persona-corpus.tsv"
+        if legacy_asset.is_file():
+            self.assertEqual(source, legacy_asset.read_bytes())
+
+        generated = tuple((REPOSITORY_ROOT / "data/intermediate").glob("*.tsv"))
+        generated += tuple((REPOSITORY_ROOT / "data/optimized").glob("*.tsv"))
+        generated += tuple((REPOSITORY_ROOT / "reports").glob("*.tsv"))
+        self.assertTrue(generated)
+        for path in generated:
+            self.assertNotIn(b"\r\n", path.read_bytes(), path)
+
     @classmethod
     def setUpClass(cls) -> None:
         if not SOURCE_PATH.is_file() or not MAPPING_PATH.is_file():
@@ -552,8 +630,7 @@ class RealCorpusBuildTests(unittest.TestCase):
         )
 
     def test_real_build_has_curated_target_size_and_traceability(self) -> None:
-        self.assertGreaterEqual(len(self.result.enabled), 800)
-        self.assertLessEqual(len(self.result.enabled), 1200)
+        self.assertEqual(800, len(self.result.enabled))
         self.assertEqual(75375, len(self.result.dispositions))
         self.assertTrue(self.result.archive)
         self.assertTrue(self.result.review)
@@ -614,6 +691,23 @@ class RealCorpusBuildTests(unittest.TestCase):
             minimum, maximum = expected_ranges[group]
             self.assertGreaterEqual(count, minimum, (group, topic_id, count))
             self.assertLessEqual(count, maximum, (group, topic_id, count))
+
+    def test_technical_growth_and_career_have_meaningful_one_two_topic_mix(self) -> None:
+        topic_sizes = Counter(
+            (row.category_group, row.topic_id) for row in self.result.enabled
+        )
+        for group in ("technical", "growth", "career"):
+            sizes = [
+                count
+                for (category_group, _topic_id), count in topic_sizes.items()
+                if category_group == group
+            ]
+            with self.subTest(category_group=group):
+                self.assertTrue(sizes)
+                self.assertEqual({1, 2}, set(sizes))
+                singleton_share = sizes.count(1) / len(sizes)
+                self.assertGreaterEqual(singleton_share, 0.10)
+                self.assertGreater(sizes.count(2), sizes.count(1))
 
     def test_task_report_has_one_current_generated_output_truth(self) -> None:
         report = REPORT_PATH.read_text(encoding="utf-8")
@@ -724,12 +818,12 @@ class RealCorpusBuildTests(unittest.TestCase):
 
         self.assertGreaterEqual(average, 18)
         self.assertLessEqual(average, 26)
-        self.assertGreaterEqual(short_share, 0.25)
-        self.assertLessEqual(short_share, 0.35)
-        self.assertGreaterEqual(medium_share, 0.35)
-        self.assertLessEqual(medium_share, 0.45)
+        self.assertGreaterEqual(short_share, 0.26)
+        self.assertLessEqual(short_share, 0.34)
+        self.assertGreaterEqual(medium_share, 0.36)
+        self.assertLessEqual(medium_share, 0.44)
         self.assertGreaterEqual(long_share, 0.20)
-        self.assertLessEqual(long_share, 0.30)
+        self.assertLessEqual(long_share, 0.29)
         self.assertLessEqual(over_36, 0.08)
         self.assertLessEqual(catchphrase_share, 0.10)
 
