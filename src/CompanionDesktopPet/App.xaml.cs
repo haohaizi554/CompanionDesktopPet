@@ -74,7 +74,7 @@ public partial class App : System.Windows.Application
         base.OnExit(e);
     }
 
-    private void HandleSmokeContentRendered(object? sender, EventArgs e)
+    private async void HandleSmokeContentRendered(object? sender, EventArgs e)
     {
         if (sender is not MainWindow window)
         {
@@ -86,6 +86,12 @@ public partial class App : System.Windows.Application
         try
         {
             if (!window.TryVerifySmokeReadiness(out _))
+            {
+                Shutdown(1);
+                return;
+            }
+
+            if (!await window.RunSmokeActionProbeAsync())
             {
                 Shutdown(1);
                 return;

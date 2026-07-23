@@ -1,4 +1,5 @@
 using System.IO;
+using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Threading;
@@ -14,6 +15,225 @@ namespace CompanionDesktopPet.Tests;
 public sealed class WindowShellTests
 {
     private static readonly Lazy<StaTestHost> StaHost = new(() => new StaTestHost());
+
+    [Fact]
+    public void MainWindow_ProvidesAmbientLayersAndSchedulesTheFirstGreeting()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var window = CreateWindow(settingsDirectory);
+
+            Assert.IsType<System.Windows.Controls.Image>(window.FindName("BlinkOverlay"));
+            Assert.IsType<Border>(window.FindName("GreetingBadge"));
+            Assert.IsType<TranslateTransform>(window.FindName("GreetingBadgeOffset"));
+            Assert.IsType<MenuItem>(window.FindName("GreetingMenuItem"));
+
+            window.Show();
+            window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+
+            var ambientTimer = GetPrivateField<DispatcherTimer>(window, "_ambientTimer");
+            Assert.True(ambientTimer.IsEnabled);
+            Assert.Equal(TimeSpan.FromMilliseconds(650), ambientTimer.Interval);
+            Assert.Equal(
+                PetAmbientAction.Greeting,
+                GetPrivateField<PetAmbientAction>(window, "_pendingAmbientAction"));
+
+            window.Close();
+            DeleteSettingsDirectory(settingsDirectory);
+        });
+    }
+
+    [Fact]
+    public async Task MainWindow_StartupGreetingCompletesThenSchedulesOneFreshBlink()
+    {
+        await RunOnStaThreadAsync(async () =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var window = CreateWindowWithScheduler(
+                settingsDirectory,
+                new AmbientActionScheduler(() => 0.5));
+            window.Show();
+            window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+
+            await Task.Delay(800);
+
+            var badge = Assert.IsType<Border>(window.FindName("GreetingBadge"));
+            var coordinator = GetPrivateField<PetActionCoordinator>(window, "_actionCoordinator");
+            Assert.Equal(PetActionState.Greeting, coordinator.State);
+            Assert.True(badge.HasAnimatedProperties);
+
+            await Task.Delay(1_100);
+
+            var ambientTimer = GetPrivateField<DispatcherTimer>(window, "_ambientTimer");
+            Assert.Equal(PetActionState.Idle, coordinator.State);
+            Assert.True(ambientTimer.IsEnabled);
+            Assert.Equal(TimeSpan.FromSeconds(5), ambientTimer.Interval);
+            Assert.Equal(
+                PetAmbientAction.Blink,
+                GetPrivateField<PetAmbientAction>(window, "_pendingAmbientAction"));
+            AssertNeutralAmbientVisuals(window);
+
+            window.Close();
+            DeleteSettingsDirectory(settingsDirectory);
+        });
+    }
+
+    [Fact]
+    public void MainWindow_GreetingMenuIsLocalAndRejectedTicksScheduleFreshWork()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var window = CreateWindowWithScheduler(
+                settingsDirectory,
+                new AmbientActionScheduler(() => 0.5));
+            window.Show();
+            window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+            var startupReply = GetLastReply(window);
+
+            var greeting = Assert.IsType<MenuItem>(window.FindName("GreetingMenuItem"));
+            Assert.Equal("打个招呼♡", greeting.Header);
+            greeting.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+
+            var badge = Assert.IsType<Border>(window.FindName("GreetingBadge"));
+            var badgeOffset = Assert.IsType<TranslateTransform>(
+                window.FindName("GreetingBadgeOffset"));
+            var coordinator = GetPrivateField<PetActionCoordinator>(window, "_actionCoordinator");
+            Assert.Same(startupReply, GetLastReply(window));
+            Assert.Equal(PetActionState.Greeting, coordinator.State);
+            Assert.True(badge.HasAnimatedProperties);
+            Assert.True(badgeOffset.HasAnimatedProperties);
+            Assert.True(Assert.IsType<RotateTransform>(window.FindName("ActionRotation"))
+                .HasAnimatedProperties);
+
+            InvokePrivate(window, "AmbientTimer_Tick", null, EventArgs.Empty);
+
+            var ambientTimer = GetPrivateField<DispatcherTimer>(window, "_ambientTimer");
+            Assert.Equal(PetActionState.Greeting, coordinator.State);
+            Assert.True(ambientTimer.IsEnabled);
+            Assert.Equal(TimeSpan.FromSeconds(5), ambientTimer.Interval);
+            Assert.Equal(
+                PetAmbientAction.Blink,
+                GetPrivateField<PetAmbientAction>(window, "_pendingAmbientAction"));
+
+            window.Close();
+            DeleteSettingsDirectory(settingsDirectory);
+        });
+    }
+
+    [Fact]
+    public void MainWindow_PauseResumeAndCloseControlAmbientWorkWithoutBlockingHearts()
+    {
+        var settingsDirectory = CreateSettingsDirectory();
+        RunOnStaThread(() =>
+        {
+            var window = CreateWindowWithScheduler(
+                settingsDirectory,
+                new AmbientActionScheduler(() => 0.5));
+            window.Show();
+            window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+            var greeting = Assert.IsType<MenuItem>(window.FindName("GreetingMenuItem"));
+            var pause = Assert.IsType<MenuItem>(window.FindName("PauseMenuItem"));
+            var say = Assert.IsType<MenuItem>(window.FindName("SayMenuItem"));
+            var ambientTimer = GetPrivateField<DispatcherTimer>(window, "_ambientTimer");
+            var coordinator = GetPrivateField<PetActionCoordinator>(window, "_actionCoordinator");
+
+            greeting.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            pause.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+
+            Assert.False(ambientTimer.IsEnabled);
+            Assert.Equal(PetActionState.Paused, coordinator.State);
+            AssertNeutralAmbientVisuals(window);
+
+            say.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            Assert.True(Assert.IsType<TextBlock>(window.FindName("HeartOne"))
+                .HasAnimatedProperties);
+
+            pause.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+
+            Assert.Equal(PetActionState.Idle, coordinator.State);
+            Assert.True(ambientTimer.IsEnabled);
+            Assert.Equal(TimeSpan.FromSeconds(5), ambientTimer.Interval);
+            Assert.Equal(
+                PetAmbientAction.Blink,
+                GetPrivateField<PetAmbientAction>(window, "_pendingAmbientAction"));
+
+            window.Close();
+            Assert.False(ambientTimer.IsEnabled);
+        });
+
+        Assert.True(SpinWait.SpinUntil(
+            () => !File.Exists(Path.Combine(settingsDirectory, "settings.json.tmp")),
+            TimeSpan.FromSeconds(5)));
+        DeleteSettingsDirectory(settingsDirectory);
+    }
+
+    [Fact]
+    public async Task MainWindow_DragAndLandingTakePriorityAndRestoreThePriorPauseState()
+    {
+        await RunOnStaThreadAsync(async () =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var window = CreateWindowWithScheduler(
+                settingsDirectory,
+                new AmbientActionScheduler(() => 0.5));
+            window.Show();
+            window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+            var ambientTimer = GetPrivateField<DispatcherTimer>(window, "_ambientTimer");
+            var coordinator = GetPrivateField<PetActionCoordinator>(window, "_actionCoordinator");
+
+            Assert.IsType<MenuItem>(window.FindName("GreetingMenuItem"))
+                .RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            InvokePrivate(window, "BeginDragAction");
+            Assert.False(ambientTimer.IsEnabled);
+            Assert.Equal(PetActionState.Dragging, coordinator.State);
+            AssertNeutralAmbientVisuals(window);
+
+            InvokePrivate(window, "BeginLandingAction");
+            Assert.Equal(PetActionState.Landing, coordinator.State);
+            await Task.Delay(650);
+            Assert.Equal(PetActionState.Idle, coordinator.State);
+            Assert.True(ambientTimer.IsEnabled);
+            Assert.Equal(TimeSpan.FromSeconds(5), ambientTimer.Interval);
+
+            Assert.IsType<MenuItem>(window.FindName("PauseMenuItem"))
+                .RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            InvokePrivate(window, "BeginDragAction");
+            InvokePrivate(window, "BeginLandingAction");
+            await Task.Delay(650);
+
+            Assert.Equal(PetActionState.Paused, coordinator.State);
+            Assert.False(ambientTimer.IsEnabled);
+            AssertNeutralAmbientVisuals(window);
+
+            window.Close();
+            DeleteSettingsDirectory(settingsDirectory);
+        });
+    }
+
+    [Fact]
+    public async Task MainWindow_SmokeActionProbeCompletesRealActionsAndRestoresNeutralState()
+    {
+        await RunOnStaThreadAsync(async () =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var window = CreateWindow(settingsDirectory);
+            window.Show();
+            window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+            var stopwatch = Stopwatch.StartNew();
+
+            var completed = await window.RunSmokeActionProbeAsync();
+
+            Assert.True(completed);
+            Assert.InRange(stopwatch.Elapsed, TimeSpan.Zero, TimeSpan.FromSeconds(3));
+            Assert.False(GetPrivateField<DispatcherTimer>(window, "_ambientTimer").IsEnabled);
+            AssertNeutralAmbientVisuals(window);
+
+            window.Close();
+            DeleteSettingsDirectory(settingsDirectory);
+        });
+    }
 
     [Fact]
     public void MainWindow_CloseRequestsShutdownUnlessExplicitlySuppressed()
@@ -161,8 +381,7 @@ public sealed class WindowShellTests
             window.Show();
             window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
             var startup = GetLastReply(window);
-            var stage = Assert.IsType<Grid>(window.FindName("CharacterStage"));
-            var say = Assert.IsType<MenuItem>(stage.ContextMenu!.Items[0]);
+            var say = Assert.IsType<MenuItem>(window.FindName("SayMenuItem"));
 
             say.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
 
@@ -281,8 +500,7 @@ public sealed class WindowShellTests
                          }),
                          (CompanionEvent.Click, window =>
                          {
-                             var stage = Assert.IsType<Grid>(window.FindName("CharacterStage"));
-                             var say = Assert.IsType<MenuItem>(stage.ContextMenu!.Items[0]);
+                             var say = Assert.IsType<MenuItem>(window.FindName("SayMenuItem"));
                              say.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
                          }),
                          (CompanionEvent.Automatic, window =>
@@ -348,20 +566,19 @@ public sealed class WindowShellTests
             Assert.Equal(Visibility.Visible, bubble.Visibility);
             Assert.False(string.IsNullOrWhiteSpace(speech.Text));
 
-            var say = Assert.IsType<MenuItem>(stage.ContextMenu.Items[0]);
+            var say = Assert.IsType<MenuItem>(window.FindName("SayMenuItem"));
             say.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
             Assert.False(string.IsNullOrWhiteSpace(speech.Text));
 
-            var pause = Assert.IsType<MenuItem>(stage.ContextMenu.Items[1]);
+            var pause = Assert.IsType<MenuItem>(window.FindName("PauseMenuItem"));
             pause.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
             Assert.Equal("继续动画", pause.Header);
 
-            var size = Assert.IsType<MenuItem>(stage.ContextMenu.Items[3]);
-            var large = Assert.IsType<MenuItem>(size.Items[2]);
+            var large = Assert.IsType<MenuItem>(window.FindName("LargeSizeMenuItem"));
             large.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
             Assert.Equal(390, stage.Width);
 
-            var topmost = Assert.IsType<MenuItem>(stage.ContextMenu.Items[4]);
+            var topmost = Assert.IsType<MenuItem>(window.FindName("TopmostMenuItem"));
             topmost.IsChecked = false;
             topmost.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
             Assert.False(window.Topmost);
@@ -378,6 +595,83 @@ public sealed class WindowShellTests
     }
 
     private static void RunOnStaThread(Action action) => StaHost.Value.Invoke(action);
+
+    private static Task RunOnStaThreadAsync(Func<Task> action) =>
+        StaHost.Value.InvokeAsync(action);
+
+    private static MainWindow CreateWindow(string settingsDirectory) =>
+        new(
+            PetSettings.Default,
+            new SettingsService(settingsDirectory),
+            suppressApplicationShutdownOnClose: true);
+
+    private static MainWindow CreateWindowWithScheduler(
+        string settingsDirectory,
+        AmbientActionScheduler ambientScheduler) =>
+        new(
+            PetSettings.Default,
+            new SettingsService(settingsDirectory),
+            ambientScheduler: ambientScheduler,
+            suppressApplicationShutdownOnClose: true);
+
+    private static T GetPrivateField<T>(MainWindow window, string fieldName)
+    {
+        var field = typeof(MainWindow).GetField(
+            fieldName,
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(field);
+        return Assert.IsType<T>(field!.GetValue(window));
+    }
+
+    private static void InvokePrivate(
+        MainWindow window,
+        string methodName,
+        params object?[] arguments)
+    {
+        var method = typeof(MainWindow).GetMethod(
+            methodName,
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        method!.Invoke(window, arguments);
+    }
+
+    private static void AssertNeutralAmbientVisuals(MainWindow window)
+    {
+        var blink = Assert.IsType<System.Windows.Controls.Image>(window.FindName("BlinkOverlay"));
+        var badge = Assert.IsType<Border>(window.FindName("GreetingBadge"));
+        var badgeOffset = Assert.IsType<TranslateTransform>(
+            window.FindName("GreetingBadgeOffset"));
+        var scale = Assert.IsType<ScaleTransform>(window.FindName("ActionScale"));
+        var rotation = Assert.IsType<RotateTransform>(window.FindName("ActionRotation"));
+        var offset = Assert.IsType<TranslateTransform>(window.FindName("ActionOffset"));
+
+        Assert.False(blink.HasAnimatedProperties);
+        Assert.False(badge.HasAnimatedProperties);
+        Assert.False(badgeOffset.HasAnimatedProperties);
+        Assert.False(scale.HasAnimatedProperties);
+        Assert.False(rotation.HasAnimatedProperties);
+        Assert.False(offset.HasAnimatedProperties);
+        Assert.Equal(0, blink.Opacity);
+        Assert.Equal(0, badge.Opacity);
+        Assert.Equal(0, badgeOffset.X);
+        Assert.Equal(8, badgeOffset.Y);
+        Assert.Equal(1, scale.ScaleX);
+        Assert.Equal(1, scale.ScaleY);
+        Assert.Equal(0, rotation.Angle);
+        Assert.Equal(0, offset.X);
+        Assert.Equal(0, offset.Y);
+    }
+
+    private static string CreateSettingsDirectory() =>
+        Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+
+    private static void DeleteSettingsDirectory(string settingsDirectory)
+    {
+        if (Directory.Exists(settingsDirectory))
+        {
+            Directory.Delete(settingsDirectory, true);
+        }
+    }
 
     private sealed class StaTestHost
     {
@@ -431,6 +725,12 @@ public sealed class WindowShellTests
         {
             ArgumentNullException.ThrowIfNull(action);
             _dispatcher.Invoke(action);
+        }
+
+        public Task InvokeAsync(Func<Task> action)
+        {
+            ArgumentNullException.ThrowIfNull(action);
+            return _dispatcher.InvokeAsync(action).Task.Unwrap();
         }
     }
 

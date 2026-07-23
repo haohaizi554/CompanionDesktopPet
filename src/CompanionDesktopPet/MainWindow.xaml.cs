@@ -21,6 +21,9 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _bubbleTimer = new() { Interval = TimeSpan.FromSeconds(5) };
     private readonly DispatcherTimer _memoryTimer = new() { Interval = TimeSpan.FromSeconds(2) };
     private readonly DispatcherTimer _eventTimer = new() { Interval = TimeSpan.FromSeconds(30) };
+    private readonly DispatcherTimer _ambientTimer = new();
+    private readonly PetActionCoordinator _actionCoordinator = new();
+    private readonly AmbientActionScheduler _ambientScheduler;
     private readonly IIdleTimeProvider _idleTimeProvider;
     private readonly bool _suppressApplicationShutdownOnClose;
     private readonly Action _shutdownApplication;
@@ -30,6 +33,10 @@ public partial class MainWindow : Window
     private bool _paused;
     private bool _dragged;
     private bool _shutdownRequested;
+    private bool _startupGreetingScheduled;
+    private bool _runningSmokeProbe;
+    private bool _isClosed;
+    private PetAmbientAction _pendingAmbientAction;
     private System.Windows.Point _mouseDown;
     private double _lastDragLeft;
 
@@ -41,6 +48,7 @@ public partial class MainWindow : Window
         AgentMemoryService? agentMemoryService = null,
         AgentMemorySnapshot? agentMemory = null,
         IIdleTimeProvider? idleTimeProvider = null,
+        AmbientActionScheduler? ambientScheduler = null,
         bool suppressApplicationShutdownOnClose = false,
         Action? shutdownApplication = null)
     {
@@ -49,6 +57,7 @@ public partial class MainWindow : Window
         _settingsService = settingsService;
         _agentMemoryService = agentMemoryService;
         _idleTimeProvider = idleTimeProvider ?? new WindowsIdleTimeProvider();
+        _ambientScheduler = ambientScheduler ?? new AmbientActionScheduler();
         _suppressApplicationShutdownOnClose = suppressApplicationShutdownOnClose;
         _shutdownApplication = shutdownApplication
             ?? (() => System.Windows.Application.Current?.Shutdown());
@@ -63,14 +72,19 @@ public partial class MainWindow : Window
             ActionScale,
             ActionRotation,
             ActionOffset,
-            [HeartOne, HeartTwo, HeartThree]);
+            [HeartOne, HeartTwo, HeartThree],
+            BlinkOverlay,
+            GreetingBadge,
+            GreetingBadgeOffset);
 
         Loaded += Window_Loaded;
+        ContentRendered += Window_ContentRendered;
         Closed += Window_Closed;
         PetImage.PreviewMouseLeftButtonDown += PetImage_MouseLeftButtonDown;
         PetImage.PreviewMouseMove += PetImage_MouseMove;
         PetImage.PreviewMouseLeftButtonUp += PetImage_MouseLeftButtonUp;
         SayMenuItem.Click += SaySomething_Click;
+        GreetingMenuItem.Click += Greeting_Click;
         PauseMenuItem.Click += ToggleAnimation_Click;
         SmallSizeMenuItem.Click += SetSize_Click;
         NormalSizeMenuItem.Click += SetSize_Click;
@@ -82,6 +96,7 @@ public partial class MainWindow : Window
         _automaticTimer.Tick += AutomaticTimer_Tick;
         _memoryTimer.Tick += MemoryTimer_Tick;
         _eventTimer.Tick += EventTimer_Tick;
+        _ambientTimer.Tick += AmbientTimer_Tick;
     }
 
     private void Window_Loaded(object sender, RoutedEventArgs e)
@@ -96,6 +111,7 @@ public partial class MainWindow : Window
         if (_paused)
         {
             _animation.PauseIdle();
+            _actionCoordinator.Pause();
         }
 
         UpdatePauseLabel();
@@ -104,6 +120,173 @@ public partial class MainWindow : Window
         _eventTimer.Start();
         ScheduleNextPhrase();
     }
+
+    private void Window_ContentRendered(object? sender, EventArgs e)
+    {
+        if (_startupGreetingScheduled)
+        {
+            return;
+        }
+
+        _startupGreetingScheduled = true;
+        if (!_paused)
+        {
+            ScheduleAmbientAction(
+                PetAmbientAction.Greeting,
+                TimeSpan.FromMilliseconds(650));
+        }
+    }
+
+    private void AmbientTimer_Tick(object? sender, EventArgs e)
+    {
+        _ambientTimer.Stop();
+        if (!_actionCoordinator.TryBeginAmbient(_pendingAmbientAction))
+        {
+            ScheduleFreshBlink();
+            return;
+        }
+
+        PlayAmbientAction(_pendingAmbientAction);
+    }
+
+    private void PlayAmbientAction(PetAmbientAction action)
+    {
+        if (action == PetAmbientAction.Blink)
+        {
+            _animation.PlayBlink(
+                _ambientScheduler.ShouldDoubleBlink(),
+                () => CompleteAmbientAction(PetActionState.Blinking));
+            return;
+        }
+
+        _animation.PlayGreeting(
+            () => CompleteAmbientAction(PetActionState.Greeting));
+    }
+
+    private void CompleteAmbientAction(PetActionState completed)
+    {
+        _actionCoordinator.Complete(completed);
+        if (_actionCoordinator.State == PetActionState.Idle)
+        {
+            ScheduleFreshBlink();
+        }
+    }
+
+    private void ScheduleFreshBlink() =>
+        ScheduleAmbientAction(PetAmbientAction.Blink, _ambientScheduler.NextBlinkDelay());
+
+    private void ScheduleAmbientAction(PetAmbientAction action, TimeSpan delay)
+    {
+        _ambientTimer.Stop();
+        if (_isClosed
+            || _runningSmokeProbe
+            || _actionCoordinator.State == PetActionState.Paused)
+        {
+            return;
+        }
+
+        _pendingAmbientAction = action;
+        _ambientTimer.Interval = delay;
+        _ambientTimer.Start();
+    }
+
+    public async Task<bool> RunSmokeActionProbeAsync()
+    {
+        _ambientTimer.Stop();
+        _runningSmokeProbe = true;
+        CancelActiveAmbientAction();
+        var succeeded = false;
+        try
+        {
+            if (_isClosed || _actionCoordinator.State != PetActionState.Idle)
+            {
+                return false;
+            }
+
+            var blinkCompleted = await RunSmokeActionAsync(PetAmbientAction.Blink);
+            var greetingCompleted = blinkCompleted
+                && await RunSmokeActionAsync(PetAmbientAction.Greeting);
+            succeeded = greetingCompleted
+                && _actionCoordinator.State == PetActionState.Idle;
+        }
+        catch (TimeoutException)
+        {
+            succeeded = false;
+        }
+        finally
+        {
+            _ambientTimer.Stop();
+            CancelActiveAmbientAction();
+            _runningSmokeProbe = false;
+        }
+
+        return succeeded && AmbientVisualsAreNeutral();
+    }
+
+    private async Task<bool> RunSmokeActionAsync(PetAmbientAction action)
+    {
+        if (!_actionCoordinator.TryBeginAmbient(action))
+        {
+            return false;
+        }
+
+        var expectedState = action == PetAmbientAction.Blink
+            ? PetActionState.Blinking
+            : PetActionState.Greeting;
+        if (_actionCoordinator.State != expectedState)
+        {
+            return false;
+        }
+
+        var completed = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        if (action == PetAmbientAction.Blink)
+        {
+            _animation.PlayBlink(
+                doubleBlink: false,
+                () =>
+                {
+                    _actionCoordinator.Complete(expectedState);
+                    completed.TrySetResult(_actionCoordinator.State == PetActionState.Idle);
+                });
+        }
+        else
+        {
+            _animation.PlayGreeting(() =>
+            {
+                _actionCoordinator.Complete(expectedState);
+                completed.TrySetResult(_actionCoordinator.State == PetActionState.Idle);
+            });
+        }
+
+        return await completed.Task.WaitAsync(TimeSpan.FromSeconds(2));
+    }
+
+    private void CancelActiveAmbientAction()
+    {
+        _animation.CancelAmbientAction();
+        if (_actionCoordinator.State is PetActionState.Blinking or PetActionState.Greeting)
+        {
+            _actionCoordinator.Complete(_actionCoordinator.State);
+        }
+    }
+
+    private bool AmbientVisualsAreNeutral() =>
+        !BlinkOverlay.HasAnimatedProperties
+        && !GreetingBadge.HasAnimatedProperties
+        && !GreetingBadgeOffset.HasAnimatedProperties
+        && !ActionScale.HasAnimatedProperties
+        && !ActionRotation.HasAnimatedProperties
+        && !ActionOffset.HasAnimatedProperties
+        && BlinkOverlay.Opacity == 0
+        && GreetingBadge.Opacity == 0
+        && GreetingBadgeOffset.X == 0
+        && GreetingBadgeOffset.Y == 8
+        && ActionScale.ScaleX == 1
+        && ActionScale.ScaleY == 1
+        && ActionRotation.Angle == 0
+        && ActionOffset.X == 0
+        && ActionOffset.Y == 0;
 
     public bool TryVerifySmokeReadiness(out string failure)
     {
@@ -193,6 +376,7 @@ public partial class MainWindow : Window
 
         _dragged = true;
         PetImage.ReleaseMouseCapture();
+        BeginDragAction();
         _lastDragLeft = Left;
         LocationChanged += Window_LocationChanged;
         try
@@ -202,7 +386,7 @@ public partial class MainWindow : Window
         finally
         {
             LocationChanged -= Window_LocationChanged;
-            _animation.PlayLanding();
+            BeginLandingAction();
         }
 
         ShowEventBubble(CompanionEvent.DragReleased);
@@ -234,6 +418,26 @@ public partial class MainWindow : Window
         _animation.PlayClickReaction();
         ShowEventBubble(CompanionEvent.Click);
         ScheduleNextPhrase();
+    }
+
+    private void BeginDragAction()
+    {
+        _ambientTimer.Stop();
+        _animation.CancelAmbientAction();
+        _actionCoordinator.BeginDrag();
+    }
+
+    private void BeginLandingAction()
+    {
+        _actionCoordinator.BeginLanding();
+        _animation.PlayLanding(() =>
+        {
+            _actionCoordinator.Complete(PetActionState.Landing);
+            if (_actionCoordinator.State == PetActionState.Idle)
+            {
+                ScheduleFreshBlink();
+            }
+        });
     }
 
     private void ShowBubble(string text)
@@ -316,16 +520,31 @@ public partial class MainWindow : Window
 
     private void SaySomething_Click(object sender, RoutedEventArgs e) => ReactAndSpeak();
 
+    private void Greeting_Click(object sender, RoutedEventArgs e)
+    {
+        _ambientTimer.Stop();
+        if (_actionCoordinator.TryBeginAmbient(PetAmbientAction.Greeting))
+        {
+            _animation.PlayGreeting(
+                () => CompleteAmbientAction(PetActionState.Greeting));
+        }
+    }
+
     private async void ToggleAnimation_Click(object sender, RoutedEventArgs e)
     {
         _paused = !_paused;
         if (_paused)
         {
+            _ambientTimer.Stop();
+            _animation.CancelAmbientAction();
+            _actionCoordinator.Pause();
             _animation.PauseIdle();
         }
         else
         {
             _animation.ResumeIdle();
+            _actionCoordinator.Resume();
+            ScheduleFreshBlink();
         }
 
         UpdatePauseLabel();
@@ -426,6 +645,9 @@ public partial class MainWindow : Window
 
     private void Window_Closed(object? sender, EventArgs e)
     {
+        _isClosed = true;
+        _ambientTimer.Stop();
+        _animation.CancelAmbientAction();
         _automaticTimer.Stop();
         _bubbleTimer.Stop();
         _memoryTimer.Stop();

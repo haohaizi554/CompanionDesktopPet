@@ -71,6 +71,7 @@
       <Grid.ContextMenu>
         <ContextMenu>
           <MenuItem x:Name="SayMenuItem" Header="说句话 ♡" />
+          <MenuItem x:Name="GreetingMenuItem" Header="打个招呼♡" />
           <MenuItem x:Name="PauseMenuItem" Header="暂停动画" />
           <Separator />
           <MenuItem Header="大小">
@@ -93,6 +94,33 @@
       <Image x:Name="PetImage"
              Source="pack://application:,,,/CompanionDesktopPet;component/Assets/character.png"
              Stretch="Uniform" />
+
+      <Image x:Name="BlinkOverlay"
+             Source="pack://application:,,,/CompanionDesktopPet;component/Assets/character-blink-closed.png"
+             Stretch="Uniform"
+             Opacity="0"
+             IsHitTestVisible="False" />
+
+      <Border x:Name="GreetingBadge"
+              Margin="0,56,48,0"
+              Padding="12,7"
+              HorizontalAlignment="Right"
+              VerticalAlignment="Top"
+              Background="{StaticResource CreamBrush}"
+              BorderBrush="{StaticResource RoseBrush}"
+              BorderThickness="2"
+              CornerRadius="18"
+              Opacity="0"
+              IsHitTestVisible="False">
+        <Border.RenderTransform>
+          <TranslateTransform x:Name="GreetingBadgeOffset" Y="8" />
+        </Border.RenderTransform>
+        <TextBlock Text="嗨～"
+                   Foreground="{StaticResource CocoaBrush}"
+                   FontFamily="Microsoft YaHei UI"
+                   FontSize="16"
+                   FontWeight="SemiBold" />
+      </Border>
 
       <Canvas x:Name="HeartLayer"
               Width="320"
