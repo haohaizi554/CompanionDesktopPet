@@ -166,14 +166,15 @@ dotnet publish src/CompanionDesktopPet/CompanionDesktopPet.csproj `
   -c Release -r win-x64 --self-contained true --no-restore -o publish
 Copy-Item publish/CompanionDesktopPet.exe outputs/CompanionDesktopPet/佳怡桌宠.exe -Force
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
-  -ExePath outputs/CompanionDesktopPet/佳怡桌宠.exe
+  -ExePath outputs/CompanionDesktopPet/佳怡桌宠.exe `
+  -PublishExePath publish/CompanionDesktopPet.exe
 ```
 
 验证器要求交付目录只有一个 EXE（可另有 `.txt` 说明），拒绝 DLL/PDB/JSON 等 sidecar，核对交付 EXE 与 publish EXE 的 SHA-256，并扫描最终 EXE 原始字节中的 UTF-8、UTF-16LE 与 UTF-16BE 直接身份标记。地区、收入等通用词可能合法存在于自包含 .NET/ICU 词典中，因此由应用程序集测试和 v2 语料门禁检查，避免扫描整个运行时包时误报。验证器把 EXE 单独复制到 `outputs/verify/` 后以 `--smoke-test` 启动；应用必须在时限内完成真实 WPF 资源与启动气泡初始化、正常关闭并自行以退出码 0 结束。超时、需要强杀或非零退出均失败，强杀只用于清理残留 PID。
 
 ## 19. 桌宠交互与隐私
 
-保留左键点击爱心、拖拽时倾斜和松手落地回弹；不提供眨眼、wink、挥手、旧 `GetGreeting` 或打招呼动画。桌宠完全离线，不读取键盘输入内容、剪贴板、文件名或窗口标题；本机状态写入 `%LOCALAPPDATA%\CompanionDesktopPet`。具体 PII marker 不进入运行时程序集，语料构建/测试门禁和最终 EXE 原始字节扫描负责阻止其进入交付物。
+保留左键点击爱心、拖拽时倾斜和松手落地回弹；自然闭眼图层叠加式眨眼不压缩整张人物图。启动后会在本地显示一次“嗨♡”，右键菜单也提供 `打个招呼♡`；这两种打招呼都只使用固定的本地 UI，不从语料生成。仍不提供 wink 或假手挥手，没有旧 `GetGreeting`，也没有语料驱动的 `AnimationCue`/`PlayAmbientGesture`。桌宠完全离线，不读取键盘输入内容、剪贴板、文件名或窗口标题；本机状态写入 `%LOCALAPPDATA%\CompanionDesktopPet`。具体 PII marker 不进入运行时程序集，语料构建/测试门禁和最终 EXE 原始字节扫描负责阻止其进入交付物。
 
 ## 20. 限制与发布政策
 

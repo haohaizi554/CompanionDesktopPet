@@ -4,7 +4,7 @@
 
 > 当前状态：Persona Corpus v2、WPF 离线运行时接入、自包含单文件发布与隔离烟测均已完成。最终交付位于 `outputs/CompanionDesktopPet/`。
 
-桌宠保留左键点击爱心、拖拽倾斜和松手落地回弹；不包含眨眼、wink、挥手、旧 `GetGreeting` 或打招呼动画。它不读取输入内容、剪贴板、文件名或窗口标题，也不依赖网络、数据库或在线模型。
+桌宠保留左键点击爱心、拖拽倾斜和松手落地回弹；现在会以自然闭眼图层叠加完成单次或偶发双次眨眼，启动后在本地显示一次“嗨♡”，也可从右键菜单选择 `打个招呼♡`。这些本地 UI 动作不由语料驱动：仍不提供 wink 或假手挥手，没有旧 `GetGreeting`，也没有语料驱动的 `AnimationCue`/`PlayAmbientGesture`。它不读取输入内容、剪贴板、文件名或窗口标题，也不依赖网络、数据库或在线模型。
 
 ## 最终交付
 
@@ -19,7 +19,7 @@ outputs/CompanionDesktopPet/使用说明.txt
 
 - 左键单击：显示爱心，并按当前场景说一句话或安静做动作。
 - 按住左键拖动：移动桌宠，移动时倾斜，松手后回弹。
-- 右键人物：说句话、暂停/继续、调整大小、切换置顶、恢复位置或退出。
+- 右键人物：说句话、`打个招呼♡`、暂停/继续、调整大小、切换置顶、恢复位置或退出。
 
 本机偏好、冷却历史和微剧情进度保存在 `%LOCALAPPDATA%\CompanionDesktopPet`。
 
@@ -91,7 +91,8 @@ dotnet publish src/CompanionDesktopPet/CompanionDesktopPet.csproj `
   -c Release -r win-x64 --self-contained true --no-restore -o publish
 Copy-Item publish/CompanionDesktopPet.exe outputs/CompanionDesktopPet/佳怡桌宠.exe -Force
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
-  -ExePath outputs/CompanionDesktopPet/佳怡桌宠.exe
+  -ExePath outputs/CompanionDesktopPet/佳怡桌宠.exe `
+  -PublishExePath publish/CompanionDesktopPet.exe
 ```
 
 验证器拒绝额外 EXE 和 DLL/PDB/JSON 等运行时 sidecar，核对 publish 与交付 EXE 的 SHA-256，并扫描最终 EXE 原始字节中的 UTF-8/UTF-16 直接身份标记。地区、收入等通用词可能合法存在于自包含 .NET/ICU 词典中，因此由应用程序集测试和 v2 语料门禁检查，而不对整个运行时包做易误报的单词扫描。随后验证器把 EXE 单独复制到 `outputs/verify/`，以 `--smoke-test` 启动并只跟踪本次 PID；只有应用在时限内完成真实 WPF 资源与启动气泡初始化、正常关闭并自行以退出码 0 结束才算成功。超时后的强制终止仅用于清理且仍判失败，非零退出同样失败。
