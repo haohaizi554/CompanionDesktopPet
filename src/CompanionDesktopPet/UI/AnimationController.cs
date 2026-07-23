@@ -4,26 +4,77 @@ using System.Windows.Media.Animation;
 
 namespace CompanionDesktopPet.UI;
 
-public sealed class AnimationController(
-    ScaleTransform breathingScale,
-    RotateTransform swayRotation,
-    TranslateTransform floatingOffset,
-    ScaleTransform reactionScale,
-    RotateTransform reactionRotation,
-    ScaleTransform actionScale,
-    RotateTransform actionRotation,
-    TranslateTransform actionOffset,
-    IReadOnlyList<FrameworkElement> hearts,
-    FrameworkElement? blinkOverlay = null,
-    FrameworkElement? greetingBadge = null,
-    TranslateTransform? greetingBadgeOffset = null)
+public sealed class AnimationController
 {
+    private readonly ScaleTransform breathingScale;
+    private readonly RotateTransform swayRotation;
+    private readonly TranslateTransform floatingOffset;
+    private readonly ScaleTransform reactionScale;
+    private readonly RotateTransform reactionRotation;
+    private readonly ScaleTransform actionScale;
+    private readonly RotateTransform actionRotation;
+    private readonly TranslateTransform actionOffset;
+    private readonly IReadOnlyList<FrameworkElement> hearts;
     private readonly List<AnimationClock> _idleClocks = [];
-    private readonly FrameworkElement _blinkOverlay = blinkOverlay ?? new FrameworkElement();
-    private readonly FrameworkElement _greetingBadge = greetingBadge ?? new FrameworkElement();
-    private readonly TranslateTransform _greetingBadgeOffset = greetingBadgeOffset ?? new TranslateTransform();
+    private readonly FrameworkElement _blinkOverlay;
+    private readonly FrameworkElement _greetingBadge;
+    private readonly TranslateTransform _greetingBadgeOffset;
     private bool _started;
     private int _ambientAnimationVersion;
+
+    public AnimationController(
+        ScaleTransform breathingScale,
+        RotateTransform swayRotation,
+        TranslateTransform floatingOffset,
+        ScaleTransform reactionScale,
+        RotateTransform reactionRotation,
+        ScaleTransform actionScale,
+        RotateTransform actionRotation,
+        TranslateTransform actionOffset,
+        IReadOnlyList<FrameworkElement> hearts)
+        : this(
+            breathingScale,
+            swayRotation,
+            floatingOffset,
+            reactionScale,
+            reactionRotation,
+            actionScale,
+            actionRotation,
+            actionOffset,
+            hearts,
+            new FrameworkElement(),
+            new FrameworkElement(),
+            new TranslateTransform())
+    {
+    }
+
+    public AnimationController(
+        ScaleTransform breathingScale,
+        RotateTransform swayRotation,
+        TranslateTransform floatingOffset,
+        ScaleTransform reactionScale,
+        RotateTransform reactionRotation,
+        ScaleTransform actionScale,
+        RotateTransform actionRotation,
+        TranslateTransform actionOffset,
+        IReadOnlyList<FrameworkElement> hearts,
+        FrameworkElement blinkOverlay,
+        FrameworkElement greetingBadge,
+        TranslateTransform greetingBadgeOffset)
+    {
+        this.breathingScale = breathingScale ?? throw new ArgumentNullException(nameof(breathingScale));
+        this.swayRotation = swayRotation ?? throw new ArgumentNullException(nameof(swayRotation));
+        this.floatingOffset = floatingOffset ?? throw new ArgumentNullException(nameof(floatingOffset));
+        this.reactionScale = reactionScale ?? throw new ArgumentNullException(nameof(reactionScale));
+        this.reactionRotation = reactionRotation ?? throw new ArgumentNullException(nameof(reactionRotation));
+        this.actionScale = actionScale ?? throw new ArgumentNullException(nameof(actionScale));
+        this.actionRotation = actionRotation ?? throw new ArgumentNullException(nameof(actionRotation));
+        this.actionOffset = actionOffset ?? throw new ArgumentNullException(nameof(actionOffset));
+        this.hearts = hearts ?? throw new ArgumentNullException(nameof(hearts));
+        _blinkOverlay = blinkOverlay ?? throw new ArgumentNullException(nameof(blinkOverlay));
+        _greetingBadge = greetingBadge ?? throw new ArgumentNullException(nameof(greetingBadge));
+        _greetingBadgeOffset = greetingBadgeOffset ?? throw new ArgumentNullException(nameof(greetingBadgeOffset));
+    }
 
     public bool IsPaused { get; private set; }
 
@@ -83,7 +134,9 @@ public sealed class AnimationController(
         actionRotation.Angle = Math.Clamp(horizontalDelta * 0.12, -8, 8);
     }
 
-    public void PlayLanding(Action? completed = null)
+    public void PlayLanding() => PlayLanding(null);
+
+    public void PlayLanding(Action? completed)
     {
         actionRotation.BeginAnimation(RotateTransform.AngleProperty, null);
         var initialAngle = actionRotation.Angle;
@@ -135,7 +188,7 @@ public sealed class AnimationController(
             {
                 (0, 0), (95, 1), (150, 1), (300, 0)
             };
-        var blink = CreateFrames(frames[^1].Milliseconds, false, frames);
+        var blink = CreateBoundedFrames(frames[^1].Milliseconds, frames);
         blink.Completed += (_, _) => CompleteBlink(version, completed);
         _blinkOverlay.BeginAnimation(
             UIElement.OpacityProperty,
@@ -169,7 +222,7 @@ public sealed class AnimationController(
             TranslateTransform.YProperty,
             greetingOffset,
             HandoffBehavior.SnapshotAndReplace);
-        BeginFrames(
+        BeginBoundedFrames(
             actionScale,
             ScaleTransform.ScaleYProperty,
             1100,
@@ -177,7 +230,7 @@ public sealed class AnimationController(
             (360, 0.988),
             (760, 1.006),
             (1100, 1));
-        BeginFrames(
+        BeginBoundedFrames(
             _greetingBadge,
             UIElement.OpacityProperty,
             900,
@@ -346,10 +399,34 @@ public sealed class AnimationController(
             HandoffBehavior.SnapshotAndReplace);
     }
 
+    private static void BeginBoundedFrames(
+        IAnimatable target,
+        DependencyProperty property,
+        int durationMilliseconds,
+        params (int Milliseconds, double Value)[] frames)
+    {
+        target.BeginAnimation(
+            property,
+            CreateBoundedFrames(durationMilliseconds, frames),
+            HandoffBehavior.SnapshotAndReplace);
+    }
+
+    private static DoubleAnimationUsingKeyFrames CreateBoundedFrames(
+        int durationMilliseconds,
+        params (int Milliseconds, double Value)[] frames) =>
+        CreateFrames(durationMilliseconds, false, frames, allowOvershoot: false);
+
     private static DoubleAnimationUsingKeyFrames CreateFrames(
         int durationMilliseconds,
         bool discrete,
-        params (int Milliseconds, double Value)[] frames)
+        params (int Milliseconds, double Value)[] frames) =>
+        CreateFrames(durationMilliseconds, discrete, frames, allowOvershoot: true);
+
+    private static DoubleAnimationUsingKeyFrames CreateFrames(
+        int durationMilliseconds,
+        bool discrete,
+        (int Milliseconds, double Value)[] frames,
+        bool allowOvershoot)
     {
         var animation = new DoubleAnimationUsingKeyFrames
         {
@@ -363,11 +440,13 @@ public sealed class AnimationController(
                 ? new DiscreteDoubleKeyFrame()
                 : new EasingDoubleKeyFrame
                 {
-                    EasingFunction = new BackEase
-                    {
-                        Amplitude = 0.22,
-                        EasingMode = EasingMode.EaseOut
-                    }
+                    EasingFunction = allowOvershoot
+                        ? new BackEase
+                        {
+                            Amplitude = 0.22,
+                            EasingMode = EasingMode.EaseOut
+                        }
+                        : new QuadraticEase { EasingMode = EasingMode.EaseInOut }
                 };
             frame.KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(milliseconds));
             frame.Value = value;

@@ -1,4 +1,5 @@
 using System.Runtime.ExceptionServices;
+using System.Reflection;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
@@ -10,6 +11,58 @@ namespace CompanionDesktopPet.Tests;
 
 public sealed class AnimationControllerTests
 {
+    [Fact]
+    public void AnimationController_PreservesLegacyClrEntryPoints()
+    {
+        var legacyConstructorParameterTypes = new[]
+        {
+            typeof(ScaleTransform),
+            typeof(RotateTransform),
+            typeof(TranslateTransform),
+            typeof(ScaleTransform),
+            typeof(RotateTransform),
+            typeof(ScaleTransform),
+            typeof(RotateTransform),
+            typeof(TranslateTransform),
+            typeof(IReadOnlyList<FrameworkElement>)
+        };
+
+        var legacyConstructor = typeof(AnimationController).GetConstructor(
+            BindingFlags.Instance | BindingFlags.Public,
+            binder: null,
+            legacyConstructorParameterTypes,
+            modifiers: null);
+        Assert.NotNull(legacyConstructor);
+
+        var completeConstructor = typeof(AnimationController).GetConstructor(
+            BindingFlags.Instance | BindingFlags.Public,
+            binder: null,
+            [.. legacyConstructorParameterTypes,
+                typeof(FrameworkElement),
+                typeof(FrameworkElement),
+                typeof(TranslateTransform)],
+            modifiers: null);
+        Assert.NotNull(completeConstructor);
+        Assert.DoesNotContain(
+            completeConstructor!.GetParameters(),
+            parameter => parameter.HasDefaultValue);
+
+        Assert.NotNull(typeof(AnimationController).GetMethod(
+            nameof(AnimationController.PlayLanding),
+            BindingFlags.Instance | BindingFlags.Public,
+            binder: null,
+            Type.EmptyTypes,
+            modifiers: null));
+        var landingWithCompletion = typeof(AnimationController).GetMethod(
+            nameof(AnimationController.PlayLanding),
+            BindingFlags.Instance | BindingFlags.Public,
+            binder: null,
+            [typeof(Action)],
+            modifiers: null);
+        Assert.NotNull(landingWithCompletion);
+        Assert.False(landingWithCompletion!.GetParameters()[0].HasDefaultValue);
+    }
+
     [Fact]
     public void AnimationController_ExposesNoCorpusDrivenAmbientGesture()
     {
@@ -148,6 +201,72 @@ public sealed class AnimationControllerTests
         });
     }
 
+    [Fact]
+    public void ConstrainedAmbientProperties_NeverOvershootTheirVisualBounds()
+    {
+        RunOnStaThread(() =>
+        {
+            var actionScale = new ScaleTransform();
+            var actionRotation = new RotateTransform();
+            var actionOffset = new TranslateTransform();
+            var blinkOverlay = new Border();
+            var greetingBadge = new Border();
+            var greetingBadgeOffset = new TranslateTransform();
+            var controller = new AnimationController(
+                new ScaleTransform(),
+                new RotateTransform(),
+                new TranslateTransform(),
+                new ScaleTransform(),
+                new RotateTransform(),
+                actionScale,
+                actionRotation,
+                actionOffset,
+                [],
+                blinkOverlay,
+                greetingBadge,
+                greetingBadgeOffset);
+            var host = new Window
+            {
+                Content = new Grid
+                {
+                    RenderTransform = new TransformGroup
+                    {
+                        Children = { actionScale, actionRotation, actionOffset }
+                    },
+                    Children = { blinkOverlay, greetingBadge }
+                }
+            };
+            greetingBadge.RenderTransform = greetingBadgeOffset;
+            host.Show();
+            host.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+
+            try
+            {
+                controller.PlayBlink(doubleBlink: false, completed: () => { });
+                var blinkOpacitySamples = SampleFor(
+                    () => blinkOverlay.Opacity,
+                    TimeSpan.FromMilliseconds(340));
+                Assert.All(blinkOpacitySamples, value => Assert.InRange(value, -0.000_001, 1.000_001));
+
+                controller.PlayGreeting(() => { });
+                var greetingSamples = SampleFor(
+                    () => (greetingBadge.Opacity, actionScale.ScaleY),
+                    TimeSpan.FromMilliseconds(1_140));
+                Assert.All(
+                    greetingSamples,
+                    sample =>
+                    {
+                        Assert.InRange(sample.Opacity, -0.000_001, 1.000_001);
+                        Assert.InRange(sample.ScaleY, 0.987_999, 1.006_001);
+                    });
+            }
+            finally
+            {
+                host.Close();
+            }
+        });
+    }
+
     private static void AssertNeutralAmbientBaseValues(
         FrameworkElement blinkOverlay,
         FrameworkElement greetingBadge,
@@ -195,6 +314,30 @@ public sealed class AnimationControllerTests
         limit.Stop();
 
         Assert.Equal(expectCompletion, completed());
+    }
+
+    private static IReadOnlyList<T> SampleFor<T>(Func<T> sample, TimeSpan duration)
+    {
+        var samples = new List<T> { sample() };
+        var dispatcher = Dispatcher.CurrentDispatcher;
+        var frame = new DispatcherFrame();
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var timer = new DispatcherTimer(DispatcherPriority.Render, dispatcher)
+        {
+            Interval = TimeSpan.FromMilliseconds(5)
+        };
+        timer.Tick += (_, _) =>
+        {
+            samples.Add(sample());
+            if (stopwatch.Elapsed >= duration)
+            {
+                frame.Continue = false;
+            }
+        };
+        timer.Start();
+        Dispatcher.PushFrame(frame);
+        timer.Stop();
+        return samples;
     }
 
     private static void RunOnStaThread(Action action)

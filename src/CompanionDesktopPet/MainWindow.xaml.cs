@@ -33,10 +33,13 @@ public partial class MainWindow : Window
     private bool _paused;
     private bool _dragged;
     private bool _shutdownRequested;
-    private bool _startupGreetingScheduled;
+    private StartupGreetingState _startupGreetingState = StartupGreetingState.Pending;
     private bool _runningSmokeProbe;
     private bool _isClosed;
     private PetAmbientAction _pendingAmbientAction;
+    private long _ambientScheduleGeneration;
+    private long _armedAmbientGeneration;
+    private DateTime _ambientDueAtUtc = DateTime.MaxValue;
     private System.Windows.Point _mouseDown;
     private double _lastDragLeft;
 
@@ -144,33 +147,71 @@ public partial class MainWindow : Window
 
     private void Window_ContentRendered(object? sender, EventArgs e)
     {
-        if (_startupGreetingScheduled)
-        {
-            return;
-        }
-
-        _startupGreetingScheduled = true;
-        if (!_paused)
-        {
-            ScheduleAmbientAction(
-                PetAmbientAction.Greeting,
-                TimeSpan.FromMilliseconds(650));
-        }
+        ScheduleNextAmbientAction();
     }
 
     private void AmbientTimer_Tick(object? sender, EventArgs e)
     {
-        _ambientTimer.Stop();
-        if (!_actionCoordinator.TryBeginAmbient(_pendingAmbientAction))
+        if (_isClosed)
         {
-            ScheduleFreshBlink();
+            _ambientTimer.Stop();
             return;
         }
 
-        PlayAmbientAction(_pendingAmbientAction);
+        if (_runningSmokeProbe
+            || _actionCoordinator.State == PetActionState.Paused
+            || _paused)
+        {
+            PreserveScheduledStartupGreeting();
+            InvalidateAmbientSchedule();
+            return;
+        }
+
+        if (_armedAmbientGeneration == 0)
+        {
+            _ambientTimer.Stop();
+            return;
+        }
+
+        var remaining = _ambientDueAtUtc - DateTime.UtcNow;
+        if (_armedAmbientGeneration != _ambientScheduleGeneration
+            || remaining > TimeSpan.Zero)
+        {
+            _ambientTimer.Stop();
+            if (_armedAmbientGeneration == _ambientScheduleGeneration)
+            {
+                _ambientTimer.Interval = remaining > TimeSpan.FromMilliseconds(1)
+                    ? remaining
+                    : TimeSpan.FromMilliseconds(1);
+                _ambientTimer.Start();
+            }
+
+            return;
+        }
+
+        var action = _pendingAmbientAction;
+        var isStartupGreeting = action == PetAmbientAction.Greeting
+            && _startupGreetingState == StartupGreetingState.Scheduled;
+        InvalidateAmbientSchedule();
+        if (!_actionCoordinator.TryBeginAmbient(action))
+        {
+            if (isStartupGreeting)
+            {
+                _startupGreetingState = StartupGreetingState.Pending;
+            }
+
+            return;
+        }
+
+        if (isStartupGreeting)
+        {
+            _startupGreetingState = StartupGreetingState.Running;
+        }
+
+        PlayAmbientAction(action, isStartupGreeting);
     }
 
-    private void PlayAmbientAction(PetAmbientAction action)
+    private void PlayAmbientAction(PetAmbientAction action, bool isStartupGreeting = false)
     {
         if (action == PetAmbientAction.Blink)
         {
@@ -180,8 +221,19 @@ public partial class MainWindow : Window
             return;
         }
 
-        _animation.PlayGreeting(
-            () => CompleteAmbientAction(PetActionState.Greeting));
+        _animation.PlayGreeting(isStartupGreeting
+            ? CompleteStartupGreeting
+            : () => CompleteAmbientAction(PetActionState.Greeting));
+    }
+
+    private void CompleteStartupGreeting()
+    {
+        if (_startupGreetingState == StartupGreetingState.Running)
+        {
+            _startupGreetingState = StartupGreetingState.Completed;
+        }
+
+        CompleteAmbientAction(PetActionState.Greeting);
     }
 
     private void CompleteAmbientAction(PetActionState completed)
@@ -189,31 +241,76 @@ public partial class MainWindow : Window
         _actionCoordinator.Complete(completed);
         if (_actionCoordinator.State == PetActionState.Idle)
         {
-            ScheduleFreshBlink();
+            ScheduleNextAmbientAction();
         }
     }
 
     private void ScheduleFreshBlink() =>
         ScheduleAmbientAction(PetAmbientAction.Blink, _ambientScheduler.NextBlinkDelay());
 
-    private void ScheduleAmbientAction(PetAmbientAction action, TimeSpan delay)
+    private void ScheduleNextAmbientAction()
     {
-        _ambientTimer.Stop();
         if (_isClosed
             || _runningSmokeProbe
-            || _actionCoordinator.State == PetActionState.Paused)
+            || _paused
+            || _actionCoordinator.State != PetActionState.Idle)
+        {
+            return;
+        }
+
+        if (_startupGreetingState == StartupGreetingState.Pending)
+        {
+            ScheduleAmbientAction(
+                PetAmbientAction.Greeting,
+                TimeSpan.FromMilliseconds(650));
+            _startupGreetingState = StartupGreetingState.Scheduled;
+            return;
+        }
+
+        if (_startupGreetingState == StartupGreetingState.Completed)
+        {
+            ScheduleFreshBlink();
+        }
+    }
+
+    private void ScheduleAmbientAction(PetAmbientAction action, TimeSpan delay)
+    {
+        InvalidateAmbientSchedule();
+        if (_isClosed
+            || _runningSmokeProbe
+            || _paused
+            || _actionCoordinator.State != PetActionState.Idle)
         {
             return;
         }
 
         _pendingAmbientAction = action;
         _ambientTimer.Interval = delay;
+        _ambientDueAtUtc = DateTime.UtcNow + delay;
+        _armedAmbientGeneration = _ambientScheduleGeneration;
         _ambientTimer.Start();
+    }
+
+    private void PreserveScheduledStartupGreeting()
+    {
+        if (_startupGreetingState == StartupGreetingState.Scheduled)
+        {
+            _startupGreetingState = StartupGreetingState.Pending;
+        }
+    }
+
+    private void InvalidateAmbientSchedule()
+    {
+        _ambientTimer.Stop();
+        _ambientScheduleGeneration++;
+        _armedAmbientGeneration = 0;
+        _ambientDueAtUtc = DateTime.MaxValue;
     }
 
     public async Task<bool> RunSmokeActionProbeAsync()
     {
-        _ambientTimer.Stop();
+        PreserveScheduledStartupGreeting();
+        InvalidateAmbientSchedule();
         _runningSmokeProbe = true;
         CancelActiveAmbientAction();
         var succeeded = false;
@@ -236,9 +333,10 @@ public partial class MainWindow : Window
         }
         finally
         {
-            _ambientTimer.Stop();
+            InvalidateAmbientSchedule();
             CancelActiveAmbientAction();
             _runningSmokeProbe = false;
+            ScheduleNextAmbientAction();
         }
 
         return succeeded && AmbientVisualsAreNeutral();
@@ -285,6 +383,11 @@ public partial class MainWindow : Window
 
     private void CancelActiveAmbientAction()
     {
+        if (_startupGreetingState == StartupGreetingState.Running)
+        {
+            _startupGreetingState = StartupGreetingState.Completed;
+        }
+
         _animation.CancelAmbientAction();
         if (_actionCoordinator.State is PetActionState.Blinking or PetActionState.Greeting)
         {
@@ -463,8 +566,9 @@ public partial class MainWindow : Window
 
     private void BeginDragAction()
     {
-        _ambientTimer.Stop();
-        _animation.CancelAmbientAction();
+        PreserveScheduledStartupGreeting();
+        InvalidateAmbientSchedule();
+        CancelActiveAmbientAction();
         _actionCoordinator.BeginDrag();
     }
 
@@ -481,7 +585,7 @@ public partial class MainWindow : Window
             _actionCoordinator.Complete(PetActionState.Landing);
             if (!_isClosed && _actionCoordinator.State == PetActionState.Idle)
             {
-                ScheduleFreshBlink();
+                ScheduleNextAmbientAction();
             }
         });
     }
@@ -568,7 +672,8 @@ public partial class MainWindow : Window
 
     private void Greeting_Click(object sender, RoutedEventArgs e)
     {
-        _ambientTimer.Stop();
+        PreserveScheduledStartupGreeting();
+        InvalidateAmbientSchedule();
         if (_actionCoordinator.TryBeginAmbient(PetAmbientAction.Greeting))
         {
             _animation.PlayGreeting(
@@ -581,8 +686,9 @@ public partial class MainWindow : Window
         _paused = !_paused;
         if (_paused)
         {
-            _ambientTimer.Stop();
-            _animation.CancelAmbientAction();
+            PreserveScheduledStartupGreeting();
+            InvalidateAmbientSchedule();
+            CancelActiveAmbientAction();
             _actionCoordinator.Pause();
             _animation.PauseIdle();
         }
@@ -590,7 +696,7 @@ public partial class MainWindow : Window
         {
             _animation.ResumeIdle();
             _actionCoordinator.Resume();
-            ScheduleFreshBlink();
+            ScheduleNextAmbientAction();
         }
 
         UpdatePauseLabel();
@@ -692,8 +798,10 @@ public partial class MainWindow : Window
     private void Window_Closed(object? sender, EventArgs e)
     {
         _isClosed = true;
-        _ambientTimer.Stop();
-        _animation.CancelAmbientAction();
+        ContentRendered -= Window_ContentRendered;
+        _ambientTimer.Tick -= AmbientTimer_Tick;
+        InvalidateAmbientSchedule();
+        CancelActiveAmbientAction();
         _automaticTimer.Stop();
         _bubbleTimer.Stop();
         _memoryTimer.Stop();
@@ -703,5 +811,13 @@ public partial class MainWindow : Window
             _shutdownRequested = true;
             _shutdownApplication();
         }
+    }
+
+    private enum StartupGreetingState
+    {
+        Pending,
+        Scheduled,
+        Running,
+        Completed
     }
 }
