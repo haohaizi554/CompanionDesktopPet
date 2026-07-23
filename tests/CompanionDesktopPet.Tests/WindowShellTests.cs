@@ -328,9 +328,9 @@ public sealed class WindowShellTests
     }
 
     [Fact]
-    public async Task MainWindow_DragAndLandingTakePriorityAndRestoreThePriorPauseState()
+    public void MainWindow_DragAndLandingTakePriorityAndRestoreThePriorPauseState()
     {
-        await RunOnStaThreadAsync(async () =>
+        RunOnStaThread(() =>
         {
             var settingsDirectory = CreateSettingsDirectory();
             var window = CreateWindowWithScheduler(
@@ -350,7 +350,10 @@ public sealed class WindowShellTests
 
             InvokePrivate(window, "BeginLandingAction");
             Assert.Equal(PetActionState.Landing, coordinator.State);
-            await Task.Delay(650);
+            WaitForCondition(
+                () => coordinator.State == PetActionState.Idle,
+                TimeSpan.FromSeconds(3),
+                () => $"Landing did not complete to Idle; current state: {coordinator.State}.");
             Assert.Equal(PetActionState.Idle, coordinator.State);
             Assert.True(ambientTimer.IsEnabled);
             Assert.Equal(TimeSpan.FromMilliseconds(650), ambientTimer.Interval);
@@ -360,7 +363,10 @@ public sealed class WindowShellTests
                 .RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
             InvokePrivate(window, "BeginDragAction");
             InvokePrivate(window, "BeginLandingAction");
-            await Task.Delay(650);
+            WaitForCondition(
+                () => coordinator.State == PetActionState.Paused,
+                TimeSpan.FromSeconds(3),
+                () => $"Landing did not restore Paused; current state: {coordinator.State}.");
 
             Assert.Equal(PetActionState.Paused, coordinator.State);
             Assert.False(ambientTimer.IsEnabled);
@@ -957,6 +963,44 @@ public sealed class WindowShellTests
             BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(method);
         method!.Invoke(window, arguments);
+    }
+
+    private static void WaitForCondition(
+        Func<bool> condition,
+        TimeSpan timeout,
+        Func<string> failureMessage)
+    {
+        if (condition())
+        {
+            return;
+        }
+
+        var dispatcher = Dispatcher.CurrentDispatcher;
+        var frame = new DispatcherFrame();
+        var stopwatch = Stopwatch.StartNew();
+        var poll = new DispatcherTimer(DispatcherPriority.Background, dispatcher)
+        {
+            Interval = TimeSpan.FromMilliseconds(10)
+        };
+        poll.Tick += (_, _) =>
+        {
+            if (condition() || stopwatch.Elapsed >= timeout)
+            {
+                frame.Continue = false;
+            }
+        };
+
+        poll.Start();
+        try
+        {
+            Dispatcher.PushFrame(frame);
+        }
+        finally
+        {
+            poll.Stop();
+        }
+
+        Assert.True(condition(), failureMessage());
     }
 
     private static Task InvokePrivateAsync(
