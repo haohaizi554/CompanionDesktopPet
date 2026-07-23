@@ -59,13 +59,14 @@ Ambient actions use an explicit coordinator instead of independent booleans.
 
 [Landing]
   -> Idle
-  -> Paused (cancel and reset)
+  -> Paused
 
 [Paused]
   -> Idle
+  -> Dragging
 ```
 
-Only one ambient/action-state animation owns `ActionScale`, `ActionRotation`, and `ActionOffset` at a time. Click hearts and the existing click reaction retain their separate transforms and remain available while idle animation is paused. Dragging and landing have priority over blink and greeting. Every cancel and completion path restores overlay opacity and action transforms to neutral values.
+Only one ambient/action-state animation owns `ActionScale`, `ActionRotation`, and `ActionOffset` at a time. Click hearts and the existing click reaction retain their separate transforms and remain available while idle animation is paused. Dragging and landing have priority over blink and greeting. A drag remains available while ambient animation is paused; its landing returns to `Paused` instead of silently resuming ambient motion. Every cancel and completion path restores overlay opacity and action transforms to neutral values.
 
 ## 5. Blink motion
 
