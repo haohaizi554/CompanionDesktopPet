@@ -13,10 +13,17 @@ public sealed class AnimationController(
     ScaleTransform actionScale,
     RotateTransform actionRotation,
     TranslateTransform actionOffset,
-    IReadOnlyList<FrameworkElement> hearts)
+    IReadOnlyList<FrameworkElement> hearts,
+    FrameworkElement? blinkOverlay = null,
+    FrameworkElement? greetingBadge = null,
+    TranslateTransform? greetingBadgeOffset = null)
 {
     private readonly List<AnimationClock> _idleClocks = [];
+    private readonly FrameworkElement _blinkOverlay = blinkOverlay ?? new FrameworkElement();
+    private readonly FrameworkElement _greetingBadge = greetingBadge ?? new FrameworkElement();
+    private readonly TranslateTransform _greetingBadgeOffset = greetingBadgeOffset ?? new TranslateTransform();
     private bool _started;
+    private int _ambientAnimationVersion;
 
     public bool IsPaused { get; private set; }
 
@@ -76,11 +83,12 @@ public sealed class AnimationController(
         actionRotation.Angle = Math.Clamp(horizontalDelta * 0.12, -8, 8);
     }
 
-    public void PlayLanding()
+    public void PlayLanding(Action? completed = null)
     {
         actionRotation.BeginAnimation(RotateTransform.AngleProperty, null);
         var initialAngle = actionRotation.Angle;
-        ResetActionBase();
+        CancelAmbientAction();
+        var version = _ambientAnimationVersion;
 
         BeginFrames(
             actionRotation,
@@ -90,14 +98,18 @@ public sealed class AnimationController(
             (170, -initialAngle * 0.35),
             (335, initialAngle * 0.14),
             (520, 0));
-        BeginFrames(
-            actionOffset,
-            TranslateTransform.YProperty,
+        var landingOffset = CreateFrames(
             520,
+            false,
             (0, -2),
             (150, 6),
             (320, -2.5),
             (520, 0));
+        landingOffset.Completed += (_, _) => CompleteAction(version, completed);
+        actionOffset.BeginAnimation(
+            TranslateTransform.YProperty,
+            landingOffset,
+            HandoffBehavior.SnapshotAndReplace);
         BeginFrames(
             actionScale,
             ScaleTransform.ScaleYProperty,
@@ -106,6 +118,125 @@ public sealed class AnimationController(
             (150, 0.965),
             (320, 1.018),
             (520, 1));
+    }
+
+    public void PlayBlink(bool doubleBlink, Action completed)
+    {
+        ArgumentNullException.ThrowIfNull(completed);
+        CancelAmbientAction();
+        var version = _ambientAnimationVersion;
+        var frames = doubleBlink
+            ? new (int Milliseconds, double Value)[]
+            {
+                (0, 0), (95, 1), (150, 1), (300, 0),
+                (420, 0), (515, 1), (570, 1), (720, 0)
+            }
+            : new (int Milliseconds, double Value)[]
+            {
+                (0, 0), (95, 1), (150, 1), (300, 0)
+            };
+        var blink = CreateFrames(frames[^1].Milliseconds, false, frames);
+        blink.Completed += (_, _) => CompleteBlink(version, completed);
+        _blinkOverlay.BeginAnimation(
+            UIElement.OpacityProperty,
+            blink,
+            HandoffBehavior.SnapshotAndReplace);
+    }
+
+    public void PlayGreeting(Action completed)
+    {
+        ArgumentNullException.ThrowIfNull(completed);
+        CancelAmbientAction();
+        var version = _ambientAnimationVersion;
+
+        BeginFrames(
+            actionRotation,
+            RotateTransform.AngleProperty,
+            1100,
+            (0, 0),
+            (360, -3.0),
+            (760, -1.0),
+            (1100, 0));
+        var greetingOffset = CreateFrames(
+            1100,
+            false,
+            (0, 0),
+            (360, -4.0),
+            (760, -2.0),
+            (1100, 0));
+        greetingOffset.Completed += (_, _) => CompleteAction(version, completed);
+        actionOffset.BeginAnimation(
+            TranslateTransform.YProperty,
+            greetingOffset,
+            HandoffBehavior.SnapshotAndReplace);
+        BeginFrames(
+            actionScale,
+            ScaleTransform.ScaleYProperty,
+            1100,
+            (0, 1),
+            (360, 0.988),
+            (760, 1.006),
+            (1100, 1));
+        BeginFrames(
+            _greetingBadge,
+            UIElement.OpacityProperty,
+            900,
+            (0, 0),
+            (180, 1),
+            (580, 1),
+            (900, 0));
+        BeginFrames(
+            _greetingBadgeOffset,
+            TranslateTransform.YProperty,
+            900,
+            (0, 8),
+            (180, 0),
+            (900, -20));
+    }
+
+    public void CancelAmbientAction()
+    {
+        _ambientAnimationVersion++;
+        _blinkOverlay.BeginAnimation(UIElement.OpacityProperty, null);
+        _greetingBadge.BeginAnimation(UIElement.OpacityProperty, null);
+        _greetingBadgeOffset.BeginAnimation(TranslateTransform.XProperty, null);
+        _greetingBadgeOffset.BeginAnimation(TranslateTransform.YProperty, null);
+        _blinkOverlay.Opacity = 0;
+        _greetingBadge.Opacity = 0;
+        _greetingBadgeOffset.X = 0;
+        _greetingBadgeOffset.Y = 8;
+        ResetActionBase();
+    }
+
+    private void CompleteBlink(int version, Action completed)
+    {
+        if (version != _ambientAnimationVersion)
+        {
+            return;
+        }
+
+        _ambientAnimationVersion++;
+        _blinkOverlay.BeginAnimation(UIElement.OpacityProperty, null);
+        _blinkOverlay.Opacity = 0;
+        completed();
+    }
+
+    private void CompleteAction(int version, Action? completed)
+    {
+        if (version != _ambientAnimationVersion)
+        {
+            return;
+        }
+
+        _ambientAnimationVersion++;
+        ResetActionBase();
+        _greetingBadge.BeginAnimation(UIElement.OpacityProperty, null);
+        _greetingBadgeOffset.BeginAnimation(TranslateTransform.XProperty, null);
+        _greetingBadgeOffset.BeginAnimation(TranslateTransform.YProperty, null);
+        _greetingBadge.Opacity = 0;
+        _greetingBadgeOffset.X = 0;
+        _greetingBadgeOffset.Y = 8;
+        completed?.Invoke();
     }
 
     private void PlayHearts()
@@ -196,18 +327,29 @@ public sealed class AnimationController(
     }
 
     private static void BeginFrames(
-        Animatable target,
+        IAnimatable target,
         DependencyProperty property,
         int durationMilliseconds,
         params (int Milliseconds, double Value)[] frames) =>
         BeginFrames(target, property, durationMilliseconds, frames, false);
 
     private static void BeginFrames(
-        Animatable target,
+        IAnimatable target,
         DependencyProperty property,
         int durationMilliseconds,
         (int Milliseconds, double Value)[] frames,
         bool discrete)
+    {
+        target.BeginAnimation(
+            property,
+            CreateFrames(durationMilliseconds, discrete, frames),
+            HandoffBehavior.SnapshotAndReplace);
+    }
+
+    private static DoubleAnimationUsingKeyFrames CreateFrames(
+        int durationMilliseconds,
+        bool discrete,
+        params (int Milliseconds, double Value)[] frames)
     {
         var animation = new DoubleAnimationUsingKeyFrames
         {
@@ -232,7 +374,7 @@ public sealed class AnimationController(
             animation.KeyFrames.Add(frame);
         }
 
-        target.BeginAnimation(property, animation, HandoffBehavior.SnapshotAndReplace);
+        return animation;
     }
 
 }
