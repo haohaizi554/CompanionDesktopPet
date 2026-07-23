@@ -120,11 +120,11 @@ try {
             $stream = [IO.File]::Open($path, [IO.FileMode]::Append, [IO.FileAccess]::Write)
             try { $stream.Write($bytes, 0, $bytes.Length) } finally { $stream.Dispose() }
         }
-    } -ExpectedMessage 'forbidden PII marker'
+    } -ExpectedMessage 'forbidden direct-identity marker'
 
     Assert-Rejected -Case 'UTF-16 reviewed PII marker bytes' -Arrange {
         param($paths)
-        $marker = -join ([char[]](0x5DE5, 0x8D44))
+        $marker = -join ([char[]](0x5C0F, 0x73A5))
         $bytes = [Text.Encoding]::Unicode.GetBytes($marker)
         $binaryPaths = @(
             (Join-Path $paths.Delivery 'candidate.exe')
@@ -134,7 +134,7 @@ try {
             $stream = [IO.File]::Open($path, [IO.FileMode]::Append, [IO.FileAccess]::Write)
             try { $stream.Write($bytes, 0, $bytes.Length) } finally { $stream.Dispose() }
         }
-    } -ExpectedMessage 'forbidden PII marker'
+    } -ExpectedMessage 'forbidden direct-identity marker'
 
     if (Test-Path -LiteralPath $helperDirectory) {
         Remove-Item -LiteralPath $helperDirectory -Recurse -Force

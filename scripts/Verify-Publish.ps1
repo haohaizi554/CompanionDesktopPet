@@ -35,16 +35,10 @@ if ($unexpectedFiles.Count -ne 0) {
     throw "Delivery directory contains forbidden sidecars: $($unexpectedFiles.Name -join ', ')"
 }
 
-$forbiddenPiiMarkers = @(
+$forbiddenIdentityMarkers = @(
     (-join ([char[]](0x96F7, 0x7433, 0x73A5)))
     (-join ([char[]](0x5C0F, 0x73A5)))
     (-join ([char[]](0x73A5, 0x73A5)))
-    (-join ([char[]](0x6E56, 0x5357)))
-    (-join ([char[]](0x957F, 0x6C99)))
-    (-join ([char[]](0x5E7F, 0x4E1C)))
-    (-join ([char[]](0x6708, 0x85AA)))
-    (-join ([char[]](0x5DE5, 0x8D44)))
-    (-join ([char[]](0x6253, 0x96F6, 0x5DE5)))
 )
 $bytePreservingEncoding = [Text.Encoding]::GetEncoding(28591)
 $binaryBytes = [IO.File]::ReadAllBytes($resolved)
@@ -54,11 +48,11 @@ $markerEncodings = @(
     [Text.Encoding]::Unicode
     [Text.Encoding]::BigEndianUnicode
 )
-foreach ($marker in $forbiddenPiiMarkers) {
+foreach ($marker in $forbiddenIdentityMarkers) {
     foreach ($encoding in $markerEncodings) {
         $needle = $bytePreservingEncoding.GetString($encoding.GetBytes($marker))
         if ($binaryText.IndexOf($needle, [StringComparison]::Ordinal) -ge 0) {
-            throw "Delivered EXE contains forbidden PII marker bytes ($($encoding.WebName))."
+            throw "Delivered EXE contains forbidden direct-identity marker bytes ($($encoding.WebName))."
         }
     }
 }

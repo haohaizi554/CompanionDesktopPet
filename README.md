@@ -94,7 +94,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
   -ExePath outputs/CompanionDesktopPet/佳怡桌宠.exe
 ```
 
-验证器拒绝额外 EXE 和 DLL/PDB/JSON 等运行时 sidecar，核对 publish 与交付 EXE 的 SHA-256，并扫描最终 EXE 原始字节中的 UTF-8/UTF-16 复核禁用 PII marker。随后它把 EXE 单独复制到 `outputs/verify/`，以 `--smoke-test` 启动并只跟踪本次 PID；只有应用在时限内完成真实 WPF 资源与启动气泡初始化、正常关闭并自行以退出码 0 结束才算成功。超时后的强制终止仅用于清理且仍判失败，非零退出同样失败。
+验证器拒绝额外 EXE 和 DLL/PDB/JSON 等运行时 sidecar，核对 publish 与交付 EXE 的 SHA-256，并扫描最终 EXE 原始字节中的 UTF-8/UTF-16 直接身份标记。地区、收入等通用词可能合法存在于自包含 .NET/ICU 词典中，因此由应用程序集测试和 v2 语料门禁检查，而不对整个运行时包做易误报的单词扫描。随后验证器把 EXE 单独复制到 `outputs/verify/`，以 `--smoke-test` 启动并只跟踪本次 PID；只有应用在时限内完成真实 WPF 资源与启动气泡初始化、正常关闭并自行以退出码 0 结束才算成功。超时后的强制终止仅用于清理且仍判失败，非零退出同样失败。
 
 ## 数据、隐私与限制
 

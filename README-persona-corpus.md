@@ -169,7 +169,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
   -ExePath outputs/CompanionDesktopPet/佳怡桌宠.exe
 ```
 
-验证器要求交付目录只有一个 EXE（可另有 `.txt` 说明），拒绝 DLL/PDB/JSON 等 sidecar，核对交付 EXE 与 publish EXE 的 SHA-256，并扫描最终 EXE 原始字节中的 UTF-8、UTF-16LE 与 UTF-16BE 复核禁用 PII marker。它把 EXE 单独复制到 `outputs/verify/` 后以 `--smoke-test` 启动；应用必须在时限内完成真实 WPF 资源与启动气泡初始化、正常关闭并自行以退出码 0 结束。超时、需要强杀或非零退出均失败，强杀只用于清理残留 PID。
+验证器要求交付目录只有一个 EXE（可另有 `.txt` 说明），拒绝 DLL/PDB/JSON 等 sidecar，核对交付 EXE 与 publish EXE 的 SHA-256，并扫描最终 EXE 原始字节中的 UTF-8、UTF-16LE 与 UTF-16BE 直接身份标记。地区、收入等通用词可能合法存在于自包含 .NET/ICU 词典中，因此由应用程序集测试和 v2 语料门禁检查，避免扫描整个运行时包时误报。验证器把 EXE 单独复制到 `outputs/verify/` 后以 `--smoke-test` 启动；应用必须在时限内完成真实 WPF 资源与启动气泡初始化、正常关闭并自行以退出码 0 结束。超时、需要强杀或非零退出均失败，强杀只用于清理残留 PID。
 
 ## 19. 桌宠交互与隐私
 
