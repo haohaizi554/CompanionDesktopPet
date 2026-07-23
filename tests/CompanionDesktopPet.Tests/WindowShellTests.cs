@@ -25,7 +25,8 @@ public sealed class WindowShellTests
             var window = CreateWindow(settingsDirectory);
 
             Assert.IsType<System.Windows.Controls.Image>(window.FindName("BlinkOverlay"));
-            Assert.IsType<Border>(window.FindName("GreetingBadge"));
+            var greetingBadge = Assert.IsType<Border>(window.FindName("GreetingBadge"));
+            Assert.Equal("嗨♡", Assert.IsType<TextBlock>(greetingBadge.Child).Text);
             Assert.IsType<TranslateTransform>(window.FindName("GreetingBadgeOffset"));
             Assert.IsType<MenuItem>(window.FindName("GreetingMenuItem"));
 
@@ -213,6 +214,46 @@ public sealed class WindowShellTests
     }
 
     [Fact]
+    public async Task MainWindow_CloseDuringDragDoesNotStartLandingOrPostDragWork()
+    {
+        await RunOnStaThreadAsync(async () =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var window = CreateWindowWithScheduler(
+                settingsDirectory,
+                new AmbientActionScheduler(() => 0.5));
+            window.Show();
+            window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+            var ambientTimer = GetPrivateField<DispatcherTimer>(window, "_ambientTimer");
+            var automaticTimer = GetPrivateField<DispatcherTimer>(window, "_automaticTimer");
+            var coordinator = GetPrivateField<PetActionCoordinator>(window, "_actionCoordinator");
+            var replyBeforeClose = GetLastReply(window);
+
+            InvokePrivate(window, "BeginDragAction");
+            Assert.Equal(PetActionState.Dragging, coordinator.State);
+            window.Close();
+            Assert.False(ambientTimer.IsEnabled);
+            Assert.False(automaticTimer.IsEnabled);
+
+            InvokePrivate(window, "BeginLandingAction");
+
+            Assert.Equal(PetActionState.Dragging, coordinator.State);
+            AssertNeutralAmbientVisuals(window);
+
+            await InvokePrivateAsync(window, "CompleteDragAfterMoveAsync");
+            await Task.Delay(100);
+
+            Assert.Same(replyBeforeClose, GetLastReply(window));
+            Assert.False(ambientTimer.IsEnabled);
+            Assert.False(automaticTimer.IsEnabled);
+            AssertNeutralAmbientVisuals(window);
+            Assert.False(File.Exists(Path.Combine(settingsDirectory, "settings.json")));
+            Assert.False(File.Exists(Path.Combine(settingsDirectory, "settings.json.tmp")));
+            DeleteSettingsDirectory(settingsDirectory);
+        });
+    }
+
+    [Fact]
     public async Task MainWindow_SmokeActionProbeCompletesRealActionsAndRestoresNeutralState()
     {
         await RunOnStaThreadAsync(async () =>
@@ -335,6 +376,41 @@ public sealed class WindowShellTests
             parameter => parameter.ParameterType == providerType
                          && parameter.Name == "idleTimeProvider"
                          && parameter.HasDefaultValue);
+    }
+
+    [Fact]
+    public void MainWindow_PreservesLegacyConstructorAndExposesSchedulerInjection()
+    {
+        var publicConstructors = typeof(MainWindow).GetConstructors();
+        Assert.Contains(
+            publicConstructors,
+            constructor => constructor.GetParameters()
+                .Select(parameter => parameter.ParameterType)
+                .SequenceEqual(
+                [
+                    typeof(PetSettings),
+                    typeof(SettingsService),
+                    typeof(AgentMemoryService),
+                    typeof(AgentMemorySnapshot),
+                    typeof(IIdleTimeProvider),
+                    typeof(bool),
+                    typeof(Action)
+                ]));
+        Assert.Contains(
+            publicConstructors,
+            constructor => constructor.GetParameters()
+                .Select(parameter => parameter.ParameterType)
+                .SequenceEqual(
+                [
+                    typeof(PetSettings),
+                    typeof(SettingsService),
+                    typeof(AmbientActionScheduler),
+                    typeof(AgentMemoryService),
+                    typeof(AgentMemorySnapshot),
+                    typeof(IIdleTimeProvider),
+                    typeof(bool),
+                    typeof(Action)
+                ]));
     }
 
     [Fact]
@@ -633,6 +709,18 @@ public sealed class WindowShellTests
             BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(method);
         method!.Invoke(window, arguments);
+    }
+
+    private static Task InvokePrivateAsync(
+        MainWindow window,
+        string methodName,
+        params object?[] arguments)
+    {
+        var method = typeof(MainWindow).GetMethod(
+            methodName,
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        return Assert.IsAssignableFrom<Task>(method!.Invoke(window, arguments));
     }
 
     private static void AssertNeutralAmbientVisuals(MainWindow window)

@@ -115,7 +115,7 @@
         <Border.RenderTransform>
           <TranslateTransform x:Name="GreetingBadgeOffset" Y="8" />
         </Border.RenderTransform>
-        <TextBlock Text="嗨～"
+        <TextBlock Text="嗨♡"
                    Foreground="{StaticResource CocoaBrush}"
                    FontFamily="Microsoft YaHei UI"
                    FontSize="16"

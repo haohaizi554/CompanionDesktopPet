@@ -48,7 +48,27 @@ public partial class MainWindow : Window
         AgentMemoryService? agentMemoryService = null,
         AgentMemorySnapshot? agentMemory = null,
         IIdleTimeProvider? idleTimeProvider = null,
-        AmbientActionScheduler? ambientScheduler = null,
+        bool suppressApplicationShutdownOnClose = false,
+        Action? shutdownApplication = null)
+        : this(
+            settings,
+            settingsService,
+            new AmbientActionScheduler(),
+            agentMemoryService,
+            agentMemory,
+            idleTimeProvider,
+            suppressApplicationShutdownOnClose,
+            shutdownApplication)
+    {
+    }
+
+    public MainWindow(
+        PetSettings settings,
+        SettingsService settingsService,
+        AmbientActionScheduler ambientScheduler,
+        AgentMemoryService? agentMemoryService = null,
+        AgentMemorySnapshot? agentMemory = null,
+        IIdleTimeProvider? idleTimeProvider = null,
         bool suppressApplicationShutdownOnClose = false,
         Action? shutdownApplication = null)
     {
@@ -57,7 +77,8 @@ public partial class MainWindow : Window
         _settingsService = settingsService;
         _agentMemoryService = agentMemoryService;
         _idleTimeProvider = idleTimeProvider ?? new WindowsIdleTimeProvider();
-        _ambientScheduler = ambientScheduler ?? new AmbientActionScheduler();
+        _ambientScheduler = ambientScheduler
+            ?? throw new ArgumentNullException(nameof(ambientScheduler));
         _suppressApplicationShutdownOnClose = suppressApplicationShutdownOnClose;
         _shutdownApplication = shutdownApplication
             ?? (() => System.Windows.Application.Current?.Shutdown());
@@ -389,8 +410,28 @@ public partial class MainWindow : Window
             BeginLandingAction();
         }
 
+        if (_isClosed)
+        {
+            return;
+        }
+
+        await CompleteDragAfterMoveAsync();
+    }
+
+    private async Task CompleteDragAfterMoveAsync()
+    {
+        if (_isClosed)
+        {
+            return;
+        }
+
         ShowEventBubble(CompanionEvent.DragReleased);
         ScheduleNextPhrase();
+        if (_isClosed)
+        {
+            return;
+        }
+
         await SaveSettingsAsync();
     }
 
@@ -429,11 +470,16 @@ public partial class MainWindow : Window
 
     private void BeginLandingAction()
     {
+        if (_isClosed)
+        {
+            return;
+        }
+
         _actionCoordinator.BeginLanding();
         _animation.PlayLanding(() =>
         {
             _actionCoordinator.Complete(PetActionState.Landing);
-            if (_actionCoordinator.State == PetActionState.Idle)
+            if (!_isClosed && _actionCoordinator.State == PetActionState.Idle)
             {
                 ScheduleFreshBlink();
             }
