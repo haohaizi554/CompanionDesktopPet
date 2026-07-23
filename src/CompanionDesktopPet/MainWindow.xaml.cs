@@ -39,7 +39,7 @@ public partial class MainWindow : Window
     private PetAmbientAction _pendingAmbientAction;
     private long _ambientScheduleGeneration;
     private long _armedAmbientGeneration;
-    private DateTime _ambientDueAtUtc = DateTime.MaxValue;
+    private long _ambientDueTimestamp;
     private System.Windows.Point _mouseDown;
     private double _lastDragLeft;
 
@@ -173,7 +173,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        var remaining = _ambientDueAtUtc - DateTime.UtcNow;
+        var remaining = _ambientScheduler.GetRemaining(_ambientDueTimestamp);
         if (_armedAmbientGeneration != _ambientScheduleGeneration
             || remaining > TimeSpan.Zero)
         {
@@ -286,7 +286,7 @@ public partial class MainWindow : Window
 
         _pendingAmbientAction = action;
         _ambientTimer.Interval = delay;
-        _ambientDueAtUtc = DateTime.UtcNow + delay;
+        _ambientDueTimestamp = _ambientScheduler.GetDeadline(delay);
         _armedAmbientGeneration = _ambientScheduleGeneration;
         _ambientTimer.Start();
     }
@@ -304,7 +304,7 @@ public partial class MainWindow : Window
         _ambientTimer.Stop();
         _ambientScheduleGeneration++;
         _armedAmbientGeneration = 0;
-        _ambientDueAtUtc = DateTime.MaxValue;
+        _ambientDueTimestamp = 0;
     }
 
     public async Task<bool> RunSmokeActionProbeAsync()

@@ -62,22 +62,56 @@ public sealed class CharacterAssetTests
             visible[index] = pixels[(index * 4) + 3] >= 8;
         }
 
-        var regions = FindFourConnectedRegions(visible, width, height)
-            .Where(region => region.Area >= 200)
-            .OrderBy(region => region.Left)
-            .ToArray();
+        Assert.True(
+            IsNaturalBlinkMask(visible, width, height),
+            "The overlay must contain exactly two separated, symmetric, eye-shaped regions.");
+    }
 
-        Assert.Equal(2, regions.Length);
-        AssertRegionInside(regions[0], 0.35, 0.48, 0.30, 0.38, width, height);
-        AssertRegionInside(regions[1], 0.50, 0.63, 0.30, 0.38, width, height);
-        Assert.All(regions, region =>
-        {
-            Assert.InRange(region.Area, 2_500, 10_000);
-            Assert.InRange(region.Width, 70, 150);
-            Assert.InRange(region.Height, 30, 75);
-        });
-        Assert.InRange(regions[0].Area / (double)regions[1].Area, 0.8, 1.25);
-        Assert.True(regions[0].Right < regions[1].Left, "The eye regions must not bridge across the nose.");
+    [Fact]
+    public void BlinkMaskTopology_AcceptsTwoSyntheticAlmondEyes()
+    {
+        var mask = CreateSyntheticMask();
+        FillTwoNaturalEyes(mask);
+
+        Assert.True(IsNaturalBlinkMask(mask, 1_024, 1_024));
+    }
+
+    [Fact]
+    public void BlinkMaskTopology_RejectsSingleWink()
+    {
+        var mask = CreateSyntheticMask();
+        FillNaturalEye(mask, 361, 460, 325, 374);
+
+        Assert.False(IsNaturalBlinkMask(mask, 1_024, 1_024));
+    }
+
+    [Fact]
+    public void BlinkMaskTopology_RejectsNoseBridge()
+    {
+        var mask = CreateSyntheticMask();
+        FillTwoNaturalEyes(mask);
+        FillRectangle(mask, 1_024, 461, 519, 349, 349);
+
+        Assert.False(IsNaturalBlinkMask(mask, 1_024, 1_024));
+    }
+
+    [Fact]
+    public void BlinkMaskTopology_RejectsTwoSolidRectangles()
+    {
+        var mask = CreateSyntheticMask();
+        FillTwoEyeRectangles(mask);
+
+        Assert.False(IsNaturalBlinkMask(mask, 1_024, 1_024));
+    }
+
+    [Fact]
+    public void BlinkMaskTopology_RejectsThirdSmallFragment()
+    {
+        var mask = CreateSyntheticMask();
+        FillTwoNaturalEyes(mask);
+        mask[(400 * 1_024) + 700] = true;
+
+        Assert.False(IsNaturalBlinkMask(mask, 1_024, 1_024));
     }
 
     [Fact]
@@ -173,7 +207,62 @@ public sealed class CharacterAssetTests
         return regions;
     }
 
-    private static void AssertRegionInside(
+    private static bool IsNaturalBlinkMask(bool[] visible, int width, int height)
+    {
+        var regions = FindFourConnectedRegions(visible, width, height)
+            .OrderBy(region => region.Left)
+            .ToArray();
+        if (regions.Length != 2)
+        {
+            return false;
+        }
+
+        return IsRegionInside(regions[0], 0.35, 0.48, 0.30, 0.38, width, height)
+            && IsRegionInside(regions[1], 0.50, 0.63, 0.30, 0.38, width, height)
+            && regions.All(region => region.Area is >= 2_500 and <= 10_000)
+            && regions.All(region => region.Width is >= 70 and <= 150)
+            && regions.All(region => region.Height is >= 30 and <= 75)
+            && regions[0].Area / (double)regions[1].Area is >= 0.8 and <= 1.25
+            && regions[0].Right < regions[1].Left
+            && regions.All(region => HasEyeShape(visible, width, region));
+    }
+
+    private static bool HasEyeShape(bool[] visible, int width, PixelRegion region)
+    {
+        var boundingArea = region.Width * region.Height;
+        var fillRatio = region.Area / (double)boundingArea;
+        var cornersAreTransparent = !IsVisible(region.Left, region.Top)
+            && !IsVisible(region.Right, region.Top)
+            && !IsVisible(region.Left, region.Bottom)
+            && !IsVisible(region.Right, region.Bottom);
+        var topCoverage = CountRow(region.Top) / (double)region.Width;
+        var bottomCoverage = CountRow(region.Bottom) / (double)region.Width;
+        var widestRowCoverage = Enumerable.Range(region.Top, region.Height)
+            .Max(y => CountRow(y)) / (double)region.Width;
+        var leftCoverage = CountColumn(region.Left) / (double)region.Height;
+        var rightCoverage = CountColumn(region.Right) / (double)region.Height;
+        var tallestColumnCoverage = Enumerable.Range(region.Left, region.Width)
+            .Max(x => CountColumn(x)) / (double)region.Height;
+
+        return fillRatio is >= 0.45 and <= 0.90
+            && cornersAreTransparent
+            && topCoverage <= 0.50
+            && bottomCoverage <= 0.50
+            && widestRowCoverage >= 0.75
+            && leftCoverage <= 0.35
+            && rightCoverage <= 0.35
+            && tallestColumnCoverage >= 0.75;
+
+        bool IsVisible(int x, int y) => visible[(y * width) + x];
+
+        int CountRow(int y) => Enumerable.Range(region.Left, region.Width)
+            .Count(x => IsVisible(x, y));
+
+        int CountColumn(int x) => Enumerable.Range(region.Top, region.Height)
+            .Count(y => IsVisible(x, y));
+    }
+
+    private static bool IsRegionInside(
         PixelRegion region,
         double left,
         double right,
@@ -182,10 +271,66 @@ public sealed class CharacterAssetTests
         int width,
         int height)
     {
-        Assert.InRange(region.Left / (double)width, left, right);
-        Assert.InRange(region.Right / (double)width, left, right);
-        Assert.InRange(region.Top / (double)height, top, bottom);
-        Assert.InRange(region.Bottom / (double)height, top, bottom);
+        return region.Left / (double)width >= left
+            && region.Right / (double)width <= right
+            && region.Top / (double)height >= top
+            && region.Bottom / (double)height <= bottom;
+    }
+
+    private static bool[] CreateSyntheticMask() => new bool[1_024 * 1_024];
+
+    private static void FillTwoEyeRectangles(bool[] mask)
+    {
+        FillRectangle(mask, 1_024, 361, 460, 325, 374);
+        FillRectangle(mask, 1_024, 520, 619, 325, 374);
+    }
+
+    private static void FillTwoNaturalEyes(bool[] mask)
+    {
+        FillNaturalEye(mask, 361, 460, 325, 374);
+        FillNaturalEye(mask, 520, 619, 325, 374);
+    }
+
+    private static void FillNaturalEye(
+        bool[] mask,
+        int left,
+        int right,
+        int top,
+        int bottom)
+    {
+        var centerX = (left + right) / 2.0;
+        var centerY = (top + bottom) / 2.0;
+        var radiusX = (right - left + 1) / 2.0;
+        var radiusY = (bottom - top + 1) / 2.0;
+        for (var y = top; y <= bottom; y++)
+        {
+            for (var x = left; x <= right; x++)
+            {
+                var normalizedX = (x - centerX) / radiusX;
+                var normalizedY = (y - centerY) / radiusY;
+                if ((normalizedX * normalizedX) + (normalizedY * normalizedY) <= 1)
+                {
+                    mask[(y * 1_024) + x] = true;
+                }
+            }
+        }
+    }
+
+    private static void FillRectangle(
+        bool[] mask,
+        int width,
+        int left,
+        int right,
+        int top,
+        int bottom)
+    {
+        for (var y = top; y <= bottom; y++)
+        {
+            for (var x = left; x <= right; x++)
+            {
+                mask[(y * width) + x] = true;
+            }
+        }
     }
 
     private sealed record PixelRegion(int Area, int Left, int Right, int Top, int Bottom)

@@ -174,14 +174,15 @@ public sealed class WindowShellTests
         var settingsDirectory = CreateSettingsDirectory();
         RunOnStaThread(() =>
         {
+            var monotonicTime = new ManualTimeProvider();
             var window = CreateWindowWithScheduler(
                 settingsDirectory,
-                new AmbientActionScheduler(() => 0.5));
+                CreateSchedulerWithTimeProvider(() => 0.5, monotonicTime));
             window.Show();
             window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
             var timer = GetPrivateField<DispatcherTimer>(window, "_ambientTimer");
 
-            SetPrivateField(window, "_ambientDueAtUtc", DateTime.UtcNow - TimeSpan.FromMilliseconds(1));
+            monotonicTime.Advance(TimeSpan.FromMilliseconds(650));
             InvokePrivate(window, "AmbientTimer_Tick", null, EventArgs.Empty);
             Assert.Equal("Running", GetPrivateFieldValue(window, "_startupGreetingState").ToString());
 
@@ -201,6 +202,39 @@ public sealed class WindowShellTests
             () => !File.Exists(Path.Combine(settingsDirectory, "settings.json.tmp")),
             TimeSpan.FromSeconds(5)));
         DeleteSettingsDirectory(settingsDirectory);
+    }
+
+    [Fact]
+    public void MainWindow_AmbientDeadlineUsesMonotonicTimeNotWallClock()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var monotonicTime = new ManualTimeProvider();
+            var window = CreateWindowWithScheduler(
+                settingsDirectory,
+                CreateSchedulerWithTimeProvider(() => 0.5, monotonicTime));
+            window.Show();
+            window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+            var timer = GetPrivateField<DispatcherTimer>(window, "_ambientTimer");
+            var coordinator = GetPrivateField<PetActionCoordinator>(window, "_actionCoordinator");
+
+            monotonicTime.SetUtcNow(new DateTimeOffset(2099, 1, 1, 0, 0, 0, TimeSpan.Zero));
+            InvokePrivate(window, "AmbientTimer_Tick", null, EventArgs.Empty);
+
+            Assert.Equal(PetActionState.Idle, coordinator.State);
+            Assert.Equal("Scheduled", GetPrivateFieldValue(window, "_startupGreetingState").ToString());
+            Assert.True(timer.IsEnabled);
+
+            monotonicTime.SetUtcNow(new DateTimeOffset(1970, 1, 1, 0, 0, 0, TimeSpan.Zero));
+            monotonicTime.Advance(TimeSpan.FromMilliseconds(650));
+            InvokePrivate(window, "AmbientTimer_Tick", null, EventArgs.Empty);
+
+            Assert.Equal(PetActionState.Greeting, coordinator.State);
+            Assert.Equal("Running", GetPrivateFieldValue(window, "_startupGreetingState").ToString());
+            window.Close();
+            DeleteSettingsDirectory(settingsDirectory);
+        });
     }
 
     [Fact]
@@ -895,13 +929,13 @@ public sealed class WindowShellTests
         return value;
     }
 
-    private static void SetPrivateField(MainWindow window, string fieldName, object value)
+    private static AmbientActionScheduler CreateSchedulerWithTimeProvider(
+        Func<double> sample,
+        TimeProvider timeProvider)
     {
-        var field = typeof(MainWindow).GetField(
-            fieldName,
-            BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.NotNull(field);
-        field!.SetValue(window, value);
+        return Assert.IsType<AmbientActionScheduler>(Activator.CreateInstance(
+            typeof(AmbientActionScheduler),
+            [sample, timeProvider]));
     }
 
     private static T GetPrivateField<T>(MainWindow window, string fieldName)
@@ -1034,6 +1068,22 @@ public sealed class WindowShellTests
             ArgumentNullException.ThrowIfNull(action);
             return _dispatcher.InvokeAsync(action).Task.Unwrap();
         }
+    }
+
+    private sealed class ManualTimeProvider : TimeProvider
+    {
+        private long _timestamp;
+        private DateTimeOffset _utcNow = new(2026, 7, 24, 0, 0, 0, TimeSpan.Zero);
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override long GetTimestamp() => _timestamp;
+
+        public override DateTimeOffset GetUtcNow() => _utcNow;
+
+        public void Advance(TimeSpan elapsed) => _timestamp += elapsed.Ticks;
+
+        public void SetUtcNow(DateTimeOffset value) => _utcNow = value;
     }
 
     private static AgentReply GetLastReply(MainWindow window)
