@@ -1,345 +1,76 @@
-# Task 3 Report: Curated v2 corpus, archive, review and PII outputs
+# Task 3 — Persona corpus lineage and editorial hardening
 
-## Status
+Date: 2026-07-23
+Status: implementation complete; final verification evidence recorded below
 
-Implemented, generated with seed `20260722`, independently audited, and ready for the explicit-path Task 3 commit.
+## Scope and source integrity
 
-## Implementation
+- The immutable source is `data/source/persona-corpus.original.tsv`.
+- Its SHA-256 is `3fd7356845df838c652f7a7668013f2b15b0e91ddfa5d784b2b71a514a2c7534` and its size is 7,961,787 bytes.
+- The staged legacy asset has the same byte count and SHA-256. It was not edited by this task.
+- Stable v2 line IDs remain derived solely from immutable `variant_id`; copy edits, runtime topics, and editorial roles cannot change them.
 
-- Added the exact 20-column v2 schema and typed archive/review/PII review records.
-- Added a materialized catalog of exactly 800 complete, playback-ready Chinese sentences. The catalog contains explicit `CatalogEntry(...)` calls rather than opener/core/closer arrays, Cartesian products, runtime assembly, or mechanical synonym expansion.
-- Added deterministic `build_v2(source, mappings, seed, pii_policy="review") -> BuildResult` migration with stable snake-case IDs, exact source references, full source dispositions, strict source/mapping consistency checks, and UTF-8/LF TSV serialization.
-- Added public-contract normalization at the build boundary:
-  - `Career -> career`
-  - `Study` and `EnglishPractice -> growth`
-  - deterministic `SystemAmbient -> system_observe`
-  - editorial source types map to `rewritten_topic`, `curated_standalone`, `preserved_easter_egg`, or `new_ambient`.
-- Archived every legacy row, including every `ProactiveChat` row as `requires_user_reply`, while routing PII, false-context, and uncertain-intimacy rows to explicit review outputs.
-- Added a standard-library CLI that emits all four deterministic outputs and reports counts plus the v2 SHA-256.
-- Tuned 63 individually reviewed complete sentences without changing catalog size: 25 now contain 11-15 characters and 38 contain 18-24 characters. This moved all hard length buckets into range without introducing questions, PII, false user context, duplicated text, or repeated template edges.
+## Editorial adjudication
 
-## Files
+Exactly 63 former `.practice` paraphrases were individually rewritten as distinct complete sentences with a declared editorial angle:
 
-- `src/persona_corpus/schema.py`
-- `src/persona_corpus/content_catalog.py`
-- `src/persona_corpus/builder.py`
-- `tools/build_corpus_v2.py`
-- `tests/test_build.py`
-- `data/optimized/persona-corpus-v2.tsv`
-- `data/optimized/persona-corpus-archive.tsv`
-- `data/optimized/persona-corpus-review.tsv`
-- `reports/pii-review.tsv`
-- `.superpowers/sdd/task-3-report.md`
+| Category | Rewritten variants |
+| --- | ---: |
+| Algorithms | 13 |
+| Architecture | 10 |
+| Backend | 9 |
+| Career | 9 |
+| Cpp | 12 |
+| Database | 10 |
+| Total | 63 |
 
-The pre-staged authoritative source `src/CompanionDesktopPet/Assets/persona-corpus.tsv` and unrelated C#/WPF, documentation, output, and packaging changes are intentionally excluded from this Task 3 commit.
+Every adjudicated entry carries a literal `editorial_role` and a `human-editorial-angle:` rationale. Against its paired `.observation`, the maximum normalized `SequenceMatcher` ratio is 0.4000; zero entries exceed the 0.55 regression ceiling. All 63 IDs and rewritten texts are unique.
 
-## TDD evidence
+## Runtime topic and role contract
 
-### Original RED
+`CatalogEntry` now separates three identities:
 
-Command:
+- `variant_id`: immutable stable-ID input.
+- `runtime_topic_id`: literal runtime grouping key.
+- `editorial_role`: immutable angle or purpose within the runtime topic.
 
-```text
-python -B -m unittest tests.test_build -v
-```
+Legacy variants retain the exact source-mapping topic as `runtime_topic_id`, and every multi-variant legacy topic has distinct roles. Authored topic families were split semantically rather than by serial number alone: CharacterLife into 3-entry topics, daily care and emotional reflection into 2–3-entry topics, and SystemAmbient into 5-entry topics.
 
-Before implementation, import failed as expected because `src.persona_corpus.builder` did not exist (`ImportError`/`ModuleNotFoundError`). The original complete terminal traceback was not persisted, so no exception line or test count is reconstructed here.
+Observed real-corpus cardinalities:
 
-### Initial GREEN
+| Category group | Topic-size distribution | Minimum | Maximum |
+| --- | --- | ---: | ---: |
+| technical | 175 topics × 2 | 2 | 2 |
+| growth | 28 topics × 2 | 2 | 2 |
+| career | 14 topics × 2 | 2 | 2 |
+| character_life | 8 topics × 3; 15 topics × 5 | 3 | 5 |
+| daily_care | 6 topics × 2; 18 topics × 3 | 2 | 3 |
+| emotional_reflection | 2 topics × 2; 9 topics × 3 | 2 | 3 |
+| easter_egg | 30 topics × 1 | 1 | 1 |
+| system_ambient | 28 topics × 5 | 5 | 5 |
 
-Before the final contract audit, the focused suite completed:
+## Current generated outputs
 
-```text
-Ran 16 tests in 74.049s
-OK
-```
+| File | Data rows | SHA-256 |
+| --- | ---: | --- |
+| `persona-corpus-v2.tsv` | 800 | `f4f6c1594bb79be9a983093ad9995ee6f0e6132b08f8c7098c55965882052d97` |
+| `persona-corpus-archive.tsv` | 75,375 | `8b0de182e39d8a367518390fdd1fc67afb84b2ab97169f43eff9654f5d39dbb6` |
+| `persona-corpus-review.tsv` | 3,265 | `a251b1e01003a078d7912f71099e57c5c6830a75195558ea61428105990b866a` |
+| `pii-review.tsv` | 1,248 | `702037759f730759be83fb1c643a8f61382fa1c3f8f2a25e2c0351a177eec6e7` |
 
-### Public taxonomy regression RED/GREEN
+The v2 output contains 800 unique stable IDs and 800 unique normalized texts. Its length buckets are 200 short (8–16 characters), 360 medium (17–24), and 240 long (25–36), with no line over 36 characters; mean length is 21.015.
 
-An audit against the user's exact field contract found that editorial `source_kind` values leaked into the runtime output and that `Career`, `Study`, and `EnglishPractice` were incorrectly counted as technical. A regression test was added first:
+## Verification evidence
 
-```text
-python -B -m unittest tests.test_build.BuildContractTests.test_public_taxonomy_matches_the_v2_contract -v
-AssertionError: False is not true
-Ran 1 test in 0.063s
-FAILED (failures=1)
-```
+- Focused RED before implementation: 7 selected regressions ran and all failed (`failures=4, errors=3`, 4.270 s), covering absent runtime fields and roles, missing 63-entry adjudication manifest, stale topic cardinalities, absent exact spec headers, and stale report truth.
+- Formal fixed-seed build: `enabled=800`, `archive=75375`, `review=3265`, `pii_review=1248`.
+- Immutable-source audit: `audit_corpus.py` completed over 75,375 lines and reported SHA-256 `3fd7356845df838c652f7a7668013f2b15b0e91ddfa5d784b2b71a514a2c7534`.
+- Two independent temporary-directory rebuilds returned 0. Each produced the same four hashes shown above, and both matched the formal outputs byte-for-byte.
+- Focused GREEN: 7/7 selected regressions passed (`Ran 7 tests in 2.420s`, `OK`) with no warnings.
+- Full Python suite: 53/53 tests passed (`Ran 53 tests in 7.883s`, `OK`).
+- Python bytecode compilation: all persona modules, corpus tools, and `tests/test_build.py` compiled successfully with `py_compile`.
+- Final scoped diff: `git diff --check` passed for every Task 3 path; unrelated staged and working-tree changes were excluded from this task.
 
-After adding only build-boundary mappings, the same test passed:
+## Design-schema authority
 
-```text
-Ran 1 test in 0.221s
-OK
-```
-
-### Final focused GREEN
-
-After the 63 sentence-level length refinements:
-
-```text
-python -B -m unittest tests.test_build -v
-Ran 18 tests in 134.220s
-OK
-```
-
-The focused suite covers explicit materialization/no Cartesian product, exact schema, standalone no-reply safety, valid metadata, public taxonomy, deterministic IDs/serialization, complete dispositions, exact rewrite traceability, ProactiveChat archival, PII/context review routing, output headers, real-corpus uniqueness, length/voice limits, opening-template dominance, and independent CLI reproducibility.
-
-## Generated outputs
-
-All files are UTF-8, contain LF-only physical rows, end in LF, have the exact declared header, and every physical data row has the exact expected column count.
-
-| Output | Rows | Physical lines | Bytes | SHA-256 |
-|---|---:|---:|---:|---|
-| `persona-corpus-v2.tsv` | 800 | 801 | 304,374 | `1183bd03c08e2b5a634b4aecf31509b5755230b18393725739f72701d4f2ecf7` |
-| `persona-corpus-archive.tsv` | 75,375 | 75,376 | 16,773,321 | `9b2bd234feaaec34175d2fd5d5044af91cac19a8f691cfe6639025e5707ec753` |
-| `persona-corpus-review.tsv` | 3,212 | 3,213 | 1,122,025 | `cc588ec5d4e563c13b841ed2dcc4f6471435a64eb2ebfdca88ea8c82d82dc6e5` |
-| `pii-review.tsv` | 1,248 | 1,249 | 421,300 | `2d2c9940a5e6e10c1221523efef055bc239fa51f2a987b3a2f4f6abecd86fc41` |
-
-Archive reasons:
-
-- `cartesian_duplicate`: 58,690
-- `requires_user_reply`: 8,580
-- `overly_commanding`: 4,160
-- `fake_context`: 1,574
-- `privacy_risk`: 1,248
-- `low_information`: 551
-- `manual_review`: 338
-- `unsafe_emotional_claim`: 234
-
-Review risks:
-
-- `future_context_signal`: 1,574
-- `privacy_risk`: 1,248
-- `uncertain_intimacy`: 390
-
-PII review types:
-
-- `location_or_history`: 793
-- `income_or_employment`: 394
-- `person_name`: 61
-
-## Traceability and source protection
-
-- Source rows: 75,375.
-- Source mappings: 75,375.
-- Non-empty migration dispositions: 75,375 unique source lines.
-- Archive coverage: 75,375 rows and 75,375 unique source lines, exactly equal to the source line set.
-- Legacy `ProactiveChat`: 2,925 source rows; all 2,925 are archived with `requires_user_reply`; zero are directly enabled.
-- Formal outputs are byte-identical to serialization of an in-memory build from the authoritative source and mapping files.
-
-Immutable source verification:
-
-```text
-SOURCE_SHA256=3fd7356845df838c652f7a7668013f2b15b0e91ddfa5d784b2b71a514a2c7534
-COPY_SHA256=3fd7356845df838c652f7a7668013f2b15b0e91ddfa5d784b2b71a514a2c7534
-HASH_EQUAL=True
-SOURCE_BYTES=7961787
-COPY_BYTES=7961787
-```
-
-## Enabled-corpus quality audit
-
-- Enabled rows: 800, all with stable unique snake-case IDs.
-- Exact duplicate texts: 0.
-- NFKC/punctuation/whitespace-normalized duplicate texts: 0.
-- Question marks: 0.
-- `requires_reply=true`: 0.
-- Missing semantic groups/source references: 0.
-- Invalid cooldowns or interrupt costs: 0.
-- Enabled PII-risk markers: 0.
-- Enabled false-context markers: 0.
-- Enabled uncertain-intimacy markers: 0.
-- Catchphrase-bearing rows: 0 (0%, below the 10% ceiling).
-- Minimum/mean/median/maximum length: 11 / 21.92625 / 22 / 36.
-
-Exact length distribution:
-
-| Length | Count | Share | Required |
-|---|---:|---:|---:|
-| 8-16 | 200 | 25% | 25-35% |
-| 17-24 | 360 | 45% | 35-45% |
-| 25-36 | 240 | 30% | 20-30% |
-| >36 | 0 | 0% | <=8% |
-
-Maximum fixed opening shares:
-
-- 2 characters: `今天`, 16/800 = 2.000%.
-- 3-6 characters: 5/800 = 0.625% at each width.
-
-Maximum fixed ending shares:
-
-- 4 characters: 5/800 = 0.625%.
-- 6 characters: 4/800 = 0.500%.
-- 8 characters: 4/800 = 0.500%.
-- 10 characters: 3/800 = 0.375%.
-
-Public category-group inventory:
-
-- `technical`: 350
-- `system_ambient`: 140
-- `character_life`: 99
-- `daily_care`: 66
-- `growth`: 56
-- `emotional_reflection`: 31
-- `easter_egg`: 30
-- `career`: 28
-
-Output-mode inventory:
-
-- `self_talk`: 594
-- `system_observe`: 140
-- `ambient`: 66
-
-Source-kind inventory:
-
-- `rewritten_topic`: 566
-- `new_ambient`: 140
-- `curated_standalone`: 64
-- `preserved_easter_egg`: 30
-
-## Reproducibility
-
-Two fresh builds were run into independent temporary roots using seed `20260722`. For every one of the four files, Build A SHA-256 equalled Build B SHA-256 and the checked-in formal output SHA-256. The temporary roots were path-checked under `C:\tmp\task3-rebuild-*` and then removed.
-
-## Final verification
-
-Full Python suite:
-
-```text
-python -B -m unittest discover -v
-Ran 35 tests in 92.208s
-OK
-```
-
-Task 3 syntax compile:
-
-```text
-python -B -m py_compile src/persona_corpus/schema.py src/persona_corpus/content_catalog.py src/persona_corpus/builder.py tools/build_corpus_v2.py tests/test_build.py
-Exit code: 0
-```
-
-All generated `src/persona_corpus/__pycache__`, `tests/__pycache__`, and `tools/__pycache__` directories were removed and the remaining count was verified as zero.
-
-## Self-review
-
-- Verified the four exact headers and physical row widths independently of the loader.
-- Verified that every formal output byte matches a fresh in-memory build.
-- Verified all 75,375 source rows have non-empty dispositions and exact archive coverage.
-- Verified all enabled safety, uniqueness, length, edge-frequency, metadata, and public-enum constraints.
-- Verified no runtime or build-time network/model dependency and no non-standard Python package is introduced.
-- Verified source/copy bytes after generation and all tests.
-- Scoped the intended commit to Task 3 files only; unrelated pre-staged and dirty files remain untouched.
-
-## Concerns
-
-- The enabled inventory intentionally contains all curated technical topics, so technical rows are 350/800 in the library. The user's 10-20% technical requirement applies to simulated playback and remains a selector/simulator acceptance gate in later tasks, not a reason to delete traceable technical coverage here.
-- `pii-review.tsv` contains conservative heuristic candidates. They remain disabled and require human review; the counts do not establish that the text contains real personal data.
-- Verification used the installed Python 3.13 runtime. The implementation uses the Python standard library and syntax compatible with Python 3.11.
-- The full 800-entry materialized catalog is deliberately large because storing complete sentences is an explicit product and audit requirement.
-
-No remaining correctness issue was found in the Task 3 scope.
-
-## Review remediation (2026-07-23)
-
-The post-implementation review identified semantic-lineage, recovery, multi-risk,
-content-authorship, context-safety, stable-ID, and output-containment defects. A
-test-first repair wave was completed without modifying the 75,375-row legacy source.
-
-### RED evidence
-
-The expanded focused suite was run before implementation:
-
-```text
-python -B -m unittest tests.test_build -v
-Ran 29 tests in 49.232s
-FAILED (failures=6, errors=3)
-```
-
-The failures reproduced all review findings: missing immutable variant identity,
-text-derived IDs, category-wide recovery, inferred report output, 252 padded lines,
-27 unavailable-state claims, collapsed multi-risk review, arbitrary lineage, and
-technical source topics with more than two variants.
-
-A final read-only review then exposed three edge cases. Regression tests were added and
-observed failing before their fixes:
-
-```text
-python -B -m unittest tests.test_build -v
-Ran 32 tests in 12.654s
-FAILED (failures=4)
-```
-
-These failures covered taxonomy-dependent IDs, colliding/escaping output paths, and a
-real-corpus test dependency on a pre-staged rather than tracked source copy.
-
-### Implemented repairs
-
-- Added an explicit immutable `CatalogEntry.variant_id` and explicit
-  `CatalogEntry.source_reference`; `catalog_line_id()` now derives solely from the
-  immutable variant ID and ignores editable text or taxonomy metadata.
-- Bound all 596 rewritten/preserved entries to distinct source lines with matching
-  category and extracted topic. The other 204 entries use explicit catalog lineage.
-- Preserved each entry's declared `required_context` in runtime rows.
-- Limited every technical source topic to at most two enabled variants.
-- Made archive recovery exact by source line. Unmapped rows now have an empty rewrite
-  and `can_recover=false`; exactly 596 mapped source rows can recover.
-- Emits one review row per independent risk, with the risk type in the stable review
-  identity. Source line 75,122 now retains both `privacy_risk` and
-  `future_context_signal`.
-- Requires an explicit, contained `report_output` for flat/noncanonical outputs.
-  Automatic report placement is allowed only for the canonical `data/optimized` layout,
-  and all four normalized destination paths must be distinct before any write.
-- Replaced all 252 semicolon-padded variants with independently authored standalone
-  sentences. Rewrote the nine unsupported observation variants instead of inventing
-  runtime context gates. Two technical wordings were adjusted to avoid the unrelated
-  privacy-marker collision on the word `地址`.
-- Added literal authoritative archive/review header assertions and real-corpus
-  regression coverage for every item above. Real-corpus tests now require the tracked
-  canonical `data/source/persona-corpus.original.tsv` fixture and no longer silently skip.
-
-### Regenerated output audit
-
-| Check | Result |
-|---|---:|
-| Enabled rows | 800 |
-| Archive rows | 75,375 |
-| Review rows | 3,265 |
-| PII review rows | 1,248 |
-| Unique IDs / unique texts | 800 / 800 |
-| Legacy / catalog lineage | 596 / 204 |
-| Exact recoverable rows / bad recoveries | 596 / 0 |
-| Maximum technical variants per source topic | 2 |
-| Padded duplicate-sentence tails | 0 |
-| Unsupported current-state assertions | 0 |
-| Mean text length | 20.88125 |
-| 8-16 / 17-24 / 25-36 / over 36 | 25% / 45% / 30% / 0% |
-
-Formal output hashes after regeneration:
-
-```text
-persona-corpus-v2.tsv      1f9736697f2f2cdda993949dbb308a5cf6418fca3c1c3a9f725b5232de920597
-persona-corpus-archive.tsv 30730e9a2456360f970b135da70f462fb14fecb5bd5179a75024b9f0afa6fa1f
-persona-corpus-review.tsv  a251b1e01003a078d7912f71099e57c5c6830a75195558ea61428105990b866a
-pii-review.tsv             702037759f730759be83fb1c643a8f61382fa1c3f8f2a25e2c0351a177eec6e7
-```
-
-The immutable legacy source remained 7,961,787 bytes with SHA-256
-`3fd7356845df838c652f7a7668013f2b15b0e91ddfa5d784b2b71a514a2c7534`.
-
-### Fresh verification
-
-Focused review suite:
-
-```text
-python -B -m unittest tests.test_build -v
-Ran 32 tests in 13.523s
-OK
-```
-
-Full Python suite:
-
-```text
-python -B -m unittest discover -s tests -p "test_*.py" -v
-Ran 49 tests in 14.228s
-OK
-```
+The design specification now states the exact Archive and Review column orders. Runtime output remains TSV, while the comma-separated strings in the specification are the reviewable schema authority required by the contract tests.

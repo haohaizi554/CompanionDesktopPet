@@ -51,6 +51,11 @@
 - `persona-corpus-archive.tsv`：每条未启用原文和原因。
 - `persona-corpus-review.tsv`：需要人工判断的风险内容。
 
+固定审计表头（逗号仅用于在本文中清楚表达列顺序，实际文件使用 TSV）：
+
+- Archive: `source_line,category,original_text,archive_reason,topic_id,suggested_rewrite,can_recover`
+- Review: `review_id,source_line,category,original_text,risk_type,risk_description,suggested_action,suggested_rewrite,default_enabled`
+
 每条 v2 文案是完整独立文本，不在构建时或运行时拼接 prefix/core/suffix。ID 由稳定的主题/变体标识生成；每条记录包含语义组、输出模式、触发、上下文、冷却、权重、来源和改写原因。
 
 ## 内容策略

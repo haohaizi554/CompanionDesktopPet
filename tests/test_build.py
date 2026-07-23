@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from collections import Counter
+from difflib import SequenceMatcher
 from dataclasses import fields, replace
 from pathlib import Path
 
@@ -33,6 +34,8 @@ from src.persona_corpus.schema import (
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_PATH = REPOSITORY_ROOT / "data/source/persona-corpus.original.tsv"
 MAPPING_PATH = REPOSITORY_ROOT / "data/intermediate/source-line-map.tsv"
+SPEC_PATH = REPOSITORY_ROOT / "docs/superpowers/specs/2026-07-22-persona-corpus-v2-design.md"
+REPORT_PATH = REPOSITORY_ROOT / ".superpowers/sdd/task-3-report.md"
 
 
 def mapping(line: LegacyLine, topic_id: str | None = None) -> SourceMapping:
@@ -62,6 +65,8 @@ def fixture_result(seed: int = 20260722) -> BuildResult:
             category="Debugging",
             category_group="technical",
             variant_id="fixture.debugging.stack.01",
+            runtime_topic_id="topic-1",
+            editorial_role="core_observation",
             semantic_group="fixture.debugging.stack",
             output_mode="self_talk",
             trigger="idle",
@@ -81,6 +86,8 @@ def fixture_result(seed: int = 20260722) -> BuildResult:
             category="EasterEgg",
             category_group="easter_egg",
             variant_id="fixture.easter.safe.01",
+            runtime_topic_id="topic-4",
+            editorial_role="easter_egg_scene",
             semantic_group="fixture.easter.safe",
             output_mode="ambient",
             trigger="app_start",
@@ -100,6 +107,8 @@ def fixture_result(seed: int = 20260722) -> BuildResult:
             category="DailyCare",
             category_group="daily_care",
             variant_id="fixture.daily.water.01",
+            runtime_topic_id="topic-5",
+            editorial_role="care_rationale",
             semantic_group="fixture.daily.water",
             output_mode="ambient",
             trigger="long_active",
@@ -205,11 +214,102 @@ class BuildContractTests(unittest.TestCase):
 
         catalog_fields = set(CatalogEntry.__dataclass_fields__)
         self.assertIn("variant_id", catalog_fields)
+        self.assertIn("runtime_topic_id", catalog_fields)
+        self.assertIn("editorial_role", catalog_fields)
         self.assertIn("source_reference", catalog_fields)
         self.assertNotIn("source_reference_hint", catalog_fields)
         variants = [entry.variant_id for entry in CONTENT_CATALOG]
         self.assertEqual(len(variants), len(set(variants)))
         self.assertTrue(all(entry.source_reference for entry in CONTENT_CATALOG))
+        self.assertTrue(all(entry.runtime_topic_id for entry in CONTENT_CATALOG))
+        self.assertTrue(all(entry.editorial_role for entry in CONTENT_CATALOG))
+        authored = [
+            entry for entry in CONTENT_CATALOG
+            if entry.source_reference.startswith("catalog:")
+        ]
+        self.assertTrue(authored)
+        self.assertTrue(
+            all(entry.runtime_topic_id != entry.variant_id for entry in authored)
+        )
+
+    def test_legacy_topics_declare_distinct_immutable_editorial_roles(self) -> None:
+        from src.persona_corpus.content_catalog import CONTENT_CATALOG
+
+        grouped: dict[tuple[str, str], list[object]] = {}
+        for entry in CONTENT_CATALOG:
+            legacy = re.fullmatch(r"legacy:(\d+);topic:([^;]+)", entry.source_reference)
+            if legacy is None:
+                continue
+            source_topic = legacy.group(2)
+            self.assertEqual(source_topic, entry.runtime_topic_id)
+            self.assertRegex(entry.editorial_role, r"^[a-z][a-z0-9_]*$")
+            grouped.setdefault((entry.category, source_topic), []).append(entry)
+
+        self.assertTrue(grouped)
+        for topic, entries in grouped.items():
+            if len(entries) < 2:
+                continue
+            roles = [entry.editorial_role for entry in entries]
+            self.assertEqual(
+                len(roles),
+                len(set(roles)),
+                f"legacy topic {topic!r} reuses an editorial role: {roles!r}",
+            )
+
+    def test_sixty_three_practice_variants_have_human_editorial_angles(self) -> None:
+        from src.persona_corpus.content_catalog import (
+            CONTENT_CATALOG,
+            EDITORIALLY_ADJUDICATED_VARIANTS,
+        )
+        from src.persona_corpus.normalization import normalize_text
+
+        expected_counts = {
+            "Algorithms": 13,
+            "Architecture": 10,
+            "Backend": 9,
+            "Career": 9,
+            "Cpp": 12,
+            "Database": 10,
+        }
+        entries = {entry.variant_id: entry for entry in CONTENT_CATALOG}
+        adjudicated = tuple(EDITORIALLY_ADJUDICATED_VARIANTS)
+        self.assertEqual(63, len(adjudicated))
+        self.assertEqual(63, len(set(adjudicated)))
+        self.assertEqual(
+            expected_counts,
+            dict(Counter(entries[variant_id].category for variant_id in adjudicated)),
+        )
+        for variant_id in adjudicated:
+            self.assertTrue(variant_id.endswith(".practice"), variant_id)
+            entry = entries[variant_id]
+            observation = entries[variant_id.removesuffix(".practice") + ".observation"]
+            self.assertNotIn(
+                entry.editorial_role,
+                {"core_observation", "implementation_practice"},
+            )
+            self.assertTrue(
+                entry.rewrite_reason.startswith("human-editorial-angle:"),
+                entry.rewrite_reason,
+            )
+            similarity = SequenceMatcher(
+                None,
+                normalize_text(observation.text),
+                normalize_text(entry.text),
+            ).ratio()
+            self.assertLessEqual(similarity, 0.55, (variant_id, similarity))
+
+    def test_design_spec_lists_exact_archive_and_review_headers(self) -> None:
+        spec = SPEC_PATH.read_text(encoding="utf-8")
+        archive = (
+            "source_line,category,original_text,archive_reason,topic_id,"
+            "suggested_rewrite,can_recover"
+        )
+        review = (
+            "review_id,source_line,category,original_text,risk_type,"
+            "risk_description,suggested_action,suggested_rewrite,default_enabled"
+        )
+        self.assertEqual(1, spec.count(archive))
+        self.assertEqual(1, spec.count(review))
 
     def test_copy_edit_does_not_change_stable_catalog_id(self) -> None:
         from src.persona_corpus.builder import catalog_line_id
@@ -474,6 +574,7 @@ class RealCorpusBuildTests(unittest.TestCase):
             variant_id = match.group(1)
             entry = entries[variant_id]
             self.assertEqual(catalog_line_id(entry), row.id)
+            self.assertEqual(entry.runtime_topic_id, row.topic_id)
             self.assertEqual(entry.required_context, row.required_context)
             if row.source_kind not in {"rewritten_topic", "preserved_easter_egg"}:
                 self.assertTrue(row.source_reference.startswith("catalog:"))
@@ -491,13 +592,59 @@ class RealCorpusBuildTests(unittest.TestCase):
             self.assertEqual(source_topic, mappings[source_line].topic_id)
             self.assertEqual(source_topic, row.topic_id)
 
-    def test_technical_source_topics_have_at_most_two_enabled_variants(self) -> None:
+    def test_every_runtime_category_group_meets_topic_cardinality_contract(self) -> None:
+        expected_ranges = {
+            "technical": (1, 2),
+            "growth": (1, 2),
+            "career": (1, 2),
+            "daily_care": (2, 3),
+            "emotional_reflection": (2, 3),
+            "character_life": (3, 5),
+            "easter_egg": (1, 1),
+            "system_ambient": (5, 5),
+        }
         variants = Counter(
-            row.topic_id for row in self.result.enabled if row.category_group == "technical"
+            (row.category_group, row.topic_id) for row in self.result.enabled
         )
-        self.assertTrue(variants)
-        self.assertLessEqual(max(variants.values()), 2)
-        self.assertTrue(all(count in (1, 2) for count in variants.values()))
+        self.assertEqual(
+            set(expected_ranges),
+            {group for group, _topic_id in variants},
+        )
+        for (group, topic_id), count in variants.items():
+            minimum, maximum = expected_ranges[group]
+            self.assertGreaterEqual(count, minimum, (group, topic_id, count))
+            self.assertLessEqual(count, maximum, (group, topic_id, count))
+
+    def test_task_report_has_one_current_generated_output_truth(self) -> None:
+        report = REPORT_PATH.read_text(encoding="utf-8")
+        heading = "## Current generated outputs"
+        self.assertEqual(1, report.count(heading))
+        section = report.split(heading, 1)[1].split("\n## ", 1)[0]
+        rows = re.findall(
+            r"^\| `([^`]+)` \| ([\d,]+) \| `([0-9a-f]{64})` \|$",
+            section,
+            flags=re.MULTILINE,
+        )
+        actual_paths = {
+            "persona-corpus-v2.tsv": REPOSITORY_ROOT / "data/optimized/persona-corpus-v2.tsv",
+            "persona-corpus-archive.tsv": REPOSITORY_ROOT / "data/optimized/persona-corpus-archive.tsv",
+            "persona-corpus-review.tsv": REPOSITORY_ROOT / "data/optimized/persona-corpus-review.tsv",
+            "pii-review.tsv": REPOSITORY_ROOT / "reports/pii-review.tsv",
+        }
+        reported = {
+            name: (int(count.replace(",", "")), digest)
+            for name, count, digest in rows
+        }
+        expected = {}
+        for name, path in actual_paths.items():
+            with path.open(encoding="utf-8") as stream:
+                line_count = sum(1 for _line in stream) - 1
+            expected[name] = (
+                line_count,
+                hashlib.sha256(path.read_bytes()).hexdigest(),
+            )
+        self.assertEqual(expected, reported)
+        self.assertNotIn("3,212", report)
 
     def test_real_archive_recovery_is_exact_and_never_category_wide(self) -> None:
         enabled_by_source: dict[int, set[str]] = {}

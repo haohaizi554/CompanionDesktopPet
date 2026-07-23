@@ -237,6 +237,10 @@ def _catalog_reference(
             raise ValueError(
                 f"catalog variant {entry.variant_id!r} source category/topic mismatch"
             )
+        if entry.runtime_topic_id != source_topic:
+            raise ValueError(
+                f"catalog variant {entry.variant_id!r} runtime topic does not match lineage"
+            )
         if entry.source_kind not in LEGACY_SOURCE_KINDS:
             raise ValueError(
                 f"catalog variant {entry.variant_id!r} uses legacy lineage with {entry.source_kind!r}"
@@ -248,7 +252,7 @@ def _catalog_reference(
             raise ValueError(
                 f"catalog variant {entry.variant_id!r} requires a verified legacy source"
             )
-        return entry.variant_id, f"{reference};variant:{entry.variant_id}"
+        return entry.runtime_topic_id, f"{reference};variant:{entry.variant_id}"
 
     raise ValueError(
         f"catalog variant {entry.variant_id!r} has invalid source_reference {reference!r}"
@@ -310,6 +314,23 @@ def build_v2(
     variants = [entry.variant_id for entry in catalog_entries]
     if len(variants) != len(set(variants)):
         raise ValueError("content catalog contains duplicate immutable variant IDs")
+    if any(not entry.runtime_topic_id for entry in catalog_entries):
+        raise ValueError("content catalog contains an empty runtime topic ID")
+    if any(not entry.editorial_role for entry in catalog_entries):
+        raise ValueError("content catalog contains an empty editorial role")
+
+    legacy_roles: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for entry in catalog_entries:
+        legacy = LEGACY_REFERENCE.fullmatch(entry.source_reference)
+        if legacy is None:
+            continue
+        key = (entry.category, entry.runtime_topic_id)
+        if entry.editorial_role in legacy_roles[key]:
+            raise ValueError(
+                f"legacy runtime topic {key!r} reuses editorial role "
+                f"{entry.editorial_role!r}"
+            )
+        legacy_roles[key].add(entry.editorial_role)
 
     enabled: list[CorpusLine] = []
     for entry in catalog_entries:
