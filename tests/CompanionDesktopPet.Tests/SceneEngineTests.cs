@@ -155,6 +155,47 @@ public sealed class SceneEngineTests
         Assert.Contains("not_fullscreen", ContextTokens(context));
     }
 
+    [Theory]
+    [InlineData(4)]
+    [InlineData(5)]
+    public void SceneContext_UsesTheDawnTriggerAndOnlyTheDawnTimeToken(int hour)
+    {
+        var now = new DateTime(2026, 7, 22, hour, 30, 0);
+        var context = new SceneContext(
+            CompanionEvent.Automatic,
+            now,
+            CharacterState.Create(now));
+        var tokens = ContextTokens(context);
+
+        Assert.Equal(DialogueTrigger.Morning, DayPart(now));
+        Assert.Contains("time:dawn", tokens);
+        Assert.DoesNotContain("time:morning", tokens);
+        Assert.DoesNotContain("time:late_night", tokens);
+    }
+
+    [Theory]
+    [InlineData(3, "time:late_night")]
+    [InlineData(4, "time:dawn")]
+    [InlineData(6, "time:morning")]
+    [InlineData(11, "time:noon")]
+    [InlineData(14, "time:afternoon")]
+    [InlineData(18, "time:evening")]
+    [InlineData(23, "time:late_night")]
+    public void SceneContext_UsesExactlyOneCanonicalTimeToken(int hour, string expected)
+    {
+        var now = new DateTime(2026, 7, 22, hour, 30, 0);
+        var context = new SceneContext(
+            CompanionEvent.Automatic,
+            now,
+            CharacterState.Create(now));
+
+        var timeToken = Assert.Single(
+            ContextTokens(context),
+            token => token.StartsWith("time:", StringComparison.Ordinal));
+
+        Assert.Equal(expected, timeToken);
+    }
+
     private static IReadOnlySet<string> ContextTokens(SceneContext context)
     {
         var method = typeof(SceneScheduler).GetMethod(
@@ -162,5 +203,14 @@ public sealed class SceneEngineTests
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         Assert.NotNull(method);
         return Assert.IsAssignableFrom<IReadOnlySet<string>>(method!.Invoke(null, [context]));
+    }
+
+    private static DialogueTrigger DayPart(DateTime now)
+    {
+        var method = typeof(InterruptionBudget).GetMethod(
+            "DayPart",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(method);
+        return Assert.IsType<DialogueTrigger>(method!.Invoke(null, [now]));
     }
 }

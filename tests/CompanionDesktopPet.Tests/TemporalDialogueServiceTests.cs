@@ -129,6 +129,26 @@ public sealed class TemporalDialogueServiceTests
             TemporalDialogueService.GetContextualLines(dateTime));
     }
 
+    [Theory]
+    [InlineData(4)]
+    [InlineData(5)]
+    public void GetContextualLines_AtDawnIncludesDawnRowsAndExcludesLateNightRows(int hour)
+    {
+        var lines = TemporalDialogueService.GetContextualLines(new DateTime(2026, 7, 22, hour, 30, 0));
+        var dawnText = PersonaCorpus.All
+            .Where(line => line.Trigger == DialogueTrigger.Morning
+                           && line.RequiredContext.Contains("time:dawn"))
+            .Select(line => line.Text)
+            .ToHashSet(StringComparer.Ordinal);
+        var lateNightText = PersonaCorpus.All
+            .Where(line => line.RequiredContext.Contains("time:late_night"))
+            .Select(line => line.Text)
+            .ToHashSet(StringComparer.Ordinal);
+
+        Assert.Contains(lines, dawnText.Contains);
+        Assert.DoesNotContain(lines, lateNightText.Contains);
+    }
+
     [Fact]
     public void GetContextualLines_ReturnsOnlyEnabledV2CorpusText()
     {

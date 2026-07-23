@@ -51,6 +51,25 @@ public static class TemporalDialogueService
         _ => TimePeriod.LateNight,
     };
 
+    internal static DialogueTrigger GetDialogueTrigger(DateTime dateTime) => GetTimePeriod(dateTime) switch
+    {
+        TimePeriod.Dawn or TimePeriod.Morning => DialogueTrigger.Morning,
+        TimePeriod.Noon => DialogueTrigger.Noon,
+        TimePeriod.Afternoon => DialogueTrigger.Afternoon,
+        TimePeriod.Evening => DialogueTrigger.Evening,
+        _ => DialogueTrigger.LateNight
+    };
+
+    internal static string GetTimeContextToken(DateTime dateTime) => GetTimePeriod(dateTime) switch
+    {
+        TimePeriod.Dawn => "time:dawn",
+        TimePeriod.Morning => "time:morning",
+        TimePeriod.Noon => "time:noon",
+        TimePeriod.Afternoon => "time:afternoon",
+        TimePeriod.Evening => "time:evening",
+        _ => "time:late_night"
+    };
+
     public static IReadOnlyList<string> GetFestivals(DateTime dateTime)
     {
         var festivals = new List<string>(3);
@@ -71,24 +90,13 @@ public static class TemporalDialogueService
 
     public static IReadOnlyList<string> GetContextualLines(DateTime dateTime)
     {
-        var periodTrigger = dateTime.Hour switch
-        {
-            >= 6 and < 11 => DialogueTrigger.Morning,
-            >= 11 and < 14 => DialogueTrigger.Noon,
-            >= 14 and < 18 => DialogueTrigger.Afternoon,
-            >= 18 and < 23 => DialogueTrigger.Evening,
-            _ => DialogueTrigger.LateNight
-        };
+        var periodTrigger = GetDialogueTrigger(dateTime);
         var isHoliday = GetFestivals(dateTime).Count > 0;
         var context = new HashSet<string>(StringComparer.Ordinal)
         {
             dateTime.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday ? "day:weekend" : "day:weekday",
-            $"time:{periodTrigger.ToString().ToLowerInvariant()}"
+            GetTimeContextToken(dateTime)
         };
-        if (dateTime.Hour is >= 4 and < 6)
-        {
-            context.Add("time:dawn");
-        }
         if (isHoliday)
         {
             context.Add("holiday");

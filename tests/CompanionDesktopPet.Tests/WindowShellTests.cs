@@ -18,26 +18,38 @@ public sealed class WindowShellTests
         {
             var app = System.Windows.Application.Current as App ?? new App();
             app.InitializeComponent();
-            var showEvent = typeof(MainWindow).GetMethod(
-                "ShowEventBubble",
-                BindingFlags.Instance | BindingFlags.NonPublic);
             var lastReply = typeof(MainWindow).GetProperty(
                 "LastReply",
                 BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            Assert.NotNull(showEvent);
+            var automaticTick = typeof(MainWindow).GetMethod(
+                "AutomaticTimer_Tick",
+                BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.NotNull(lastReply);
+            Assert.NotNull(automaticTick);
 
-            foreach (var trigger in new[]
+            foreach (var (trigger, enterThroughRealHandler) in new (CompanionEvent, Action<MainWindow>)[]
                      {
-                         CompanionEvent.Startup,
-                         CompanionEvent.Click,
-                         CompanionEvent.Automatic
+                         (CompanionEvent.Startup, window =>
+                         {
+                             window.Show();
+                             window.Dispatcher.Invoke(
+                                 () => { },
+                                 System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+                         }),
+                         (CompanionEvent.Click, window =>
+                         {
+                             var stage = Assert.IsType<Grid>(window.FindName("CharacterStage"));
+                             var say = Assert.IsType<MenuItem>(stage.ContextMenu!.Items[0]);
+                             say.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+                         }),
+                         (CompanionEvent.Automatic, window =>
+                             automaticTick!.Invoke(window, [null, EventArgs.Empty]))
                      })
             {
                 var settingsDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
                 var window = new MainWindow(PetSettings.Default, new SettingsService(settingsDirectory));
 
-                showEvent!.Invoke(window, [trigger]);
+                enterThroughRealHandler(window);
 
                 var reply = Assert.IsType<AgentReply>(lastReply!.GetValue(window));
                 var source = Assert.IsType<DialogueLine>(reply.SourceLine);

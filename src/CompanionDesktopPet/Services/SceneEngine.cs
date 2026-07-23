@@ -271,14 +271,7 @@ public static class InterruptionBudget
         }) < MaximumOutputsPerHour;
     }
 
-    internal static DialogueTrigger DayPart(DateTime now) => now.Hour switch
-    {
-        >= 6 and < 11 => DialogueTrigger.Morning,
-        >= 11 and < 14 => DialogueTrigger.Noon,
-        >= 14 and < 18 => DialogueTrigger.Afternoon,
-        >= 18 and < 23 => DialogueTrigger.Evening,
-        _ => DialogueTrigger.LateNight
-    };
+    internal static DialogueTrigger DayPart(DateTime now) => TemporalDialogueService.GetDialogueTrigger(now);
 }
 
 public sealed class SceneScheduler
@@ -375,14 +368,12 @@ public sealed class SceneScheduler
     private static HashSet<string> ContextTokens(SceneContext context)
     {
         var now = context.Now;
-        var dayPart = InterruptionBudget.DayPart(now).ToString().ToLowerInvariant();
         var tokens = new HashSet<string>(StringComparer.Ordinal)
         {
             now.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday ? "day:weekend" : "day:weekday",
-            $"time:{dayPart}",
+            TemporalDialogueService.GetTimeContextToken(now),
             $"season:{(now.Month is >= 3 and <= 5 ? "spring" : now.Month is >= 6 and <= 8 ? "summer" : now.Month is >= 9 and <= 11 ? "autumn" : "winter")}"
         };
-        if (now.Hour is >= 4 and < 6) tokens.Add("time:dawn");
         if (context.Trigger == CompanionEvent.Startup) tokens.Add("app_started");
         if (context.Trigger == CompanionEvent.IdleReturned) tokens.Add("idle_return");
         if (context.IsFullscreen is false) tokens.Add("not_fullscreen");
