@@ -62,12 +62,12 @@ Technical, growth, and career now each contain a meaningful mixture of one- and 
 
 | File | Data rows | SHA-256 |
 | --- | ---: | --- |
-| `persona-corpus-v2.tsv` | 800 | `d2e7e655c1a4aeb3464ccdc9403498378b3cdf098bbc526c25a4159329ede4b3` |
-| `persona-corpus-archive.tsv` | 75,375 | `e9eb0a03db310bfef81fc2912b045941bdb78137f7d5871fb2e61e93735d15d4` |
+| `persona-corpus-v2.tsv` | 800 | `5f6f1aa3b0f88a1491d3cce54f355c9829513565822463ea4219a54ed536d39d` |
+| `persona-corpus-archive.tsv` | 75,375 | `1c9c5afc86feae7e3642aee33f0f6fd1427bd02b28cebaabb51aa9fdaba82eb8` |
 | `persona-corpus-review.tsv` | 3,265 | `a251b1e01003a078d7912f71099e57c5c6830a75195558ea61428105990b866a` |
 | `pii-review.tsv` | 1,248 | `702037759f730759be83fb1c643a8f61382fa1c3f8f2a25e2c0351a177eec6e7` |
 
-All four generated files contain LF only. The v2 output has 800 unique stable IDs and 800 unique normalized texts. Its length buckets are 216 short (8–16 characters), 352 medium (17–24), and 232 long (25–36), with no line over 36 characters; mean length is 20.8000. These shares are 27%, 44%, and 29%, leaving 2, 1, and 1 percentage points of margin against the configured boundaries.
+All four generated files contain LF only. The v2 output has 800 unique stable IDs and 800 unique normalized texts. Its length buckets are 216 short (8–16 characters), 352 medium (17–24), and 232 long (25–36), with no line over 36 characters; mean length is 20.8025. These shares are 27%, 44%, and 29%, leaving 2, 1, and 1 percentage points of margin against the configured boundaries.
 
 ## Verification evidence
 
@@ -76,6 +76,7 @@ All four generated files contain LF only. The v2 output has 800 unique stable ID
 - Cooldown RED: the new catalog-level test failed on `authored.small_errands.01` because 96 was below 144.
 - Focused GREEN: 6/6 selected regressions passed (`Ran 6 tests in 9.744s`, `OK`).
 - Formal fixed-seed build: `enabled=800`, `archive=75375`, `review=3265`, `pii_review=1248`.
+- Fake-current-context follow-up: the exact-ID regression first failed on the Java and database legacy rewrites, then passed after both lines became timeless standalone guidance; the current scoped run passed the other 57 tests, with only Task 4's concurrently edited normalization expectation outside this commit still failing.
 - Immutable-source audit: `audit_corpus.py` completed over 75,375 lines with canonical SHA-256 `3fd7356845df838c652f7a7668013f2b15b0e91ddfa5d784b2b71a514a2c7534`.
 - Full Python suite: 57/57 tests passed (`Ran 57 tests in 7.161s`, `OK`) with bytecode writes disabled.
 - Python bytecode compilation: 15/15 scoped persona modules, tools, and tests compiled successfully.

@@ -795,6 +795,27 @@ class RealCorpusBuildTests(unittest.TestCase):
         ]
         self.assertEqual([], offenders)
 
+    def test_known_technical_lines_are_timeless_without_fake_current_context(self) -> None:
+        expected = {
+            "v2_topic_java_0c686ce39743_observation_365c905b0e89":
+                "Java 空指针通常要检查初始化与生命周期。",
+            "v2_topic_database_47e099c79fa9_observation_8db719cc42c4":
+                "数据库死锁先对齐双方持锁顺序。",
+        }
+        actual = {
+            row.id: row.text
+            for row in self.result.enabled
+            if row.id in expected
+        }
+        self.assertEqual(expected, actual)
+
+        old_context_claims = (
+            "Java 这个空指针先看对象生命周期。",
+            "这次死锁得把双方持锁顺序对出来。",
+        )
+        enabled_texts = {row.text for row in self.result.enabled}
+        self.assertTrue(enabled_texts.isdisjoint(old_context_claims))
+
     def test_real_build_has_unique_text_and_stable_ids(self) -> None:
         from src.persona_corpus.normalization import normalize_text
 
