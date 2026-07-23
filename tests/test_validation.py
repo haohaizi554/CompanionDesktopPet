@@ -495,6 +495,9 @@ class ValidationContractTests(unittest.TestCase):
         rows = [
             valid_line(id="food", text="我偶尔会想吃湖南菜，那股辣味很有层次。"),
             valid_line(id="field", text="工资字段最好统一用整数分保存。"),
+            valid_line(id="task", text="任务今天完成了。"),
+            valid_line(id="program", text="程序今天工作正常。"),
+            valid_line(id="game", text="王者今天更新了。"),
         ]
         pii_ids = {
             issue.line_id
@@ -875,6 +878,24 @@ class SimulationGateTests(unittest.TestCase):
             <= codes
         )
 
+        rows, config, no_outputs_for_one_seed = clean_simulation()
+        attempts = no_outputs_for_one_seed["attempts"]
+        assert isinstance(attempts, list)
+        for attempt in attempts:
+            if attempt["seed"] == 9:
+                attempt["selected_id"] = None
+        self.assertIn(
+            "simulation_seed_coverage",
+            issue_codes(
+                validate_corpus(
+                    rows,
+                    config,
+                    {"exceptions": []},
+                    simulation_result=no_outputs_for_one_seed,
+                )
+            ),
+        )
+
     def test_event_schema_rejects_naive_timestamp_bad_context_unknown_and_disabled_ids(self) -> None:
         rows, config, simulation = clean_simulation()
         rows.append(valid_line(id="sim_disabled", enabled=False))
@@ -976,6 +997,83 @@ class SimulationGateTests(unittest.TestCase):
             }
             <= codes
         )
+
+    def test_hourly_and_late_night_budgets_use_rolling_windows_across_clock_boundaries(self) -> None:
+        rows, config, simulation = clean_simulation()
+        attempts = simulation["attempts"]
+        assert isinstance(attempts, list)
+        first_seed = [attempt for attempt in attempts if attempt["seed"] == 0]
+        first_seed[10]["selected_id"] = None
+        base = datetime.fromisoformat(str(first_seed[10]["attempted_at"]))
+        for hour, minute, selected_id, elapsed in (
+            (12, 30, "sim_life_a", 1470),
+            (12, 50, "sim_growth", 20),
+            (13, 10, "sim_career", 20),
+        ):
+            played_at = base.replace(hour=hour, minute=minute)
+            attempts.append(
+                {
+                    "seed": 0,
+                    "attempted_at": played_at.isoformat(),
+                    "context": simulation_context(
+                        played_at, minutes_since_last_output=elapsed
+                    ),
+                    "selected_id": selected_id,
+                }
+            )
+        late_first = base.replace(hour=23, minute=50)
+        late_second = late_first + timedelta(minutes=20)
+        for played_at, selected_id, elapsed in (
+            (late_first, "sim_life_b", 640),
+            (late_second, "sim_system", 20),
+        ):
+            attempts.append(
+                {
+                    "seed": 0,
+                    "attempted_at": played_at.isoformat(),
+                    "context": simulation_context(
+                        played_at, minutes_since_last_output=elapsed
+                    ),
+                    "selected_id": selected_id,
+                }
+            )
+        codes = issue_codes(
+            validate_corpus(rows, config, {"exceptions": []}, simulation_result=simulation)
+        )
+        self.assertTrue(
+            {
+                "simulation_hourly_budget_violation",
+                "simulation_late_night_budget_violation",
+            }
+            <= codes
+        )
+
+        rows, config, boundary = clean_simulation()
+        attempts = boundary["attempts"]
+        assert isinstance(attempts, list)
+        first_seed = [attempt for attempt in attempts if attempt["seed"] == 0]
+        first_seed[10]["selected_id"] = None
+        base = datetime.fromisoformat(str(first_seed[10]["attempted_at"]))
+        for hour, minute, selected_id, elapsed in (
+            (12, 10, "sim_life_a", 1450),
+            (12, 30, "sim_growth", 20),
+            (13, 10, "sim_career", 40),
+        ):
+            played_at = base.replace(hour=hour, minute=minute)
+            attempts.append(
+                {
+                    "seed": 0,
+                    "attempted_at": played_at.isoformat(),
+                    "context": simulation_context(
+                        played_at, minutes_since_last_output=elapsed
+                    ),
+                    "selected_id": selected_id,
+                }
+            )
+        boundary_codes = issue_codes(
+            validate_corpus(rows, config, {"exceptions": []}, simulation_result=boundary)
+        )
+        self.assertNotIn("simulation_hourly_budget_violation", boundary_codes)
 
     def test_recent_user_direct_easter_question_and_zero_output_checks_use_real_rows(self) -> None:
         rows, config, simulation = clean_simulation()

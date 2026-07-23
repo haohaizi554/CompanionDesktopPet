@@ -7,7 +7,7 @@ import math
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -181,6 +181,59 @@ COMMON_CHINESE_SURNAMES = (
     "瞿阎充慕连茹习宦艾鱼容向古易慎戈廖庾终暨居衡步都耿满弘匡"
     "国文寇广禄阙东欧利师巩聂关荆司马欧阳上官诸葛夏侯东方"
 )
+COMMON_CHINESE_GIVEN_NAMES = (
+    "伟",
+    "芳",
+    "娜",
+    "敏",
+    "静",
+    "丽",
+    "强",
+    "磊",
+    "军",
+    "洋",
+    "勇",
+    "艳",
+    "杰",
+    "娟",
+    "涛",
+    "超",
+    "明",
+    "华",
+    "平",
+    "刚",
+    "英",
+    "霞",
+    "凤",
+    "兰",
+    "秀英",
+    "桂英",
+    "秀兰",
+    "建华",
+    "建国",
+    "国强",
+    "志强",
+    "志伟",
+    "文华",
+    "小明",
+    "小红",
+    "雨桐",
+    "子涵",
+    "梓涵",
+    "浩宇",
+    "俊杰",
+    "佳怡",
+    "佳琪",
+    "欣怡",
+    "梦瑶",
+    "诗涵",
+    "宇轩",
+    "浩然",
+    "一诺",
+    "可欣",
+    "思雨",
+    "欣妍",
+)
 NAME_CONTEXT_MARKERS = (
     "今天",
     "昨天",
@@ -210,7 +263,8 @@ NAME_CONTEXT_MARKERS = (
 )
 CONTEXTUAL_CHINESE_NAME_PATTERN = re.compile(
     rf"(?<![\u3400-\u9fff])"
-    rf"[{COMMON_CHINESE_SURNAMES}][\u3400-\u9fff]{{1,2}}?"
+    rf"[{COMMON_CHINESE_SURNAMES}]"
+    rf"(?:{'|'.join(sorted(map(re.escape, COMMON_CHINESE_GIVEN_NAMES), key=len, reverse=True))})"
     rf"(?=(?:{'|'.join(map(re.escape, NAME_CONTEXT_MARKERS))}))"
 )
 LABELED_CHINESE_NAME_PATTERN = re.compile(
@@ -1314,6 +1368,14 @@ def _simulation_issues(
             continue
         outputs_by_seed[attempt.seed].append(_SimulationOutput(attempt, matches[0]))
 
+    if seeds_structurally_valid:
+        seeds_without_outputs = sorted(seed for seed in seed_set if not outputs_by_seed[seed])
+        if seeds_without_outputs:
+            issues.error(
+                "simulation_seed_coverage",
+                f"each declared seed must produce at least one selected output; empty seeds={seeds_without_outputs!r}",
+            )
+
     output_count = sum(map(len, outputs_by_seed.values()))
     if output_count == 0:
         issues.error("simulation_zero_outputs", "simulation must contain at least one actual output")
@@ -1371,8 +1433,8 @@ def _simulation_issues(
         last_id: dict[str, datetime] = {}
         last_semantic: dict[str, datetime] = {}
         daily_id_counts: Counter[tuple[object, str]] = Counter()
-        hourly_counts: Counter[tuple[object, int]] = Counter()
-        late_hourly_counts: Counter[tuple[object, int]] = Counter()
+        rolling_hour: list[datetime] = []
+        rolling_late_night_hour: list[datetime] = []
 
         for output in outputs:
             attempt = output.attempt
@@ -1479,20 +1541,29 @@ def _simulation_issues(
                     f"row exceeds max_per_day={row.max_per_day}",
                     row.id,
                 )
-            hour_key = (timestamp.date(), timestamp.hour)
-            hourly_counts[hour_key] += 1
-            if hourly_counts[hour_key] == max_per_hour + 1:
+            rolling_hour = [
+                played_at
+                for played_at in rolling_hour
+                if timestamp - played_at < timedelta(hours=1)
+            ]
+            rolling_hour.append(timestamp)
+            if len(rolling_hour) == max_per_hour + 1:
                 issues.error(
                     "simulation_hourly_budget_violation",
-                    f"seed {seed} exceeds {max_per_hour} outputs in one clock hour",
+                    f"seed {seed} exceeds {max_per_hour} outputs in rolling window (now-60min, now]",
                     row.id,
                 )
             if _expected_daypart(timestamp) == "late_night":
-                late_hourly_counts[hour_key] += 1
-                if late_hourly_counts[hour_key] == late_night_max + 1:
+                rolling_late_night_hour = [
+                    played_at
+                    for played_at in rolling_late_night_hour
+                    if timestamp - played_at < timedelta(hours=1)
+                ]
+                rolling_late_night_hour.append(timestamp)
+                if len(rolling_late_night_hour) == late_night_max + 1:
                     issues.error(
                         "simulation_late_night_budget_violation",
-                        f"seed {seed} exceeds the late-night hourly budget",
+                        f"seed {seed} exceeds the late-night rolling 60-minute budget",
                         row.id,
                     )
 
