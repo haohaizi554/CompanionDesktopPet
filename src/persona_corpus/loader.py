@@ -5,30 +5,7 @@ import math
 from pathlib import Path
 
 from .models import CorpusLine, LegacyLine
-
-
-V2_HEADER = (
-    "id",
-    "category",
-    "category_group",
-    "topic_id",
-    "semantic_group",
-    "output_mode",
-    "trigger",
-    "required_context",
-    "tone",
-    "interrupt_cost",
-    "cooldown_hours",
-    "semantic_cooldown_hours",
-    "max_per_day",
-    "weight",
-    "requires_reply",
-    "enabled",
-    "text",
-    "source_kind",
-    "source_reference",
-    "rewrite_reason",
-)
+from .schema import V2_HEADER
 
 
 class CorpusFormatError(ValueError):
@@ -43,22 +20,25 @@ class CorpusFormatError(ValueError):
 
 def _rows(path: Path):
     try:
-        stream = path.open("r", encoding="utf-8-sig", newline="")
-    except (OSError, UnicodeError) as error:
+        payload = path.read_bytes()
+    except OSError as error:
         raise CorpusFormatError(path, 1, str(error)) from error
-    with stream:
-        line_number = 1
+    physical_lines = payload.split(b"\n")
+    if physical_lines and physical_lines[-1] == b"":
+        physical_lines.pop()
+    for line_number, raw_line in enumerate(physical_lines, start=1):
+        if raw_line.endswith(b"\r"):
+            raw_line = raw_line[:-1]
+        encoding = "utf-8-sig" if line_number == 1 else "utf-8"
         try:
-            for line_number, physical_line in enumerate(stream, start=1):
-                if physical_line.endswith("\n"):
-                    physical_line = physical_line[:-1]
-                    if physical_line.endswith("\r"):
-                        physical_line = physical_line[:-1]
-                elif physical_line.endswith("\r"):
-                    physical_line = physical_line[:-1]
-                yield line_number, physical_line.split("\t")
+            physical_line = raw_line.decode(encoding, errors="strict")
         except UnicodeError as error:
             raise CorpusFormatError(path, line_number, str(error)) from error
+        if "\ufeff" in physical_line:
+            raise CorpusFormatError(path, line_number, "unexpected UTF-8 BOM inside file")
+        if "\x00" in physical_line:
+            raise CorpusFormatError(path, line_number, "NUL byte is not allowed")
+        yield line_number, physical_line.split("\t")
 
 
 def load_legacy(path: Path) -> list[LegacyLine]:

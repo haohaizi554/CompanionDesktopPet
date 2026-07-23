@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "category_group_weights": {
+    "technical": 0.18,
+    "growth": 0.10,
+    "career": 0.07,
+    "daily_care": 0.10,
+    "emotional_reflection": 0.08,
+    "character_life": 0.35,
+    "easter_egg": 0.02,
+    "system_ambient": 0.10
+  },
+  "output_mode_targets": {
+    "self_talk": 0.45,
+    "ambient": 0.25,
+    "user_direct": 0.10,
+    "system_observe": 0.20
+  },
+  "runtime_limits": {
+    "minimum_interval_minutes": 8,
+    "max_outputs_per_hour": 2,
+    "late_night_max_outputs_per_hour": 1,
+    "semantic_group_no_repeat": true,
+    "block_adjacent_category_groups": [
+      "technical",
+      "daily_care",
+      "emotional_reflection"
+    ],
+    "technical_recent_window": 5,
+    "technical_recent_max": 2,
+    "user_direct_recent_window": 10,
+    "user_direct_recent_max": 2,
+    "easter_egg_recent_window": 50,
+    "easter_egg_recent_max": 1,
+    "interrupt_cost_minimum_intervals_minutes": {
+      "0": 8,
+      "1": 12,
+      "2": 16,
+      "3": 24,
+      "4": 40,
+      "5": 60
+    }
+  },
+  "context_tokens": [
+    "none",
+    "app_started",
+    "holiday",
+    "anniversary",
+    "ide_foreground",
+    "active_90m",
+    "idle_return",
+    "not_fullscreen",
+    "day:weekday",
+    "day:weekend",
+    "time:dawn",
+    "time:morning",
+    "time:noon",
+    "time:afternoon",
+    "time:evening",
+    "time:late_night",
+    "season:spring",
+    "season:summer",
+    "season:autumn",
+    "season:winter",
+    "date:holiday",
+    "date:month_boundary"
+  ],
+  "mvp_triggers": [
+    "any",
+    "app_start",
+    "morning",
+    "noon",
+    "afternoon",
+    "evening",
+    "late_night",
+    "day_changed",
+    "weekday",
+    "weekend",
+    "holiday",
+    "anniversary",
+    "long_silence"
+  ],
+  "future_triggers": [
+    "ide_foreground",
+    "long_active",
+    "idle_return",
+    "story_timer"
+  ]
+}

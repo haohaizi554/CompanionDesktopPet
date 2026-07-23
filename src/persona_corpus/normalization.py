@@ -48,11 +48,11 @@ MAX_CANDIDATES_PER_LINE = 16
 
 
 def normalize_text(text: str) -> str:
-    normalized = unicodedata.normalize("NFKC", text)
+    normalized = unicodedata.normalize("NFKC", text).casefold()
     return "".join(
         character
         for character in normalized
-        if not unicodedata.category(character).startswith(("P", "Z"))
+        if not unicodedata.category(character).startswith(("P", "Z", "C"))
         and not character.isspace()
     )
 

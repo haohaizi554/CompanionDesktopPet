@@ -134,8 +134,8 @@ class LoaderTests(CorpusTestCase):
 
 
 class AuditTests(unittest.TestCase):
-    def test_normalize_text_uses_nfkc_and_strips_punctuation_whitespace(self) -> None:
-        self.assertEqual("ABC你好吗", normalize_text(" ＡＢＣ，你 好吗？ "))
+    def test_normalize_text_uses_nfkc_casefold_and_strips_punctuation_whitespace(self) -> None:
+        self.assertEqual("abc你好吗", normalize_text(" ＡＢＣ，你 好吗？ "))
 
     def test_audit_detects_normalized_and_question_risks(self) -> None:
         rows = [
