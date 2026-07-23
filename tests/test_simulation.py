@@ -113,6 +113,34 @@ class SimulationIntegrationTests(unittest.TestCase):
         self.assertEqual(10, len(self.report.per_seed_anomalies))
         self.assertEqual(set(range(10)), set(self.report.per_seed_anomalies))
 
+    def test_combined_care_adjacency_counts_cross_group_pairs(self) -> None:
+        care_groups = {"daily_care", "emotional_reflection"}
+        expected = 0
+        same_group = 0
+        for seed in self.report.seeds:
+            outputs = [
+                attempt
+                for attempt in self.report.attempts
+                if attempt.seed == seed and attempt.row is not None
+            ]
+            for previous, current in zip(outputs, outputs[1:]):
+                assert previous.row is not None and current.row is not None
+                if (
+                    previous.row.category_group in care_groups
+                    and current.row.category_group in care_groups
+                ):
+                    expected += 1
+                    if previous.row.category_group == current.row.category_group:
+                        same_group += 1
+
+        self.assertGreater(expected, same_group)
+        self.assertEqual(expected, self.report.adjacent_care)
+        self.assertEqual(
+            same_group,
+            self.report.adjacent_daily_care
+            + self.report.adjacent_emotional_reflection,
+        )
+
     def test_validation_event_payload_is_exact_hash_bound_and_context_complete(self) -> None:
         payload = self.report.to_validation_payload()
         self.assertEqual(EVENT_KEYS, set(payload))

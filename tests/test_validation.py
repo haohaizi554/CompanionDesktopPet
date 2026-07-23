@@ -863,6 +863,19 @@ class SimulationGateTests(unittest.TestCase):
         )
         self.assertTrue({"simulation_hash_mismatch", "simulation_format"} <= codes)
 
+    def test_simulation_schema_version_rejects_float_one(self) -> None:
+        rows, config, simulation = clean_simulation()
+        simulation["schema_version"] = 1.0
+
+        report = validate_corpus(
+            rows,
+            config,
+            {"exceptions": []},
+            simulation_result=simulation,
+        )
+
+        self.assertIn("simulation_format", issue_codes(report))
+
     def test_short_too_few_seed_and_incomplete_calendar_coverage_are_rejected(self) -> None:
         rows, config, simulation = clean_simulation()
         simulation["days"] = 29

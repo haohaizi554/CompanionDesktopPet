@@ -374,6 +374,7 @@ def _analyse(
     adjacent_technical = 0
     adjacent_daily = 0
     adjacent_emotional = 0
+    adjacent_care = 0
     question_count = 0
     unmet_context_count = 0
     max_outputs_per_hour = 0
@@ -419,6 +420,12 @@ def _analyse(
                     _add_hard(hard, anomalies, seed, "interrupt_budget_violation")
                 if row.semantic_group == previous.row.semantic_group:
                     _add_hard(hard, anomalies, seed, "adjacent_semantic_violation")
+                if (
+                    row.category_group in {"daily_care", "emotional_reflection"}
+                    and previous.row.category_group
+                    in {"daily_care", "emotional_reflection"}
+                ):
+                    adjacent_care += 1
                 if row.category_group == previous.row.category_group:
                     adjacent_same_group += 1
                     if row.category_group == "technical":
@@ -606,7 +613,7 @@ def _analyse(
         adjacent_technical=adjacent_technical,
         adjacent_daily_care=adjacent_daily,
         adjacent_emotional_reflection=adjacent_emotional,
-        adjacent_care=adjacent_daily + adjacent_emotional,
+        adjacent_care=adjacent_care,
         average_text_length=(sum(lengths) / output_count if output_count else 0.0),
         length_distribution=length_distribution,
         common_openings=_stable_common(selected_texts, PREFIX_WIDTHS),
@@ -764,7 +771,10 @@ def render_simulation_report(report: SimulationReport) -> str:
                 ("14. Adjacent technical", report.adjacent_technical),
                 ("15a. Adjacent daily_care", report.adjacent_daily_care),
                 ("15b. Adjacent emotional_reflection", report.adjacent_emotional_reflection),
-                ("15c. Combined adjacent care", report.adjacent_care),
+                (
+                    "15c. Combined adjacent care (including cross-group pairs)",
+                    report.adjacent_care,
+                ),
                 ("16. Average text length", f"{report.average_text_length:.3f}"),
                 ("19. Catchphrase line ratio", _percent(report.catchphrase_ratio)),
                 ("20. Question/reply outputs", report.question_count),

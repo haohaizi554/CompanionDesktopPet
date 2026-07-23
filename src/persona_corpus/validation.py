@@ -1247,8 +1247,9 @@ def _simulation_issues(
         return
     if set(simulation) != SIMULATION_KEYS:
         issues.error("simulation_format", "simulation result uses unknown or missing top-level keys")
-    if simulation.get("schema_version") != 1 or isinstance(
-        simulation.get("schema_version"), bool
+    if (
+        type(simulation.get("schema_version")) is not int
+        or simulation.get("schema_version") != 1
     ):
         issues.error("simulation_format", "simulation schema_version must be integer 1")
     for key, expected in (

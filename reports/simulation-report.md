@@ -31,7 +31,7 @@ The validator-facing event stream is stored separately with an exact schema and 
 | 14. Adjacent technical | 0 |
 | 15a. Adjacent daily_care | 0 |
 | 15b. Adjacent emotional_reflection | 0 |
-| 15c. Combined adjacent care | 0 |
+| 15c. Combined adjacent care (including cross-group pairs) | 61 |
 | 16. Average text length | 21.843 |
 | 19. Catchphrase line ratio | 0.00% |
 | 20. Question/reply outputs | 0 |
