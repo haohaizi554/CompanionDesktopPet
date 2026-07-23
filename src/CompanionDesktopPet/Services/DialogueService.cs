@@ -2,39 +2,20 @@ namespace CompanionDesktopPet.Services;
 
 public sealed class DialogueService
 {
-    private static readonly string[] Phrases =
-    [
-        "今天也很棒呀 ♡",
-        "伸个懒腰吧，我陪着你",
-        "喝一小口水，好不好？",
-        "忙完这一点，就休息一下吧",
-        "嘿嘿，被你发现我在发呆啦",
-        "保持好心情，幸运会靠近你的",
-        "别皱眉啦，慢慢来就好",
-        "给你一颗小爱心 ♡"
-    ];
+    private readonly OfflineCompanionAgent _agent;
 
-    private int _lastPhraseIndex = -1;
-
-    public string GetGreeting(DateTime localTime) => localTime.Hour switch
+    public DialogueService(AgentMemorySnapshot? snapshot = null)
     {
-        >= 5 and < 12 => "早上好呀，今天也一起加油 ♡",
-        >= 12 and < 18 => "下午好，要记得喝水哦 ♡",
-        >= 18 and < 24 => "晚上好，辛苦一天啦 ♡",
-        _ => "这么晚还没睡呀？要照顾好自己哦"
-    };
+        _agent = snapshot is null
+            ? new OfflineCompanionAgent()
+            : new OfflineCompanionAgent(snapshot);
+    }
 
-    public string GetNextPhrase(Random random)
+    public AgentMemorySnapshot CreateSnapshot() => _agent.CreateSnapshot();
+
+    public AgentReply GetReply(CompanionEvent trigger, DateTime localTime, Random random)
     {
         ArgumentNullException.ThrowIfNull(random);
-        int index;
-        do
-        {
-            index = random.Next(Phrases.Length);
-        }
-        while (index == _lastPhraseIndex);
-
-        _lastPhraseIndex = index;
-        return Phrases[index];
+        return _agent.Respond(trigger, localTime, random);
     }
 }

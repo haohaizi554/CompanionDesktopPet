@@ -48,24 +48,27 @@
             Data="M 0,0 L 20,0 L 10,12 Z" />
     </StackPanel>
 
-    <Image x:Name="PetImage"
-           Width="320"
-           Margin="0,72,0,0"
-           VerticalAlignment="Bottom"
-           HorizontalAlignment="Center"
-           Source="pack://application:,,,/CompanionDesktopPet;component/Assets/character.png"
-           Stretch="Uniform"
-           RenderTransformOrigin="0.5,0.92">
-      <Image.RenderTransform>
+    <Grid x:Name="CharacterStage"
+          Width="320"
+          Height="320"
+          Margin="0,72,0,0"
+          VerticalAlignment="Bottom"
+          HorizontalAlignment="Center"
+          Background="Transparent"
+          RenderTransformOrigin="0.5,0.92">
+      <Grid.RenderTransform>
         <TransformGroup>
           <ScaleTransform x:Name="BreathingScale" ScaleX="1" ScaleY="1" />
           <ScaleTransform x:Name="ReactionScale" ScaleX="1" ScaleY="1" />
           <RotateTransform x:Name="SwayRotation" Angle="0" />
           <RotateTransform x:Name="ReactionRotation" Angle="0" />
           <TranslateTransform x:Name="FloatingOffset" Y="0" />
+          <ScaleTransform x:Name="ActionScale" ScaleX="1" ScaleY="1" />
+          <RotateTransform x:Name="ActionRotation" Angle="0" />
+          <TranslateTransform x:Name="ActionOffset" X="0" Y="0" />
         </TransformGroup>
-      </Image.RenderTransform>
-      <Image.ContextMenu>
+      </Grid.RenderTransform>
+      <Grid.ContextMenu>
         <ContextMenu>
           <MenuItem x:Name="SayMenuItem" Header="说句话 ♡" />
           <MenuItem x:Name="PauseMenuItem" Header="暂停动画" />
@@ -83,7 +86,60 @@
           <Separator />
           <MenuItem x:Name="ExitMenuItem" Header="先休息啦（退出）" />
         </ContextMenu>
-      </Image.ContextMenu>
-    </Image>
+      </Grid.ContextMenu>
+
+      <Viewbox Stretch="Uniform">
+        <Grid Width="320" Height="320">
+      <Image x:Name="PetImage"
+             Source="pack://application:,,,/CompanionDesktopPet;component/Assets/character.png"
+             Stretch="Uniform" />
+
+      <Canvas x:Name="HeartLayer"
+              Width="320"
+              Height="320"
+              IsHitTestVisible="False">
+        <TextBlock x:Name="HeartOne"
+                   Canvas.Left="229"
+                   Canvas.Top="124"
+                   Text="♥"
+                   Foreground="#FFFF6F91"
+                   FontSize="25"
+                   FontWeight="Bold"
+                   Opacity="0"
+                   RenderTransformOrigin="0.5,0.5">
+          <TextBlock.RenderTransform>
+            <TranslateTransform />
+          </TextBlock.RenderTransform>
+        </TextBlock>
+        <TextBlock x:Name="HeartTwo"
+                   Canvas.Left="257"
+                   Canvas.Top="159"
+                   Text="♥"
+                   Foreground="#FFFF9BB2"
+                   FontSize="20"
+                   FontWeight="Bold"
+                   Opacity="0"
+                   RenderTransformOrigin="0.5,0.5">
+          <TextBlock.RenderTransform>
+            <TranslateTransform />
+          </TextBlock.RenderTransform>
+        </TextBlock>
+        <TextBlock x:Name="HeartThree"
+                   Canvas.Left="214"
+                   Canvas.Top="184"
+                   Text="♥"
+                   Foreground="#FFFFB3C6"
+                   FontSize="17"
+                   FontWeight="Bold"
+                   Opacity="0"
+                   RenderTransformOrigin="0.5,0.5">
+          <TextBlock.RenderTransform>
+            <TranslateTransform />
+          </TextBlock.RenderTransform>
+        </TextBlock>
+      </Canvas>
+        </Grid>
+      </Viewbox>
+    </Grid>
   </Grid>
 </Window>

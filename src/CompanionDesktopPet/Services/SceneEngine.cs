@@ -38,7 +38,7 @@ public sealed record SceneContext(
     CompanionEvent Trigger,
     DateTime Now,
     CharacterState State,
-    bool IsFullscreen = false,
+    bool? IsFullscreen = null,
     TimeSpan UserIdle = default,
     DialogueTreeKind? PreferredTree = null,
     DialogueCategory? PreviousCategory = null);
@@ -220,7 +220,7 @@ public static class InterruptionBudget
     public static IReadOnlyDictionary<int, int> CostIntervalsMinutes { get; } =
         new Dictionary<int, int> { [0] = 8, [1] = 12, [2] = 16, [3] = 24, [4] = 40, [5] = 60 };
 
-    public static bool CanPlay(SceneDefinition scene, DateTime now, SceneHistory history, bool isFullscreen)
+    public static bool CanPlay(SceneDefinition scene, DateTime now, SceneHistory history, bool? isFullscreen)
     {
         var last = history.LastSceneAt;
         if (last is { } lastAt)
@@ -231,7 +231,7 @@ public static class InterruptionBudget
                 return false;
             }
 
-            if (isFullscreen && elapsed < TimeSpan.FromHours(2))
+            if (isFullscreen is true && elapsed < TimeSpan.FromHours(2))
             {
                 return false;
             }
@@ -380,12 +380,12 @@ public sealed class SceneScheduler
         {
             now.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday ? "day:weekend" : "day:weekday",
             $"time:{dayPart}",
-            $"season:{(now.Month is >= 3 and <= 5 ? "spring" : now.Month is >= 6 and <= 8 ? "summer" : now.Month is >= 9 and <= 11 ? "autumn" : "winter")}" 
+            $"season:{(now.Month is >= 3 and <= 5 ? "spring" : now.Month is >= 6 and <= 8 ? "summer" : now.Month is >= 9 and <= 11 ? "autumn" : "winter")}"
         };
         if (now.Hour is >= 4 and < 6) tokens.Add("time:dawn");
         if (context.Trigger == CompanionEvent.Startup) tokens.Add("app_started");
         if (context.Trigger == CompanionEvent.IdleReturned) tokens.Add("idle_return");
-        if (!context.IsFullscreen) tokens.Add("not_fullscreen");
+        if (context.IsFullscreen is false) tokens.Add("not_fullscreen");
         if (TemporalDialogueService.GetFestivals(now).Count > 0)
         {
             tokens.Add("holiday");

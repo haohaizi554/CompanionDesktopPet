@@ -1,5 +1,7 @@
 using System.Runtime.ExceptionServices;
 using System.Threading;
+using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Media;
 using CompanionDesktopPet.UI;
 
@@ -17,8 +19,20 @@ public sealed class AnimationControllerTests
             var floating = new TranslateTransform();
             var reactionScale = new ScaleTransform();
             var reactionRotation = new RotateTransform();
+            var actionScale = new ScaleTransform();
+            var actionRotation = new RotateTransform();
+            var actionOffset = new TranslateTransform();
+            var hearts = new FrameworkElement[] { new TextBlock(), new TextBlock(), new TextBlock() };
             var controller = new AnimationController(
-                breathing, sway, floating, reactionScale, reactionRotation);
+                breathing,
+                sway,
+                floating,
+                reactionScale,
+                reactionRotation,
+                actionScale,
+                actionRotation,
+                actionOffset,
+                hearts);
 
             controller.StartIdle();
             Assert.True(breathing.HasAnimatedProperties);
@@ -33,6 +47,21 @@ public sealed class AnimationControllerTests
             controller.PlayClickReaction();
             Assert.True(reactionScale.HasAnimatedProperties);
             Assert.True(reactionRotation.HasAnimatedProperties);
+            Assert.All(hearts, heart => Assert.True(heart.HasAnimatedProperties));
+
+            controller.SetDragLean(1_000);
+            Assert.Equal(8, actionRotation.Angle);
+            controller.SetDragLean(-1_000);
+            Assert.Equal(-8, actionRotation.Angle);
+
+            controller.PlayLanding();
+            Assert.True(actionRotation.HasAnimatedProperties);
+            Assert.True(actionOffset.HasAnimatedProperties);
+
+            controller.PlayAmbientGesture();
+            Assert.True(actionScale.HasAnimatedProperties);
+            Assert.True(actionRotation.HasAnimatedProperties);
+            Assert.True(actionOffset.HasAnimatedProperties);
         });
     }
 

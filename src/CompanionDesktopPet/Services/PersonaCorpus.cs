@@ -113,6 +113,27 @@ public static class PersonaCorpus
     ];
 
     private static readonly Lazy<CorpusSnapshot> Snapshot = new(Build);
+    private static readonly HashSet<string> ControlledTones = new(StringComparer.Ordinal)
+    {
+        "calm", "gentle", "playful", "dry", "serious", "sleepy", "nostalgic", "curious", "intimate",
+        "encouraging"
+    };
+    private static readonly HashSet<string> ControlledSourceKinds = new(StringComparer.Ordinal)
+    {
+        "rewritten_topic", "curated_standalone", "preserved_easter_egg", "new_ambient", "archived_question",
+        "manual_review"
+    };
+    private static readonly HashSet<string> DisabledOnlySourceKinds = new(StringComparer.Ordinal)
+    {
+        "archived_question", "manual_review"
+    };
+    private static readonly HashSet<string> ControlledContextTokens = new(StringComparer.Ordinal)
+    {
+        "none", "app_started", "holiday", "anniversary", "ide_foreground", "active_90m", "idle_return",
+        "not_fullscreen", "day:weekday", "day:weekend", "time:dawn", "time:morning", "time:noon",
+        "time:afternoon", "time:evening", "time:late_night", "season:spring", "season:summer",
+        "season:autumn", "season:winter", "date:holiday", "date:month_boundary"
+    };
     private static readonly string[] ForbiddenPiiMarkers =
         ["雷琳玥", "小玥", "玥玥", "湖南", "长沙", "广东", "月薪", "工资", "打零工"];
 
@@ -122,12 +143,29 @@ public static class PersonaCorpus
 
     public static IReadOnlyList<DialogueLine> EasterEggs => Snapshot.Value.EasterEggs;
 
+    public static IReadOnlyList<DialogueLine> Load(Stream stream)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        try
+        {
+            using var reader = new StreamReader(
+                stream,
+                new UTF8Encoding(false, true),
+                detectEncodingFromByteOrderMarks: false,
+                leaveOpen: true);
+            return Parse(reader);
+        }
+        catch (DecoderFallbackException exception)
+        {
+            throw new InvalidDataException("Persona v2 corpus must be strict UTF-8.", exception);
+        }
+    }
+
     private static CorpusSnapshot Build()
     {
         using var stream = typeof(PersonaCorpus).Assembly.GetManifestResourceStream(EmbeddedResourceName)
             ?? throw new InvalidOperationException($"Embedded persona corpus '{EmbeddedResourceName}' was not found.");
-        using var reader = new StreamReader(stream, new UTF8Encoding(false, true), true);
-        var all = Parse(reader);
+        var all = Load(stream);
         if (all.Count is < 800 or > 1_200)
         {
             throw new InvalidDataException($"Enabled v2 persona corpus must contain 800-1200 rows, found {all.Count}.");
@@ -142,7 +180,8 @@ public static class PersonaCorpus
     private static IReadOnlyList<DialogueLine> Parse(TextReader reader)
     {
         var rawHeader = reader.ReadLine() ?? throw new InvalidDataException("Persona v2 corpus is missing its header.");
-        var header = rawHeader.TrimStart('\uFEFF').Split('\t');
+        var normalizedHeader = rawHeader.StartsWith('\uFEFF') ? rawHeader[1..] : rawHeader;
+        var header = normalizedHeader.Split('\t');
         if (!header.SequenceEqual(V2Header, StringComparer.Ordinal))
         {
             throw new InvalidDataException("Persona v2 corpus does not use the exact 20-column header.");
@@ -163,16 +202,53 @@ public static class PersonaCorpus
                 throw Error(lineNumber, $"expected {V2Header.Count} columns, found {values.Length}");
             }
 
+            if (raw.Contains('\uFEFF') || raw.Contains('\0'))
+            {
+                throw Error(lineNumber, "embedded byte-order marks and NUL characters are not allowed");
+            }
+
             string Value(string name) => values[columns[name]];
             var enabled = ParseBoolean(Value("enabled"), "enabled", lineNumber);
+            var id = Required(Value("id"), "id", lineNumber);
+            var category = ParseEnum<DialogueCategory>(Value("category"), "category", lineNumber);
+            var categoryGroup = ParseSnakeEnum<DialogueCategoryGroup>(
+                Value("category_group"), "category_group", lineNumber);
+            var topicId = Required(Value("topic_id"), "topic_id", lineNumber);
+            var semanticGroup = Required(Value("semantic_group"), "semantic_group", lineNumber);
+            var outputMode = ParseSnakeEnum<DialogueOutputMode>(Value("output_mode"), "output_mode", lineNumber);
+            var trigger = ParseSnakeEnum<DialogueTrigger>(Value("trigger"), "trigger", lineNumber);
+            var requiredContext = ParseContext(Value("required_context"), lineNumber);
+            var tone = ParseControlled(
+                Value("tone"), "tone", ControlledTones, lineNumber);
+            var interruptionCost = ParseInteger(Value("interrupt_cost"), "interrupt_cost", lineNumber);
+            var cooldown = ParseMinimumDouble(Value("cooldown_hours"), "cooldown_hours", 1, lineNumber);
+            var semanticCooldown = ParseMinimumDouble(
+                Value("semantic_cooldown_hours"), "semantic_cooldown_hours", 1, lineNumber);
+            var maxPerDay = ParseInteger(Value("max_per_day"), "max_per_day", lineNumber);
+            var weight = ParsePositiveDouble(Value("weight"), "weight", lineNumber);
+            var requiresReply = ParseBoolean(Value("requires_reply"), "requires_reply", lineNumber);
+            var text = Required(Value("text"), "text", lineNumber);
+            var sourceKind = ParseControlled(
+                Value("source_kind"), "source_kind", ControlledSourceKinds, lineNumber);
+            var sourceReference = Required(Value("source_reference"), "source_reference", lineNumber);
+            var rewriteReason = Required(Value("rewrite_reason"), "rewrite_reason", lineNumber);
+
+            if (semanticCooldown < cooldown)
+            {
+                throw Error(lineNumber, "semantic_cooldown_hours must be at least cooldown_hours");
+            }
+            if (interruptionCost is < 0 or > 5 || maxPerDay is not (1 or 2) || weight > 2)
+            {
+                throw Error(lineNumber, "interrupt_cost, max_per_day, or weight is outside the safe range");
+            }
+            if (enabled && DisabledOnlySourceKinds.Contains(sourceKind))
+            {
+                throw Error(lineNumber, "archived_question and manual_review rows cannot be enabled");
+            }
             if (!enabled)
             {
                 continue;
             }
-
-            var id = Required(Value("id"), "id", lineNumber);
-            var text = Required(Value("text"), "text", lineNumber);
-            var requiresReply = ParseBoolean(Value("requires_reply"), "requires_reply", lineNumber);
             if (requiresReply || text.Contains('?') || text.Contains('？'))
             {
                 throw Error(lineNumber, "enabled rows cannot ask a question or require a reply");
@@ -189,42 +265,27 @@ public static class PersonaCorpus
                 throw Error(lineNumber, "enabled row duplicates an id or normalized text");
             }
 
-            var cooldown = ParsePositiveDouble(Value("cooldown_hours"), "cooldown_hours", lineNumber);
-            var semanticCooldown = ParsePositiveDouble(
-                Value("semantic_cooldown_hours"), "semantic_cooldown_hours", lineNumber);
-            if (semanticCooldown < cooldown)
-            {
-                throw Error(lineNumber, "semantic_cooldown_hours must be at least cooldown_hours");
-            }
-
-            var interruptionCost = ParseInteger(Value("interrupt_cost"), "interrupt_cost", lineNumber);
-            var maxPerDay = ParseInteger(Value("max_per_day"), "max_per_day", lineNumber);
-            if (interruptionCost is < 0 or > 5 || maxPerDay < 1)
-            {
-                throw Error(lineNumber, "interrupt_cost or max_per_day is outside the safe range");
-            }
-
             lines.Add(new DialogueLine(
                 id,
-                ParseEnum<DialogueCategory>(Value("category"), "category", lineNumber),
-                ParseSnakeEnum<DialogueCategoryGroup>(Value("category_group"), "category_group", lineNumber),
-                Required(Value("topic_id"), "topic_id", lineNumber),
-                Required(Value("semantic_group"), "semantic_group", lineNumber),
-                ParseSnakeEnum<DialogueOutputMode>(Value("output_mode"), "output_mode", lineNumber),
-                ParseSnakeEnum<DialogueTrigger>(Value("trigger"), "trigger", lineNumber),
-                ParseContext(Value("required_context"), lineNumber),
-                Required(Value("tone"), "tone", lineNumber),
+                category,
+                categoryGroup,
+                topicId,
+                semanticGroup,
+                outputMode,
+                trigger,
+                requiredContext,
+                tone,
                 interruptionCost,
                 cooldown,
                 semanticCooldown,
                 maxPerDay,
-                ParsePositiveDouble(Value("weight"), "weight", lineNumber),
+                weight,
                 requiresReply,
                 enabled,
                 text,
-                Required(Value("source_kind"), "source_kind", lineNumber),
-                Required(Value("source_reference"), "source_reference", lineNumber),
-                Required(Value("rewrite_reason"), "rewrite_reason", lineNumber)));
+                sourceKind,
+                sourceReference,
+                rewriteReason));
         }
 
         return lines.ToArray();
@@ -236,6 +297,7 @@ public static class PersonaCorpus
         if (tokens.Length == 0
             || tokens.Any(string.IsNullOrWhiteSpace)
             || tokens.Any(token => token != token.Trim())
+            || tokens.Any(token => !ControlledContextTokens.Contains(token))
             || tokens.Distinct(StringComparer.Ordinal).Count() != tokens.Length
             || (tokens.Contains("none", StringComparer.Ordinal) && tokens.Length != 1))
         {
@@ -243,6 +305,18 @@ public static class PersonaCorpus
         }
 
         return tokens;
+    }
+
+    private static string ParseControlled(
+        string value,
+        string name,
+        IReadOnlySet<string> allowed,
+        int lineNumber)
+    {
+        var required = Required(value, name, lineNumber);
+        return allowed.Contains(required)
+            ? required
+            : throw Error(lineNumber, $"{name} contains an unknown value '{required}'");
     }
 
     private static string Required(string value, string name, int lineNumber)
@@ -279,8 +353,18 @@ public static class PersonaCorpus
         return result;
     }
 
+    private static double ParseMinimumDouble(string value, string name, double minimum, int lineNumber)
+    {
+        var result = ParsePositiveDouble(value, name, lineNumber);
+        return result >= minimum
+            ? result
+            : throw Error(lineNumber, $"{name} must be at least {minimum.ToString(CultureInfo.InvariantCulture)}");
+    }
+
     private static T ParseEnum<T>(string value, string name, int lineNumber) where T : struct, Enum =>
-        Enum.TryParse<T>(value, false, out var result) && result.ToString() == value
+        Enum.TryParse<T>(value, false, out var result)
+        && Enum.IsDefined(result)
+        && result.ToString() == value
             ? result
             : throw Error(lineNumber, $"{name} contains an unknown value '{value}'");
 

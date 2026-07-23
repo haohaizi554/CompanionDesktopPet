@@ -11,31 +11,46 @@ namespace CompanionDesktopPet;
 
 public partial class MainWindow : Window
 {
-    private readonly DialogueService _dialogue = new();
+    private readonly DialogueService _dialogue;
     private readonly Random _random = new();
     private readonly DialogueScheduler _scheduler;
     private readonly SettingsService _settingsService;
+    private readonly AgentMemoryService? _agentMemoryService;
     private readonly AnimationController _animation;
     private readonly DispatcherTimer _automaticTimer = new();
     private readonly DispatcherTimer _bubbleTimer = new() { Interval = TimeSpan.FromSeconds(5) };
+    private readonly DispatcherTimer _memoryTimer = new() { Interval = TimeSpan.FromSeconds(2) };
     private PetSettings _settings;
     private PetScale _scale;
     private bool _paused;
     private bool _dragged;
     private System.Windows.Point _mouseDown;
+    private double _lastDragLeft;
 
-    public MainWindow(PetSettings settings, SettingsService settingsService)
+    internal AgentReply? LastReply { get; private set; }
+
+    public MainWindow(
+        PetSettings settings,
+        SettingsService settingsService,
+        AgentMemoryService? agentMemoryService = null,
+        AgentMemorySnapshot? agentMemory = null)
     {
         InitializeComponent();
         _settings = settings;
         _settingsService = settingsService;
+        _agentMemoryService = agentMemoryService;
+        _dialogue = new DialogueService(agentMemory);
         _scheduler = new DialogueScheduler(_random);
         _animation = new AnimationController(
             BreathingScale,
             SwayRotation,
             FloatingOffset,
             ReactionScale,
-            ReactionRotation);
+            ReactionRotation,
+            ActionScale,
+            ActionRotation,
+            ActionOffset,
+            [HeartOne, HeartTwo, HeartThree]);
 
         Loaded += Window_Loaded;
         Closed += Window_Closed;
@@ -52,6 +67,7 @@ public partial class MainWindow : Window
         ExitMenuItem.Click += Exit_Click;
         _bubbleTimer.Tick += BubbleTimer_Tick;
         _automaticTimer.Tick += AutomaticTimer_Tick;
+        _memoryTimer.Tick += MemoryTimer_Tick;
     }
 
     private void Window_Loaded(object sender, RoutedEventArgs e)
@@ -69,7 +85,7 @@ public partial class MainWindow : Window
         }
 
         UpdatePauseLabel();
-        ShowBubble(_dialogue.GetGreeting(DateTime.Now));
+        ShowEventBubble(CompanionEvent.Startup);
         ScheduleNextPhrase();
     }
 
@@ -120,8 +136,28 @@ public partial class MainWindow : Window
 
         _dragged = true;
         PetImage.ReleaseMouseCapture();
-        DragMove();
+        _lastDragLeft = Left;
+        LocationChanged += Window_LocationChanged;
+        try
+        {
+            DragMove();
+        }
+        finally
+        {
+            LocationChanged -= Window_LocationChanged;
+            _animation.PlayLanding();
+        }
+
+        ShowEventBubble(CompanionEvent.DragReleased);
+        ScheduleNextPhrase();
         await SaveSettingsAsync();
+    }
+
+    private void Window_LocationChanged(object? sender, EventArgs e)
+    {
+        var horizontalDelta = Left - _lastDragLeft;
+        _lastDragLeft = Left;
+        _animation.SetDragLean(horizontalDelta);
     }
 
     private void PetImage_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
@@ -139,7 +175,7 @@ public partial class MainWindow : Window
     private void ReactAndSpeak()
     {
         _animation.PlayClickReaction();
-        ShowBubble(_dialogue.GetNextPhrase(_random));
+        ShowEventBubble(CompanionEvent.Click);
         ScheduleNextPhrase();
     }
 
@@ -160,14 +196,45 @@ public partial class MainWindow : Window
     private void ScheduleNextPhrase()
     {
         _automaticTimer.Stop();
-        _automaticTimer.Interval = _scheduler.NextDelay();
+        _automaticTimer.Interval = _scheduler.NextDelay(DateTime.Now);
         _automaticTimer.Start();
     }
 
     private void AutomaticTimer_Tick(object? sender, EventArgs e)
     {
-        ShowBubble(_dialogue.GetNextPhrase(_random));
+        ShowEventBubble(CompanionEvent.Automatic);
         ScheduleNextPhrase();
+    }
+
+    private void ShowEventBubble(CompanionEvent trigger)
+    {
+        var reply = _dialogue.GetReply(trigger, DateTime.Now, _random);
+        LastReply = reply;
+        if (reply.AnimationCue == "heart" && trigger != CompanionEvent.Click)
+        {
+            _animation.PlayClickReaction();
+        }
+        else if (reply.AnimationCue is "soft_sway" or "small_nod" or "look_around")
+        {
+            _animation.PlayAmbientGesture();
+        }
+
+        if (reply.ShouldDisplayText)
+        {
+            ShowBubble(reply.Text);
+        }
+
+        if (_agentMemoryService is not null)
+        {
+            _memoryTimer.Stop();
+            _memoryTimer.Start();
+        }
+    }
+
+    private async void MemoryTimer_Tick(object? sender, EventArgs e)
+    {
+        _memoryTimer.Stop();
+        await SaveAgentMemoryAsync();
     }
 
     private void SaySomething_Click(object sender, RoutedEventArgs e) => ReactAndSpeak();
@@ -185,6 +252,7 @@ public partial class MainWindow : Window
         }
 
         UpdatePauseLabel();
+        ShowEventBubble(_paused ? CompanionEvent.AnimationPaused : CompanionEvent.AnimationResumed);
         await SaveSettingsAsync();
     }
 
@@ -202,17 +270,20 @@ public partial class MainWindow : Window
         _scale = scale;
         ApplyScale(scale);
         PlaceOnScreen();
+        ShowEventBubble(CompanionEvent.SizeChanged);
         await SaveSettingsAsync();
     }
 
     private void ApplyScale(PetScale scale)
     {
-        PetImage.Width = scale switch
+        var size = scale switch
         {
             PetScale.Small => 250,
             PetScale.Large => 390,
             _ => 320
         };
+        CharacterStage.Width = size;
+        CharacterStage.Height = size;
         SmallSizeMenuItem.IsChecked = scale == PetScale.Small;
         NormalSizeMenuItem.IsChecked = scale == PetScale.Normal;
         LargeSizeMenuItem.IsChecked = scale == PetScale.Large;
@@ -237,13 +308,31 @@ public partial class MainWindow : Window
         var point = DefaultPosition(work);
         Left = point.X;
         Top = point.Y;
+        ShowEventBubble(CompanionEvent.PositionRestored);
         await SaveSettingsAsync();
     }
 
     private async void Exit_Click(object sender, RoutedEventArgs e)
     {
         await SaveSettingsAsync();
+        await SaveAgentMemoryAsync();
         System.Windows.Application.Current.Shutdown();
+    }
+
+    private async Task SaveAgentMemoryAsync()
+    {
+        if (_agentMemoryService is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _agentMemoryService.SaveAsync(_dialogue.CreateSnapshot());
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
     }
 
     private async Task SaveSettingsAsync()
@@ -262,5 +351,6 @@ public partial class MainWindow : Window
     {
         _automaticTimer.Stop();
         _bubbleTimer.Stop();
+        _memoryTimer.Stop();
     }
 }

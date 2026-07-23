@@ -5,7 +5,7 @@ public sealed record AgentReply(
     DialogueCategory Category,
     DialogueTreeKind Tree,
     CompanionEvent Trigger,
-    string SceneId = "legacy",
+    string SceneId = "unknown",
     SceneExpression Expression = SceneExpression.Direct,
     string AnimationCue = "none",
     bool ShouldDisplayText = true,

@@ -5,28 +5,30 @@ namespace CompanionDesktopPet.Tests;
 public sealed class DialogueServiceTests
 {
     [Theory]
-    [InlineData(7, "早上好呀，今天也一起加油 ♡")]
-    [InlineData(13, "下午好，要记得喝水哦 ♡")]
-    [InlineData(19, "晚上好，辛苦一天啦 ♡")]
-    [InlineData(1, "这么晚还没睡呀？要照顾好自己哦")]
-    public void GetGreeting_UsesLocalHour(int hour, string expected)
+    [InlineData(CompanionEvent.Startup)]
+    [InlineData(CompanionEvent.Click)]
+    [InlineData(CompanionEvent.Automatic)]
+    public void GetReply_ReturnsEnabledV2TextWithProvenance(CompanionEvent trigger)
     {
         var service = new DialogueService();
-        Assert.Equal(expected, service.GetGreeting(new DateTime(2026, 7, 22, hour, 0, 0)));
+
+        var reply = service.GetReply(
+            trigger,
+            new DateTime(2026, 7, 22, 15, 0, 0, DateTimeKind.Local),
+            new Random(1000 + (int)trigger));
+
+        Assert.True(reply.ShouldDisplayText);
+        var source = Assert.IsType<DialogueLine>(reply.SourceLine);
+        Assert.True(source.Enabled);
+        Assert.Equal(source.Text, reply.Text);
+        Assert.Equal(source.SemanticGroup, reply.SemanticGroup);
+        Assert.Contains(source, PersonaCorpus.All);
     }
 
     [Fact]
-    public void GetNextPhrase_DoesNotImmediatelyRepeat()
+    public void DialogueService_ExposesNoLegacyGreetingOrPhrasePath()
     {
-        var service = new DialogueService();
-        var random = new Random(1234);
-        var previous = service.GetNextPhrase(random);
-
-        for (var index = 0; index < 30; index++)
-        {
-            var next = service.GetNextPhrase(random);
-            Assert.NotEqual(previous, next);
-            previous = next;
-        }
+        Assert.Null(typeof(DialogueService).GetMethod("GetGreeting"));
+        Assert.Null(typeof(DialogueService).GetMethod("GetNextPhrase"));
     }
 }

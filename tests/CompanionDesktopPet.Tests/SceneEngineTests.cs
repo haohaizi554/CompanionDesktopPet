@@ -126,4 +126,41 @@ public sealed class SceneEngineTests
         Assert.False(InterruptionBudget.CanPlay(scene, now, history, isFullscreen: false));
         Assert.True(InterruptionBudget.CanPlay(scene, now.AddHours(1), history, isFullscreen: false));
     }
+
+    [Fact]
+    public void SceneContext_LeavesFullscreenUnknownByDefault()
+    {
+        var property = typeof(SceneContext).GetProperty(nameof(SceneContext.IsFullscreen));
+        var now = new DateTime(2026, 7, 22, 15, 0, 0);
+        var context = new SceneContext(
+            CompanionEvent.Automatic,
+            now,
+            CharacterState.Create(now));
+
+        Assert.Equal(typeof(bool?), property!.PropertyType);
+        Assert.Null(property.GetValue(context));
+        Assert.DoesNotContain("not_fullscreen", ContextTokens(context));
+    }
+
+    [Fact]
+    public void SceneContext_AddsNotFullscreenOnlyForAnExplicitFalseSignal()
+    {
+        var now = new DateTime(2026, 7, 22, 15, 0, 0);
+        var context = new SceneContext(
+            CompanionEvent.Automatic,
+            now,
+            CharacterState.Create(now),
+            IsFullscreen: false);
+
+        Assert.Contains("not_fullscreen", ContextTokens(context));
+    }
+
+    private static IReadOnlySet<string> ContextTokens(SceneContext context)
+    {
+        var method = typeof(SceneScheduler).GetMethod(
+            "ContextTokens",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(method);
+        return Assert.IsAssignableFrom<IReadOnlySet<string>>(method!.Invoke(null, [context]));
+    }
 }

@@ -7,10 +7,10 @@ public sealed class TemporalDialogueServiceTests
     public static TheoryData<int, TimePeriod> TimePeriodBoundaries => new()
     {
         { 0, TimePeriod.LateNight },
-        { 4, TimePeriod.LateNight },
+        { 3, TimePeriod.LateNight },
+        { 4, TimePeriod.Dawn },
         { 5, TimePeriod.Dawn },
-        { 7, TimePeriod.Dawn },
-        { 8, TimePeriod.Morning },
+        { 6, TimePeriod.Morning },
         { 10, TimePeriod.Morning },
         { 11, TimePeriod.Noon },
         { 13, TimePeriod.Noon },

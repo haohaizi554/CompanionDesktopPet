@@ -21,7 +21,9 @@ public partial class App : System.Windows.Application
         DispatcherUnhandledException += HandleDispatcherException;
         var settingsService = new SettingsService();
         var settings = await settingsService.LoadAsync();
-        var window = new MainWindow(settings, settingsService);
+        var agentMemoryService = new AgentMemoryService();
+        var agentMemory = await agentMemoryService.LoadAsync();
+        var window = new MainWindow(settings, settingsService, agentMemoryService, agentMemory);
         MainWindow = window;
         window.Show();
     }
