@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import calendar
 import hashlib
 import json
 import math
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -164,6 +166,57 @@ PII_PATTERNS = (
     re.compile(r"(?<!\d)\d{17}[\dXx](?!\d)"),
     re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"),
 )
+COMMON_CHINESE_SURNAMES = (
+    "赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦尤许何吕施张孔曹严华"
+    "金魏陶姜戚谢邹喻柏水窦章云苏潘葛奚范彭郎鲁韦昌马苗凤花方"
+    "俞任袁柳鲍史唐费廉岑薛雷贺倪汤滕殷罗毕郝邬安常乐于时傅皮"
+    "卞齐康伍余元顾孟平黄和穆萧尹姚邵湛汪祁毛禹狄米贝明臧计伏"
+    "成戴谈宋茅庞熊纪舒屈项祝董梁杜阮蓝闵季贾路娄江童颜郭梅盛"
+    "林刁钟徐邱骆高夏蔡田樊胡凌霍虞万支柯管卢莫经房裘缪干解应"
+    "宗丁宣贲邓郁单杭洪包诸左石崔吉龚程邢裴陆荣翁荀羊惠甄曲封"
+    "芮羿储靳汲邴糜松井段富巫乌焦巴弓牧隗山谷车侯宓蓬全班仰秋"
+    "仲伊宫宁仇栾暴甘厉戎祖武符刘景詹束龙叶幸司韶郜黎蓟薄印宿"
+    "白怀蒲邰鄂索咸籍赖卓蔺屠蒙池乔阴胥能苍双闻莘党翟谭贡劳姬"
+    "申扶堵冉宰郦雍郤璩桑桂濮牛寿通边扈燕冀郏浦尚农温别庄晏柴"
+    "瞿阎充慕连茹习宦艾鱼容向古易慎戈廖庾终暨居衡步都耿满弘匡"
+    "国文寇广禄阙东欧利师巩聂关荆司马欧阳上官诸葛夏侯东方"
+)
+NAME_CONTEXT_MARKERS = (
+    "今天",
+    "昨天",
+    "明天",
+    "刚才",
+    "曾经",
+    "目前",
+    "现在",
+    "以前",
+    "住在",
+    "来自",
+    "出生于",
+    "来了",
+    "来过",
+    "来到",
+    "去了",
+    "说过",
+    "说道",
+    "说",
+    "告诉",
+    "联系",
+    "上班",
+    "工作",
+    "请假",
+    "发来",
+    "写了",
+)
+CONTEXTUAL_CHINESE_NAME_PATTERN = re.compile(
+    rf"(?<![\u3400-\u9fff])"
+    rf"[{COMMON_CHINESE_SURNAMES}][\u3400-\u9fff]{{1,2}}?"
+    rf"(?=(?:{'|'.join(map(re.escape, NAME_CONTEXT_MARKERS))}))"
+)
+LABELED_CHINESE_NAME_PATTERN = re.compile(
+    rf"(?:姓名|名字|真名|叫作|叫|我是)\s*[:：]?\s*"
+    rf"[{COMMON_CHINESE_SURNAMES}][\u3400-\u9fff]{{1,2}}"
+)
 STRONG_EMOTION_MARKERS = (
     "永远陪",
     "绝对不会离开",
@@ -183,7 +236,9 @@ CATCHPHRASES = (
     "本姑娘",
     "玥玥",
 )
-ALLOWLIST_KEYS = frozenset({"line_id", "normalized_text_sha256", "reason"})
+ALLOWLIST_KEYS = frozenset(
+    {"rule_code", "line_id", "normalized_text_sha256", "reason"}
+)
 ALLOWLISTABLE_CODES = frozenset(
     {"fake_context", "user_direct_context", "technical_fake_context", "pii_enabled"}
 )
@@ -211,38 +266,44 @@ RUNTIME_LIMIT_KEYS = frozenset(
         "user_direct_recent_max",
         "easter_egg_recent_window",
         "easter_egg_recent_max",
+        "long_silence_minutes",
         "interrupt_cost_minimum_intervals_minutes",
     }
 )
 FORMAT_ERROR_CODES = frozenset(
     {"config_format", "config_keys", "allowlist_format", "simulation_format"}
 )
-SIMULATION_KEYS = frozenset({"days", "seeds", "hard_violations", "plays", "metrics"})
-SIMULATION_METRIC_KEYS = frozenset(
+SIMULATION_KEYS = frozenset(
     {
-        "actual_output_count",
-        "category_group_ratio",
-        "output_mode_ratio",
-        "id_cooldown_violations",
-        "semantic_cooldown_violations",
-        "required_context_violations",
-        "adjacent_technical",
-        "adjacent_daily_care",
-        "adjacent_emotional_reflection",
-        "question_count",
+        "schema_version",
+        "corpus_sha256",
+        "scheduler_config_sha256",
+        "days",
+        "seeds",
+        "attempts",
     }
 )
-SIMULATION_PLAY_KEYS = frozenset(
+SIMULATION_ATTEMPT_KEYS = frozenset(
+    {"seed", "attempted_at", "context", "selected_id"}
+)
+SIMULATION_CONTEXT_KEYS = frozenset(
     {
-        "seed",
-        "category_group",
-        "output_mode",
-        "question",
-        "required_context_violation",
-        "id_cooldown_violation",
-        "semantic_cooldown_violation",
-        "adjacent_group_violation",
+        "event",
+        "daypart",
+        "weekday",
+        "is_weekend",
+        "holiday",
+        "anniversary_days",
+        "minutes_since_last_output",
+        "ide_foreground",
+        "active_minutes",
+        "idle_return",
+        "fullscreen",
     }
+)
+SIMULATION_EVENTS = frozenset({"tick", "app_start", "day_changed"})
+SIMULATION_DAYPARTS = frozenset(
+    {"morning", "noon", "afternoon", "evening", "late_night"}
 )
 
 
@@ -325,6 +386,19 @@ def _is_integer(value: object) -> bool:
 
 def normalized_text_sha256(text: str) -> str:
     return hashlib.sha256(normalize_text(text).encode("utf-8")).hexdigest()
+
+
+def scheduler_config_sha256(config: object) -> str:
+    """Hash the scheduler's semantic JSON value, independent of formatting."""
+
+    payload = json.dumps(
+        config,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _json_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -443,12 +517,21 @@ def _validate_runtime_limits(config: Mapping[str, object], issues: _Issues) -> N
     valid &= raw.get("semantic_group_no_repeat") is True
 
     adjacent = raw.get("block_adjacent_category_groups")
-    valid &= (
-        isinstance(adjacent, list)
-        and len(adjacent) == len(set(adjacent))
-        and set(adjacent)
-        == {"technical", "daily_care", "emotional_reflection"}
+    adjacent_is_string_list = isinstance(adjacent, list) and all(
+        isinstance(value, str) for value in adjacent
     )
+    if not adjacent_is_string_list:
+        issues.error(
+            "config_format",
+            "block_adjacent_category_groups must be an array of strings",
+        )
+        valid = False
+    else:
+        valid &= (
+            len(adjacent) == len(set(adjacent))
+            and set(adjacent)
+            == {"technical", "daily_care", "emotional_reflection"}
+        )
     expected_pairs = {
         "technical_recent_window": 5,
         "technical_recent_max": 2,
@@ -456,6 +539,7 @@ def _validate_runtime_limits(config: Mapping[str, object], issues: _Issues) -> N
         "user_direct_recent_max": 2,
         "easter_egg_recent_window": 50,
         "easter_egg_recent_max": 1,
+        "long_silence_minutes": 180,
     }
     valid &= all(raw.get(name) == value and _is_integer(raw.get(name)) for name, value in expected_pairs.items())
 
@@ -540,7 +624,7 @@ def _required_context_tokens(value: object) -> tuple[str, ...] | None:
 def _looks_like_pii(text: str) -> bool:
     if any(marker in text for marker in PII_MARKERS) or any(
         pattern.search(text) for pattern in PII_PATTERNS
-    ):
+    ) or CONTEXTUAL_CHINESE_NAME_PATTERN.search(text) or LABELED_CHINESE_NAME_PATTERN.search(text):
         return True
     location = r"(?:湖南|长沙|广东)"
     personal_location = (
@@ -605,15 +689,15 @@ def _validate_line(row: CorpusLine, row_number: int, issues: _Issues) -> None:
             issues.error("required_field", f"{field} must be a non-empty string", line_id, row_number)
     if isinstance(row.id, str) and row.id and ID_PATTERN.fullmatch(row.id) is None:
         issues.error("invalid_id", "id must use only stable ASCII identifier characters", line_id, row_number)
-    if row.category_group not in CATEGORY_GROUPS:
+    if not isinstance(row.category_group, str) or row.category_group not in CATEGORY_GROUPS:
         issues.error("invalid_category_group", f"unknown category_group {row.category_group!r}", line_id, row_number)
-    if row.output_mode not in OUTPUT_MODES:
+    if not isinstance(row.output_mode, str) or row.output_mode not in OUTPUT_MODES:
         issues.error("invalid_output_mode", f"unknown output_mode {row.output_mode!r}", line_id, row_number)
-    if row.trigger not in TRIGGERS:
+    if not isinstance(row.trigger, str) or row.trigger not in TRIGGERS:
         issues.error("invalid_trigger", f"unknown trigger {row.trigger!r}", line_id, row_number)
-    if row.tone not in TONES:
+    if not isinstance(row.tone, str) or row.tone not in TONES:
         issues.error("invalid_tone", f"unknown tone {row.tone!r}", line_id, row_number)
-    if row.source_kind not in SOURCE_KINDS:
+    if not isinstance(row.source_kind, str) or row.source_kind not in SOURCE_KINDS:
         issues.error("invalid_source_kind", f"unknown source_kind {row.source_kind!r}", line_id, row_number)
     if not _is_integer(row.interrupt_cost) or not 0 <= row.interrupt_cost <= 5:
         issues.error("invalid_interrupt_cost", "interrupt_cost must be an integer in [0, 5]", line_id, row_number)
@@ -768,7 +852,11 @@ def _validate_line(row: CorpusLine, row_number: int, issues: _Issues) -> None:
             line_id,
             row_number,
         )
-    if enabled and row.source_kind in {"archived_question", "manual_review"}:
+    if (
+        enabled
+        and isinstance(row.source_kind, str)
+        and row.source_kind in {"archived_question", "manual_review"}
+    ):
         issues.error(
             "unsafe_source_kind",
             "archived_question and manual_review rows cannot be enabled",
@@ -926,7 +1014,174 @@ def _distribution_issues(rows: Sequence[CorpusLine], issues: _Issues) -> None:
                     )
 
 
-def _simulation_issues(simulation: object | None, issues: _Issues) -> None:
+@dataclass(frozen=True, slots=True)
+class _SimulationAttempt:
+    source_index: int
+    seed: int
+    attempted_at: datetime
+    context: Mapping[str, object]
+    selected_id: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class _SimulationOutput:
+    attempt: _SimulationAttempt
+    row: CorpusLine
+
+
+def _expected_daypart(timestamp: datetime) -> str:
+    hour = timestamp.hour
+    if 6 <= hour < 11:
+        return "morning"
+    if 11 <= hour < 14:
+        return "noon"
+    if 14 <= hour < 18:
+        return "afternoon"
+    if 18 <= hour < 23:
+        return "evening"
+    return "late_night"
+
+
+def _parse_simulation_timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+        return None
+    return timestamp
+
+
+def _valid_optional_boolean(value: object) -> bool:
+    return value is None or isinstance(value, bool)
+
+
+def _simulation_context_valid(
+    context: object,
+    timestamp: datetime,
+) -> bool:
+    if not isinstance(context, Mapping) or set(context) != SIMULATION_CONTEXT_KEYS:
+        return False
+    event = context.get("event")
+    daypart = context.get("daypart")
+    weekday = context.get("weekday")
+    is_weekend = context.get("is_weekend")
+    holiday = context.get("holiday")
+    anniversary_days = context.get("anniversary_days")
+    minutes_since_last_output = context.get("minutes_since_last_output")
+    active_minutes = context.get("active_minutes")
+    return (
+        isinstance(event, str)
+        and event in SIMULATION_EVENTS
+        and isinstance(daypart, str)
+        and daypart in SIMULATION_DAYPARTS
+        and daypart == _expected_daypart(timestamp)
+        and _is_integer(weekday)
+        and weekday == timestamp.isoweekday()
+        and isinstance(is_weekend, bool)
+        and is_weekend == (timestamp.isoweekday() >= 6)
+        and (holiday is None or (isinstance(holiday, str) and bool(holiday.strip())))
+        and _is_integer(anniversary_days)
+        and anniversary_days >= 0
+        and _is_finite_number(minutes_since_last_output)
+        and float(minutes_since_last_output) >= 0
+        and (active_minutes is None or (_is_integer(active_minutes) and active_minutes >= 0))
+        and _valid_optional_boolean(context.get("ide_foreground"))
+        and _valid_optional_boolean(context.get("idle_return"))
+        and _valid_optional_boolean(context.get("fullscreen"))
+    )
+
+
+def _simulation_trigger_matches(
+    trigger: object,
+    context: Mapping[str, object],
+    timestamp: datetime,
+    elapsed_minutes: float,
+    long_silence_minutes: int,
+) -> bool:
+    if not isinstance(trigger, str):
+        return False
+    if trigger == "any":
+        return True
+    if trigger == "app_start":
+        return context.get("event") == "app_start"
+    if trigger == "day_changed":
+        return context.get("event") == "day_changed"
+    if trigger in SIMULATION_DAYPARTS:
+        return trigger == _expected_daypart(timestamp)
+    if trigger == "weekday":
+        return timestamp.isoweekday() < 6
+    if trigger == "weekend":
+        return timestamp.isoweekday() >= 6
+    if trigger == "holiday":
+        return isinstance(context.get("holiday"), str)
+    if trigger == "anniversary":
+        return _is_integer(context.get("anniversary_days")) and context["anniversary_days"] > 0
+    if trigger == "long_silence":
+        return elapsed_minutes >= long_silence_minutes
+    if trigger == "ide_foreground":
+        return context.get("ide_foreground") is True
+    if trigger == "long_active":
+        return _is_integer(context.get("active_minutes")) and context["active_minutes"] >= 90
+    if trigger == "idle_return":
+        return context.get("idle_return") is True
+    # story_timer has no signal in the documented MVP context and must not be selected.
+    return False
+
+
+def _simulation_context_token_matches(
+    token: str,
+    context: Mapping[str, object],
+    timestamp: datetime,
+) -> bool:
+    if token == "none":
+        return True
+    if token == "app_started":
+        return context.get("event") == "app_start"
+    if token in {"holiday", "date:holiday"}:
+        return isinstance(context.get("holiday"), str)
+    if token == "anniversary":
+        return _is_integer(context.get("anniversary_days")) and context["anniversary_days"] > 0
+    if token == "ide_foreground":
+        return context.get("ide_foreground") is True
+    if token == "active_90m":
+        return _is_integer(context.get("active_minutes")) and context["active_minutes"] >= 90
+    if token == "idle_return":
+        return context.get("idle_return") is True
+    if token == "not_fullscreen":
+        return context.get("fullscreen") is False
+    if token == "day:weekday":
+        return timestamp.isoweekday() < 6
+    if token == "day:weekend":
+        return timestamp.isoweekday() >= 6
+    if token == "time:dawn":
+        return 4 <= timestamp.hour < 6
+    if token.startswith("time:"):
+        return token.removeprefix("time:") == _expected_daypart(timestamp)
+    season = (
+        "spring" if timestamp.month in {3, 4, 5}
+        else "summer" if timestamp.month in {6, 7, 8}
+        else "autumn" if timestamp.month in {9, 10, 11}
+        else "winter"
+    )
+    if token.startswith("season:"):
+        return token == f"season:{season}"
+    if token == "date:month_boundary":
+        return timestamp.day in {1, calendar.monthrange(timestamp.year, timestamp.month)[1]}
+    return False
+
+
+def _simulation_issues(
+    simulation: object | None,
+    rows: Sequence[CorpusLine],
+    scheduler_config: object,
+    issues: _Issues,
+    *,
+    expected_corpus_sha256: str,
+    expected_scheduler_config_sha256: str,
+) -> None:
     if simulation is None:
         issues.warning(
             "simulation_missing",
@@ -938,181 +1193,358 @@ def _simulation_issues(simulation: object | None, issues: _Issues) -> None:
         return
     if set(simulation) != SIMULATION_KEYS:
         issues.error("simulation_format", "simulation result uses unknown or missing top-level keys")
+    if simulation.get("schema_version") != 1 or isinstance(
+        simulation.get("schema_version"), bool
+    ):
+        issues.error("simulation_format", "simulation schema_version must be integer 1")
+    for key, expected in (
+        ("corpus_sha256", expected_corpus_sha256),
+        ("scheduler_config_sha256", expected_scheduler_config_sha256),
+    ):
+        digest = simulation.get(key)
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            issues.error("simulation_format", f"simulation {key} must be lowercase SHA-256")
+        elif digest != expected:
+            issues.error(
+                "simulation_hash_mismatch",
+                f"simulation {key} does not match the inputs under validation",
+            )
+
     days = simulation.get("days")
     if not _is_integer(days) or days < 30:
         issues.error("simulation_duration", "simulation must cover at least 30 days")
+    required_days = days if _is_integer(days) and days >= 30 else 30
     seeds = simulation.get("seeds")
-    seeds_valid = (
+    seeds_structurally_valid = (
         isinstance(seeds, list)
         and all(_is_integer(seed) for seed in seeds)
         and len(seeds) == len(set(seeds))
-        and len(seeds) >= 10
     )
-    if not seeds_valid:
+    if not seeds_structurally_valid or len(seeds) < 10:
         issues.error("simulation_seed_count", "simulation must contain at least 10 distinct seeds")
-    violations = simulation.get("hard_violations")
-    if not isinstance(violations, list):
-        issues.error("simulation_format", "hard_violations must be an array")
-    else:
-        for violation in violations:
-            detail = json.dumps(violation, ensure_ascii=False, sort_keys=True)
-            issues.error("simulation_hard_violation", f"simulation reported: {detail}")
+    seed_set = set(seeds) if seeds_structurally_valid else set()
 
-    metrics = simulation.get("metrics")
-    if not isinstance(metrics, Mapping) or set(metrics) != SIMULATION_METRIC_KEYS:
-        issues.error("simulation_format", "simulation metrics must be an object")
+    attempts_value = simulation.get("attempts")
+    if not isinstance(attempts_value, list):
+        issues.error("simulation_format", "simulation attempts must be an array")
         return
-    plays = simulation.get("plays")
-    if not isinstance(plays, list):
-        issues.error("simulation_format", "simulation plays must be an array")
+    runtime_limits = (
+        scheduler_config.get("runtime_limits")
+        if isinstance(scheduler_config, Mapping)
+        else None
+    )
+    if not isinstance(runtime_limits, Mapping):
+        issues.error(
+            "simulation_format",
+            "simulation constraints cannot be recomputed without valid runtime_limits",
+        )
         return
-    if not plays:
+
+    parsed_attempts: list[_SimulationAttempt] = []
+    covered_dates: dict[int, set[object]] = defaultdict(set)
+    seen_attempt_times: set[tuple[int, datetime]] = set()
+    for index, attempt in enumerate(attempts_value):
+        if not isinstance(attempt, Mapping) or set(attempt) != SIMULATION_ATTEMPT_KEYS:
+            issues.error(
+                "simulation_format",
+                f"simulation attempt {index} has unknown or missing keys",
+            )
+            continue
+        seed = attempt.get("seed")
+        timestamp = _parse_simulation_timestamp(attempt.get("attempted_at"))
+        selected_id = attempt.get("selected_id")
+        if (
+            not _is_integer(seed)
+            or (seeds_structurally_valid and seed not in seed_set)
+            or timestamp is None
+            or (selected_id is not None and (not isinstance(selected_id, str) or not selected_id))
+            or (timestamp is not None and not _simulation_context_valid(attempt.get("context"), timestamp))
+        ):
+            issues.error(
+                "simulation_format",
+                f"simulation attempt {index} has invalid seed, timestamp, context or selected_id",
+            )
+            continue
+        assert timestamp is not None and _is_integer(seed)
+        key = (seed, timestamp)
+        if key in seen_attempt_times:
+            issues.error(
+                "simulation_format",
+                f"simulation seed {seed} repeats attempted_at {timestamp.isoformat()}",
+            )
+            continue
+        seen_attempt_times.add(key)
+        context = attempt.get("context")
+        assert isinstance(context, Mapping)
+        parsed_attempts.append(
+            _SimulationAttempt(index, seed, timestamp, context, selected_id)
+        )
+        covered_dates[seed].add(timestamp.date())
+
+    incomplete_seeds: list[int] = []
+    if seeds_structurally_valid:
+        for seed in sorted(seed_set):
+            dates = covered_dates.get(seed, set())
+            span = 0
+            if dates:
+                span = (max(dates) - min(dates)).days + 1
+            if len(dates) < required_days or span < required_days:
+                incomplete_seeds.append(seed)
+    if incomplete_seeds:
+        issues.error(
+            "simulation_seed_coverage",
+            f"each seed must cover {required_days} calendar days; incomplete seeds={incomplete_seeds!r}",
+        )
+
+    by_id: dict[str, list[CorpusLine]] = defaultdict(list)
+    for row in rows:
+        if isinstance(row.id, str):
+            by_id[row.id].append(row)
+    outputs_by_seed: dict[int, list[_SimulationOutput]] = defaultdict(list)
+    for attempt in parsed_attempts:
+        if attempt.selected_id is None:
+            continue
+        matches = by_id.get(attempt.selected_id, [])
+        if len(matches) != 1 or matches[0].enabled is not True:
+            issues.error(
+                "simulation_unknown_line",
+                "selected_id must resolve to exactly one enabled corpus row",
+                attempt.selected_id,
+            )
+            continue
+        outputs_by_seed[attempt.seed].append(_SimulationOutput(attempt, matches[0]))
+
+    output_count = sum(map(len, outputs_by_seed.values()))
+    if output_count == 0:
         issues.error("simulation_zero_outputs", "simulation must contain at least one actual output")
         return
 
-    play_format_valid = True
+    minimum_interval = runtime_limits.get("minimum_interval_minutes")
+    max_per_hour = runtime_limits.get("max_outputs_per_hour")
+    late_night_max = runtime_limits.get("late_night_max_outputs_per_hour")
+    blocked_groups = runtime_limits.get("block_adjacent_category_groups")
+    interrupt_intervals = runtime_limits.get("interrupt_cost_minimum_intervals_minutes")
+    long_silence = runtime_limits.get("long_silence_minutes")
+    runtime_types_valid = (
+        _is_integer(minimum_interval)
+        and _is_integer(max_per_hour)
+        and _is_integer(late_night_max)
+        and isinstance(blocked_groups, list)
+        and all(isinstance(group, str) for group in blocked_groups)
+        and isinstance(interrupt_intervals, Mapping)
+        and all(_is_integer(interrupt_intervals.get(str(cost))) for cost in range(6))
+        and _is_integer(long_silence)
+        and all(
+            _is_integer(runtime_limits.get(name))
+            for name in (
+                "technical_recent_window",
+                "technical_recent_max",
+                "user_direct_recent_window",
+                "user_direct_recent_max",
+                "easter_egg_recent_window",
+                "easter_egg_recent_max",
+            )
+        )
+    )
+    if not runtime_types_valid:
+        issues.error(
+            "simulation_format",
+            "simulation constraints cannot be recomputed from malformed runtime limits",
+        )
+        return
+    assert isinstance(minimum_interval, int)
+    assert isinstance(max_per_hour, int)
+    assert isinstance(late_night_max, int)
+    assert isinstance(blocked_groups, list)
+    assert isinstance(interrupt_intervals, Mapping)
+    assert isinstance(long_silence, int)
+
     group_counts: Counter[str] = Counter()
     mode_counts: Counter[str] = Counter()
-    computed_flags = {
-        "id_cooldown_violations": 0,
-        "semantic_cooldown_violations": 0,
-        "required_context_violations": 0,
-        "question_count": 0,
-    }
-    for index, play in enumerate(plays):
-        if not isinstance(play, Mapping) or set(play) != SIMULATION_PLAY_KEYS:
-            issues.error("simulation_format", f"simulation play {index} has unknown or missing keys")
-            play_format_valid = False
-            continue
-        seed = play.get("seed")
-        category_group = play.get("category_group")
-        output_mode = play.get("output_mode")
-        flags = (
-            "question",
-            "required_context_violation",
-            "id_cooldown_violation",
-            "semantic_cooldown_violation",
-            "adjacent_group_violation",
+    for seed in sorted(outputs_by_seed):
+        outputs = sorted(
+            outputs_by_seed[seed],
+            key=lambda output: (output.attempt.attempted_at, output.attempt.source_index),
         )
-        if (
-            not _is_integer(seed)
-            or (seeds_valid and seed not in seeds)
-            or category_group not in CATEGORY_GROUPS
-            or output_mode not in OUTPUT_MODES
-            or any(not isinstance(play.get(flag), bool) for flag in flags)
-        ):
-            issues.error("simulation_format", f"simulation play {index} has invalid field values")
-            play_format_valid = False
-            continue
-        group_counts[str(category_group)] += 1
-        mode_counts[str(output_mode)] += 1
-        computed_flags["question_count"] += int(play["question"])
-        computed_flags["required_context_violations"] += int(
-            play["required_context_violation"]
-        )
-        computed_flags["id_cooldown_violations"] += int(play["id_cooldown_violation"])
-        computed_flags["semantic_cooldown_violations"] += int(
-            play["semantic_cooldown_violation"]
-        )
-        if play["adjacent_group_violation"]:
-            issues.error(
-                "simulation_hard_violation",
-                f"simulation play {index} reports an adjacent constrained-group violation",
-            )
+        previous: _SimulationOutput | None = None
+        history: list[CorpusLine] = []
+        last_id: dict[str, datetime] = {}
+        last_semantic: dict[str, datetime] = {}
+        daily_id_counts: Counter[tuple[object, str]] = Counter()
+        hourly_counts: Counter[tuple[object, int]] = Counter()
+        late_hourly_counts: Counter[tuple[object, int]] = Counter()
 
-    if not play_format_valid:
-        return
-    output_count = len(plays)
-    if metrics.get("actual_output_count") != output_count or isinstance(
-        metrics.get("actual_output_count"), bool
+        for output in outputs:
+            attempt = output.attempt
+            row = output.row
+            timestamp = attempt.attempted_at
+            elapsed_minutes = float(attempt.context["minutes_since_last_output"])
+            if previous is not None:
+                elapsed_minutes = (
+                    timestamp - previous.attempt.attempted_at
+                ).total_seconds() / 60
+                reported_elapsed = float(attempt.context["minutes_since_last_output"])
+                if abs(reported_elapsed - elapsed_minutes) > 1e-9:
+                    issues.error(
+                        "simulation_context_violation",
+                        "minutes_since_last_output does not match the preceding selected event",
+                        row.id,
+                    )
+                if elapsed_minutes < minimum_interval:
+                    issues.error(
+                        "simulation_minimum_interval_violation",
+                        f"selected outputs are only {elapsed_minutes:g} minutes apart",
+                        row.id,
+                    )
+                required_interval = interrupt_intervals.get(str(row.interrupt_cost))
+                if _is_integer(required_interval) and elapsed_minutes < required_interval:
+                    issues.error(
+                        "simulation_interrupt_budget_violation",
+                        f"interrupt_cost {row.interrupt_cost!r} requires {required_interval} minutes",
+                        row.id,
+                    )
+                if row.semantic_group == previous.row.semantic_group:
+                    issues.error(
+                        "simulation_adjacent_semantic_violation",
+                        "adjacent outputs repeat semantic_group",
+                        row.id,
+                    )
+                if (
+                    isinstance(row.category_group, str)
+                    and row.category_group == previous.row.category_group
+                    and row.category_group in blocked_groups
+                ):
+                    issues.error(
+                        "simulation_adjacent_group_violation",
+                        f"adjacent outputs repeat blocked category_group {row.category_group!r}",
+                        row.id,
+                    )
+
+            if not _simulation_trigger_matches(
+                row.trigger,
+                attempt.context,
+                timestamp,
+                elapsed_minutes,
+                long_silence,
+            ):
+                issues.error(
+                    "simulation_trigger_violation",
+                    f"selected row trigger {row.trigger!r} does not match the event",
+                    row.id,
+                )
+            tokens = _required_context_tokens(row.required_context)
+            if tokens is None or not all(
+                _simulation_context_token_matches(token, attempt.context, timestamp)
+                for token in tokens
+            ):
+                issues.error(
+                    "simulation_context_violation",
+                    f"selected row required_context {row.required_context!r} is not satisfied",
+                    row.id,
+                )
+
+            if row.requires_reply is True or (
+                isinstance(row.text, str) and any(mark in row.text for mark in ("?", "？"))
+            ):
+                issues.error(
+                    "simulation_question",
+                    "selected row asks a question or requires a reply",
+                    row.id,
+                )
+
+            if isinstance(row.id, str) and row.id in last_id and _is_finite_number(row.cooldown_hours):
+                elapsed_hours = (timestamp - last_id[row.id]).total_seconds() / 3600
+                if elapsed_hours < float(row.cooldown_hours):
+                    issues.error(
+                        "simulation_id_cooldown_violation",
+                        f"row repeated after {elapsed_hours:g}h inside its cooldown",
+                        row.id,
+                    )
+            if isinstance(row.semantic_group, str) and row.semantic_group in last_semantic and _is_finite_number(row.semantic_cooldown_hours):
+                elapsed_hours = (
+                    timestamp - last_semantic[row.semantic_group]
+                ).total_seconds() / 3600
+                if elapsed_hours < float(row.semantic_cooldown_hours):
+                    issues.error(
+                        "simulation_semantic_cooldown_violation",
+                        f"semantic_group repeated after {elapsed_hours:g}h inside its cooldown",
+                        row.id,
+                    )
+
+            day_id = (timestamp.date(), str(row.id))
+            daily_id_counts[day_id] += 1
+            if _is_integer(row.max_per_day) and daily_id_counts[day_id] == row.max_per_day + 1:
+                issues.error(
+                    "simulation_max_per_day_violation",
+                    f"row exceeds max_per_day={row.max_per_day}",
+                    row.id,
+                )
+            hour_key = (timestamp.date(), timestamp.hour)
+            hourly_counts[hour_key] += 1
+            if hourly_counts[hour_key] == max_per_hour + 1:
+                issues.error(
+                    "simulation_hourly_budget_violation",
+                    f"seed {seed} exceeds {max_per_hour} outputs in one clock hour",
+                    row.id,
+                )
+            if _expected_daypart(timestamp) == "late_night":
+                late_hourly_counts[hour_key] += 1
+                if late_hourly_counts[hour_key] == late_night_max + 1:
+                    issues.error(
+                        "simulation_late_night_budget_violation",
+                        f"seed {seed} exceeds the late-night hourly budget",
+                        row.id,
+                    )
+
+            history.append(row)
+            technical_window = int(runtime_limits["technical_recent_window"])
+            user_window = int(runtime_limits["user_direct_recent_window"])
+            easter_window = int(runtime_limits["easter_egg_recent_window"])
+            if sum(item.category_group == "technical" for item in history[-technical_window:]) > int(runtime_limits["technical_recent_max"]):
+                issues.error(
+                    "simulation_recent_technical_violation",
+                    "recent technical outputs exceed the configured window quota",
+                    row.id,
+                )
+            if sum(item.output_mode == "user_direct" for item in history[-user_window:]) > int(runtime_limits["user_direct_recent_max"]):
+                issues.error(
+                    "simulation_recent_user_direct_violation",
+                    "recent user_direct outputs exceed the configured window quota",
+                    row.id,
+                )
+            if sum(item.category_group == "easter_egg" for item in history[-easter_window:]) > int(runtime_limits["easter_egg_recent_max"]):
+                issues.error(
+                    "simulation_recent_easter_egg_violation",
+                    "recent EasterEgg outputs exceed the configured window quota",
+                    row.id,
+                )
+
+            if isinstance(row.id, str):
+                last_id[row.id] = timestamp
+            if isinstance(row.semantic_group, str):
+                last_semantic[row.semantic_group] = timestamp
+            if isinstance(row.category_group, str):
+                group_counts[row.category_group] += 1
+            if isinstance(row.output_mode, str):
+                mode_counts[row.output_mode] += 1
+            previous = output
+
+    technical_ratio = group_counts["technical"] / output_count
+    easter_ratio = group_counts["easter_egg"] / output_count
+    self_ambient_ratio = (
+        mode_counts["self_talk"] + mode_counts["ambient"]
+    ) / output_count
+    user_direct_ratio = mode_counts["user_direct"] / output_count
+    if (
+        not 0.10 <= technical_ratio <= 0.20
+        or easter_ratio > 0.02
+        or self_ambient_ratio < 0.65
+        or user_direct_ratio > 0.15
     ):
         issues.error(
-            "simulation_aggregate_mismatch",
-            "actual_output_count does not equal the structured plays length",
+            "simulation_metric",
+            "recomputed technical, EasterEgg or output-mode ratios violate acceptance bounds",
         )
-    group_ratio = metrics.get("category_group_ratio")
-    mode_ratio = metrics.get("output_mode_ratio")
-    valid_ratios = (
-        isinstance(group_ratio, Mapping)
-        and isinstance(mode_ratio, Mapping)
-        and set(group_ratio) == CATEGORY_GROUPS
-        and set(mode_ratio) == OUTPUT_MODES
-        and all(
-            _is_finite_number(value) and 0 <= float(value) <= 1
-            for value in group_ratio.values()
-        )
-        and all(
-            _is_finite_number(value) and 0 <= float(value) <= 1
-            for value in mode_ratio.values()
-        )
-        and abs(sum(float(value) for value in group_ratio.values()) - 1.0) <= 1e-9
-        and abs(sum(float(value) for value in mode_ratio.values()) - 1.0) <= 1e-9
-    )
-    if valid_ratios:
-        needed = (
-            group_ratio.get("technical"),
-            group_ratio.get("easter_egg"),
-            mode_ratio.get("self_talk"),
-            mode_ratio.get("ambient"),
-            mode_ratio.get("user_direct"),
-        )
-        valid_ratios = all(_is_finite_number(value) for value in needed)
-    if not valid_ratios:
-        issues.error("simulation_metric", "simulation ratio metrics are missing or non-finite")
-    else:
-        technical = float(group_ratio["technical"])
-        easter = float(group_ratio["easter_egg"])
-        self_talk = float(mode_ratio["self_talk"])
-        ambient = float(mode_ratio["ambient"])
-        user_direct = float(mode_ratio["user_direct"])
-        if (
-            not 0.10 <= technical <= 0.20
-            or easter > 0.02
-            or self_talk + ambient < 0.65
-            or user_direct > 0.15
-        ):
-            issues.error(
-                "simulation_metric",
-                "simulation ratios violate technical, EasterEgg or output-mode acceptance bounds",
-            )
-        expected_ratios = {
-            name: group_counts[name] / output_count for name in CATEGORY_GROUPS
-        }
-        expected_modes = {
-            name: mode_counts[name] / output_count
-            for name in ("self_talk", "ambient", "user_direct", "system_observe")
-        }
-        if any(
-            abs(float(group_ratio.get(name, math.nan)) - value) > 1e-9
-            for name, value in expected_ratios.items()
-        ) or any(
-            not _is_finite_number(mode_ratio.get(name))
-            or abs(float(mode_ratio[name]) - value) > 1e-9
-            for name, value in expected_modes.items()
-        ):
-            issues.error(
-                "simulation_aggregate_mismatch",
-                "reported group/output-mode ratios do not match structured plays",
-            )
-    zero_metrics = (
-        "id_cooldown_violations",
-        "semantic_cooldown_violations",
-        "required_context_violations",
-        "adjacent_technical",
-        "adjacent_daily_care",
-        "adjacent_emotional_reflection",
-        "question_count",
-    )
-    for name in zero_metrics:
-        value = metrics.get(name)
-        if not _is_integer(value) or value != 0:
-            issues.error("simulation_metric", f"simulation metric {name} must be integer zero")
-    for name, computed in computed_flags.items():
-        if metrics.get(name) != computed:
-            issues.error(
-                "simulation_aggregate_mismatch",
-                f"reported {name}={metrics.get(name)!r} does not match structured plays value {computed}",
-            )
 
 
 def _apply_allowlist(
@@ -1159,21 +1591,24 @@ def _apply_allowlist(
     by_id: dict[str, list[CorpusLine]] = defaultdict(list)
     for row in rows:
         by_id[str(row.id)].append(row)
-    seen: set[str] = set()
-    active: dict[str, str] = {}
-    invalid_ids: set[str] = set()
+    seen: set[tuple[str, str]] = set()
+    active: dict[tuple[str, str], str] = {}
+    invalid_keys: set[tuple[str, str]] = set()
     for position, entry in enumerate(entries, start=1):
         if not isinstance(entry, Mapping) or set(entry) != ALLOWLIST_KEYS:
             issues.error(
                 "allowlist_format",
-                f"allowlist exception {position} must contain exactly line_id, normalized_text_sha256 and reason",
+                f"allowlist exception {position} must contain exactly rule_code, line_id, normalized_text_sha256 and reason",
             )
             continue
+        rule_code = entry.get("rule_code")
         line_id = entry.get("line_id")
         digest = entry.get("normalized_text_sha256")
         reason = entry.get("reason")
         if (
-            not isinstance(line_id, str)
+            not isinstance(rule_code, str)
+            or rule_code not in ALLOWLISTABLE_CODES
+            or not isinstance(line_id, str)
             or not line_id
             or not isinstance(digest, str)
             or re.fullmatch(r"[0-9a-f]{64}", digest) is None
@@ -1182,15 +1617,20 @@ def _apply_allowlist(
         ):
             issues.error("allowlist_format", f"allowlist exception {position} has invalid values")
             continue
-        if line_id in seen:
-            issues.error("allowlist_duplicate", f"allowlist line_id {line_id!r} occurs more than once", line_id)
-            invalid_ids.add(line_id)
+        key = (rule_code, line_id)
+        if key in seen:
+            issues.error(
+                "allowlist_duplicate",
+                f"allowlist tuple ({rule_code!r}, {line_id!r}) occurs more than once",
+                line_id,
+            )
+            invalid_keys.add(key)
             continue
-        seen.add(line_id)
+        seen.add(key)
         matches = by_id.get(line_id, [])
         if len(matches) != 1:
             issues.error("allowlist_unknown_line", f"allowlist line_id {line_id!r} does not resolve uniquely", line_id)
-            invalid_ids.add(line_id)
+            invalid_keys.add(key)
             continue
         actual = normalized_text_sha256(matches[0].text)
         if actual != digest:
@@ -1199,17 +1639,18 @@ def _apply_allowlist(
                 f"allowlist normalized-text SHA-256 for {line_id!r} is stale or mismatched",
                 line_id,
             )
-            invalid_ids.add(line_id)
+            invalid_keys.add(key)
             continue
-        active[line_id] = reason.strip()
+        active[key] = reason.strip()
 
     original_errors = list(issues.errors)
     retained: list[ValidationIssue] = []
-    used: set[str] = set()
+    used: set[tuple[str, str]] = set()
     for issue in original_errors:
-        reason = active.get(issue.line_id)
-        if reason is not None and issue.line_id not in invalid_ids and issue.code in ALLOWLISTABLE_CODES:
-            used.add(issue.line_id)
+        key = (issue.code, issue.line_id)
+        reason = active.get(key)
+        if reason is not None and key not in invalid_keys:
+            used.add(key)
             issues.warning(
                 f"allowlisted_{issue.code}",
                 f"{issue.message} Exception reason: {reason}",
@@ -1219,10 +1660,10 @@ def _apply_allowlist(
         else:
             retained.append(issue)
     issues.errors = retained
-    for line_id in sorted(set(active) - used - invalid_ids):
+    for rule_code, line_id in sorted(set(active) - used - invalid_keys):
         issues.error(
             "allowlist_stale",
-            f"allowlist entry for {line_id!r} no longer matches an allowlistable heuristic finding",
+            f"allowlist entry for ({rule_code!r}, {line_id!r}) no longer matches that exact heuristic finding",
             line_id,
         )
 
@@ -1234,6 +1675,7 @@ def validate_corpus(
     simulation_result: object | None = None,
     *,
     _corpus_sha256: str | None = None,
+    _scheduler_config_sha256: str | None = None,
     _require_allowlist_binding: bool = False,
     _enforce_canonical_size: bool = False,
 ) -> ValidationReport:
@@ -1258,7 +1700,6 @@ def validate_corpus(
     _duplicate_issues(typed_rows, issues)
     _cartesian_grid_issues(typed_rows, issues)
     _distribution_issues(typed_rows, issues)
-    _simulation_issues(simulation_result, issues)
     if _corpus_sha256 is None:
         from .builder import serialize_v2
 
@@ -1267,6 +1708,21 @@ def validate_corpus(
         except ValueError:
             payload = repr(typed_rows).encode("utf-8", errors="backslashreplace")
         _corpus_sha256 = hashlib.sha256(payload).hexdigest()
+    if _scheduler_config_sha256 is None:
+        try:
+            _scheduler_config_sha256 = scheduler_config_sha256(scheduler_config)
+        except (TypeError, ValueError):
+            _scheduler_config_sha256 = hashlib.sha256(
+                repr(scheduler_config).encode("utf-8", errors="backslashreplace")
+            ).hexdigest()
+    _simulation_issues(
+        simulation_result,
+        typed_rows,
+        scheduler_config,
+        issues,
+        expected_corpus_sha256=_corpus_sha256,
+        expected_scheduler_config_sha256=_scheduler_config_sha256,
+    )
     _apply_allowlist(
         typed_rows,
         allowlist,
@@ -1301,6 +1757,7 @@ def validate_file(
         allowlist,
         simulation_result=simulation,
         _corpus_sha256=corpus_sha256,
+        _scheduler_config_sha256=scheduler_config_sha256(config),
         _require_allowlist_binding=True,
         _enforce_canonical_size=True,
     )
@@ -1330,6 +1787,7 @@ __all__ = [
     "format_report",
     "load_json_object",
     "normalized_text_sha256",
+    "scheduler_config_sha256",
     "validate_config",
     "validate_corpus",
     "validate_file",

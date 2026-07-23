@@ -3,11 +3,13 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import copy
 import subprocess
 import sys
 import tempfile
 import unittest
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from src.persona_corpus.builder import serialize_v2
@@ -19,6 +21,7 @@ from src.persona_corpus.validation import (
     ValidationInputError,
     load_json_object,
     normalized_text_sha256,
+    scheduler_config_sha256,
     validate_config,
     validate_corpus,
     validate_file,
@@ -97,6 +100,7 @@ def valid_config(**weight_overrides: float) -> dict[str, object]:
             "user_direct_recent_max": 2,
             "easter_egg_recent_window": 50,
             "easter_egg_recent_max": 1,
+            "long_silence_minutes": 180,
             "interrupt_cost_minimum_intervals_minutes": {
                 "0": 8,
                 "1": 12,
@@ -173,68 +177,124 @@ def bound_allowlist(
     }
 
 
-def clean_simulation() -> dict[str, object]:
-    groups = (
-        ["technical"] * 15
-        + ["easter_egg"]
-        + ["character_life"] * 34
-        + ["growth"] * 10
-        + ["career"] * 8
-        + ["daily_care"] * 10
-        + ["emotional_reflection"] * 8
-        + ["system_ambient"] * 14
+def simulation_rows() -> list[CorpusLine]:
+    specifications = (
+        ("tech_a", "technical", "self_talk", "通用日志先按时间顺序排查。"),
+        ("tech_b", "technical", "ambient", "边界条件值得单独做一轮验证。"),
+        ("life_a", "character_life", "self_talk", "窗边的光今天落得很安静。"),
+        ("life_b", "character_life", "ambient", "风从窗缝绕了一圈才离开。"),
+        ("life_c", "character_life", "self_talk", "桌角那点光慢慢移到书页上。"),
+        ("growth", "growth", "ambient", "慢一点也算是在认真往前走。"),
+        ("career", "career", "self_talk", "把今天学会的东西记下来挺好。"),
+        ("care", "daily_care", "ambient", "偶尔停一会儿也不算耽误。"),
+        ("emotion", "emotional_reflection", "self_talk", "有些心事放一晚会轻一点。"),
+        ("system", "system_ambient", "system_observe", "时间又悄悄翻过了一页。"),
+        ("egg", "easter_egg", "self_talk", "这一小段光只在偶然时出现。"),
     )
-    modes = (
-        ["self_talk"] * 48
-        + ["ambient"] * 24
-        + ["user_direct"] * 10
-        + ["system_observe"] * 18
+    rows: list[CorpusLine] = []
+    for suffix, group, mode, text in specifications:
+        rows.append(
+            valid_line(
+                id=f"sim_{suffix}",
+                category="Debugging" if group == "technical" else "WanderingLife",
+                category_group=group,
+                topic_id=f"simulation.{suffix}",
+                semantic_group=f"simulation.{suffix}",
+                output_mode=mode,
+                cooldown_hours=168.0 if group == "easter_egg" else 1.0,
+                semantic_cooldown_hours=168.0 if group == "easter_egg" else 1.0,
+                max_per_day=1,
+                weight=0.1 if group == "easter_egg" else 0.5,
+                source_kind="preserved_easter_egg" if group == "easter_egg" else "curated_standalone",
+                source_reference=f"catalog:simulation-{suffix}",
+                text=text,
+            )
+        )
+    return rows
+
+
+def simulation_context(played_at: datetime, **overrides: object) -> dict[str, object]:
+    hour = played_at.hour
+    if 6 <= hour < 11:
+        daypart = "morning"
+    elif 11 <= hour < 14:
+        daypart = "noon"
+    elif 14 <= hour < 18:
+        daypart = "afternoon"
+    elif 18 <= hour < 23:
+        daypart = "evening"
+    else:
+        daypart = "late_night"
+    result: dict[str, object] = {
+        "event": "tick",
+        "daypart": daypart,
+        "weekday": played_at.isoweekday(),
+        "is_weekend": played_at.isoweekday() >= 6,
+        "holiday": None,
+        "anniversary_days": 0,
+        "minutes_since_last_output": 1440,
+        "ide_foreground": None,
+        "active_minutes": None,
+        "idle_return": None,
+        "fullscreen": None,
+    }
+    result.update(overrides)
+    return result
+
+
+def rebind_simulation(
+    simulation: dict[str, object], rows: list[CorpusLine], config: dict[str, object]
+) -> None:
+    simulation["corpus_sha256"] = hashlib.sha256(serialize_v2(rows)).hexdigest()
+    simulation["scheduler_config_sha256"] = scheduler_config_sha256(config)
+
+
+def clean_simulation() -> tuple[list[CorpusLine], dict[str, object], dict[str, object]]:
+    rows = simulation_rows()
+    config = valid_config()
+    base_ids = (
+        "sim_life_a",
+        "sim_growth",
+        "sim_life_b",
+        "sim_career",
+        "sim_care",
+        "sim_life_c",
+        "sim_emotion",
+        "sim_life_b",
+        "sim_system",
     )
-    plays = [
-        {
-            "seed": index % 10,
-            "category_group": groups[index],
-            "output_mode": modes[index],
-            "question": False,
-            "required_context_violation": False,
-            "id_cooldown_violation": False,
-            "semantic_cooldown_violation": False,
-            "adjacent_group_violation": False,
-        }
-        for index in range(100)
-    ]
-    return {
+    attempts: list[dict[str, object]] = []
+    start = datetime(2026, 1, 1, 12, 0, tzinfo=timezone(timedelta(hours=8)))
+    for seed in range(10):
+        technical_days = {0, 6, 12, 18, 24} if seed < 5 else {0, 7, 14, 21}
+        technical_index = 0
+        for day in range(30):
+            played_at = start + timedelta(days=day)
+            if day in technical_days:
+                selected_id = "sim_tech_a" if technical_index % 2 == 0 else "sim_tech_b"
+                technical_index += 1
+            elif seed < 3 and day == 3:
+                selected_id = "sim_egg"
+            else:
+                selected_id = base_ids[day % len(base_ids)]
+            attempts.append(
+                {
+                    "seed": seed,
+                    "attempted_at": played_at.isoformat(),
+                    "context": simulation_context(played_at),
+                    "selected_id": selected_id,
+                }
+            )
+    simulation: dict[str, object] = {
+        "schema_version": 1,
+        "corpus_sha256": "",
+        "scheduler_config_sha256": "",
         "days": 30,
         "seeds": list(range(10)),
-        "hard_violations": [],
-        "plays": plays,
-        "metrics": {
-            "actual_output_count": 100,
-            "category_group_ratio": {
-                "technical": 0.15,
-                "growth": 0.10,
-                "career": 0.08,
-                "daily_care": 0.10,
-                "emotional_reflection": 0.08,
-                "character_life": 0.34,
-                "easter_egg": 0.01,
-                "system_ambient": 0.14,
-            },
-            "output_mode_ratio": {
-                "self_talk": 0.48,
-                "ambient": 0.24,
-                "user_direct": 0.10,
-                "system_observe": 0.18,
-            },
-            "id_cooldown_violations": 0,
-            "semantic_cooldown_violations": 0,
-            "required_context_violations": 0,
-            "adjacent_technical": 0,
-            "adjacent_daily_care": 0,
-            "adjacent_emotional_reflection": 0,
-            "question_count": 0,
-        },
+        "attempts": attempts,
     }
+    rebind_simulation(simulation, rows, config)
+    return rows, config, simulation
 
 
 class ValidationContractTests(unittest.TestCase):
@@ -294,6 +354,26 @@ class ValidationContractTests(unittest.TestCase):
                 "invalid_trigger",
                 "invalid_tone",
                 "invalid_category_group",
+                "invalid_source_kind",
+            }
+            <= codes
+        )
+
+    def test_non_string_unhashable_enum_values_are_reported_without_crashing(self) -> None:
+        row = valid_line(
+            category_group=[],
+            output_mode={},
+            trigger=[],
+            tone={},
+            source_kind=[],
+        )
+        codes = issue_codes(validate_corpus([row], valid_config(), {"exceptions": []}))
+        self.assertTrue(
+            {
+                "invalid_category_group",
+                "invalid_output_mode",
+                "invalid_trigger",
+                "invalid_tone",
                 "invalid_source_kind",
             }
             <= codes
@@ -402,13 +482,14 @@ class ValidationContractTests(unittest.TestCase):
             valid_line(id="phone", text="联系号码是 13800138000。"),
             valid_line(id="id", text="证件号是 11010519491231002X。"),
             valid_line(id="name", text="雷琳玥以前在广东打零工，月薪两三千。"),
+            valid_line(id="generic_name", text="张伟昨天来办公室。"),
         ]
         pii_ids = {
             issue.line_id
             for issue in validate_corpus(rows, valid_config(), {"exceptions": []}).errors
             if issue.code == "pii_enabled"
         }
-        self.assertEqual({"phone", "id", "name"}, pii_ids)
+        self.assertEqual({"phone", "id", "name", "generic_name"}, pii_ids)
 
     def test_generic_hunan_food_and_salary_field_are_not_personal_pii(self) -> None:
         rows = [
@@ -596,6 +677,7 @@ class AllowlistTests(unittest.TestCase):
 
     def entry(self, **overrides: str) -> dict[str, str]:
         result = {
+            "rule_code": "technical_fake_context",
             "line_id": self.row.id,
             "normalized_text_sha256": normalized_text_sha256(self.row.text),
             "reason": "这是无第二人称的通用工程术语，不表示看到了用户代码。",
@@ -618,6 +700,7 @@ class AllowlistTests(unittest.TestCase):
             "allowlist_unknown_line": self.entry(line_id="missing"),
             "allowlist_hash_mismatch": self.entry(normalized_text_sha256="0" * 64),
             "allowlist_stale": {
+                "rule_code": "technical_fake_context",
                 "line_id": valid_line(id="safe").id,
                 "normalized_text_sha256": normalized_text_sha256(valid_line(id="safe").text),
                 "reason": "旧规则留下的例外。",
@@ -639,10 +722,15 @@ class AllowlistTests(unittest.TestCase):
 
     def test_allowlist_schema_is_exact_and_reason_is_required(self) -> None:
         entry = self.entry(reason="")
-        entry["rule_code"] = "technical_fake_context"
         self.assertIn(
             "allowlist_format",
             issue_codes(validate_corpus([self.row], valid_config(), {"exceptions": [entry]})),
+        )
+
+        unknown_rule = self.entry(rule_code="question")
+        self.assertIn(
+            "allowlist_format",
+            issue_codes(validate_corpus([self.row], valid_config(), {"exceptions": [unknown_rule]})),
         )
 
     def test_allowlist_root_is_bound_to_schema_and_exact_corpus_sha256(self) -> None:
@@ -657,6 +745,38 @@ class AllowlistTests(unittest.TestCase):
             "allowlist_corpus_hash_mismatch",
             issue_codes(validate_corpus([self.row], valid_config(), stale)),
         )
+
+    def test_one_line_exception_suppresses_only_its_exact_rule_code(self) -> None:
+        row = replace(self.row, text="你现在看这个 BUG，先停一下。")
+        entry = {
+            "rule_code": "technical_fake_context",
+            "line_id": row.id,
+            "normalized_text_sha256": normalized_text_sha256(row.text),
+            "reason": "只确认其中一个启发式为误报。",
+        }
+        report = validate_corpus([row], valid_config(), {"exceptions": [entry]})
+        self.assertNotIn("technical_fake_context", issue_codes(report))
+        self.assertIn("fake_context", issue_codes(report))
+
+    def test_same_line_can_have_distinct_explicit_rules_but_duplicate_tuple_is_rejected(self) -> None:
+        row = replace(self.row, text="你现在看这个 BUG，先停一下。")
+        technical = {
+            "rule_code": "technical_fake_context",
+            "line_id": row.id,
+            "normalized_text_sha256": normalized_text_sha256(row.text),
+            "reason": "技术短语人工确认。",
+        }
+        fake_context = dict(technical, rule_code="fake_context", reason="上下文短语人工确认。")
+        report = validate_corpus(
+            [row], valid_config(), {"exceptions": [technical, fake_context]}
+        )
+        self.assertNotIn("technical_fake_context", issue_codes(report))
+        self.assertNotIn("fake_context", issue_codes(report))
+
+        duplicate = validate_corpus(
+            [row], valid_config(), {"exceptions": [technical, dict(technical)]}
+        )
+        self.assertIn("allowlist_duplicate", issue_codes(duplicate))
 
 
 class SchedulerConfigTests(unittest.TestCase):
@@ -709,6 +829,13 @@ class SchedulerConfigTests(unittest.TestCase):
         codes = issue_codes(validate_config(bad))
         self.assertTrue({"context_tokens", "trigger_partition"} <= codes)
 
+    def test_nested_wrong_json_types_become_config_format_errors_not_type_errors(self) -> None:
+        bad = valid_config()
+        limits = bad["runtime_limits"]
+        assert isinstance(limits, dict)
+        limits["block_adjacent_category_groups"] = [{}]
+        self.assertIn("config_format", issue_codes(validate_config(bad)))
+
 
 class SimulationGateTests(unittest.TestCase):
     def test_absent_simulation_is_an_explained_warning_until_task_six(self) -> None:
@@ -717,125 +844,185 @@ class SimulationGateTests(unittest.TestCase):
         self.assertEqual(1, len(missing))
         self.assertIn("Task 6", missing[0].message)
 
-    def test_clean_structured_thirty_day_ten_seed_simulation_passes(self) -> None:
-        report = validate_corpus(
-            [valid_line()],
-            valid_config(),
-            {"exceptions": []},
-            simulation_result=clean_simulation(),
-        )
+    def test_clean_bound_event_log_thirty_day_ten_seed_simulation_passes(self) -> None:
+        rows, config, simulation = clean_simulation()
+        report = validate_corpus(rows, config, {"exceptions": []}, simulation_result=simulation)
         self.assertFalse(report.errors)
         self.assertNotIn("simulation_missing", {issue.code for issue in report.warnings})
 
-    def test_short_or_too_few_seed_simulation_is_rejected(self) -> None:
-        simulation = clean_simulation()
+    def test_schema_hashes_and_exact_keys_are_verified_not_trusted(self) -> None:
+        rows, config, simulation = clean_simulation()
+        simulation["corpus_sha256"] = "0" * 64
+        simulation["scheduler_config_sha256"] = "f" * 64
+        simulation["trusted"] = True
+        codes = issue_codes(
+            validate_corpus(rows, config, {"exceptions": []}, simulation_result=simulation)
+        )
+        self.assertTrue({"simulation_hash_mismatch", "simulation_format"} <= codes)
+
+    def test_short_too_few_seed_and_incomplete_calendar_coverage_are_rejected(self) -> None:
+        rows, config, simulation = clean_simulation()
         simulation["days"] = 29
         simulation["seeds"] = list(range(9))
+        attempts = simulation["attempts"]
+        assert isinstance(attempts, list)
+        simulation["attempts"] = [attempt for attempt in attempts if attempt["seed"] != 8]
         codes = issue_codes(
-            validate_corpus(
-                [valid_line()], valid_config(), {"exceptions": []}, simulation_result=simulation
+            validate_corpus(rows, config, {"exceptions": []}, simulation_result=simulation)
+        )
+        self.assertTrue(
+            {"simulation_duration", "simulation_seed_count", "simulation_seed_coverage"}
+            <= codes
+        )
+
+    def test_event_schema_rejects_naive_timestamp_bad_context_unknown_and_disabled_ids(self) -> None:
+        rows, config, simulation = clean_simulation()
+        rows.append(valid_line(id="sim_disabled", enabled=False))
+        attempts = simulation["attempts"]
+        assert isinstance(attempts, list)
+        attempts[0]["attempted_at"] = "2026-01-01T12:00:00"
+        attempts[1]["context"]["weekday"] = 9
+        attempts[2]["selected_id"] = "sim_missing"
+        attempts[3]["selected_id"] = "sim_disabled"
+        rebind_simulation(simulation, rows, config)
+        codes = issue_codes(
+            validate_corpus(rows, config, {"exceptions": []}, simulation_result=simulation)
+        )
+        self.assertTrue({"simulation_format", "simulation_unknown_line"} <= codes)
+
+    def test_trigger_and_required_context_are_recomputed_from_row_and_actual_context(self) -> None:
+        rows, config, simulation = clean_simulation()
+        rows.append(
+            valid_line(
+                id="sim_contextual",
+                trigger="app_start",
+                required_context="app_started,ide_foreground",
+                cooldown_hours=1.0,
+                semantic_cooldown_hours=1.0,
             )
         )
-        self.assertTrue({"simulation_duration", "simulation_seed_count"} <= codes)
-
-    def test_supplied_hard_violations_and_acceptance_metrics_are_hard_errors(self) -> None:
-        simulation = clean_simulation()
-        simulation["hard_violations"] = [
-            {"code": "adjacent_technical", "seed": 3, "detail": "two adjacent rows"}
-        ]
-        metrics = simulation["metrics"]
-        assert isinstance(metrics, dict)
-        metrics["category_group_ratio"] = {"technical": 0.25, "easter_egg": 0.03}
+        attempts = simulation["attempts"]
+        assert isinstance(attempts, list)
+        attempts[5]["selected_id"] = "sim_contextual"
+        rebind_simulation(simulation, rows, config)
         codes = issue_codes(
-            validate_corpus(
-                [valid_line()], valid_config(), {"exceptions": []}, simulation_result=simulation
+            validate_corpus(rows, config, {"exceptions": []}, simulation_result=simulation)
+        )
+        self.assertTrue({"simulation_trigger_violation", "simulation_context_violation"} <= codes)
+
+    def test_row_id_semantic_daily_interval_and_interrupt_constraints_are_recomputed(self) -> None:
+        rows, config, simulation = clean_simulation()
+        attempts = simulation["attempts"]
+        assert isinstance(attempts, list)
+        first = attempts[0]
+        duplicate = copy.deepcopy(first)
+        duplicate["attempted_at"] = "2026-01-01T12:04:00+08:00"
+        duplicate["context"]["minutes_since_last_output"] = 4
+        attempts.append(duplicate)
+        codes = issue_codes(
+            validate_corpus(rows, config, {"exceptions": []}, simulation_result=simulation)
+        )
+        self.assertTrue(
+            {
+                "simulation_id_cooldown_violation",
+                "simulation_semantic_cooldown_violation",
+                "simulation_max_per_day_violation",
+                "simulation_minimum_interval_violation",
+                "simulation_interrupt_budget_violation",
+                "simulation_adjacent_semantic_violation",
+            }
+            <= codes
+        )
+
+    def test_hourly_late_night_adjacent_group_and_recent_quotas_are_recomputed(self) -> None:
+        rows, config, simulation = clean_simulation()
+        attempts = simulation["attempts"]
+        assert isinstance(attempts, list)
+        first_seed = [attempt for attempt in attempts if attempt["seed"] == 0]
+        for index in range(20):
+            first_seed[index]["selected_id"] = "sim_tech_a" if index % 2 == 0 else "sim_tech_b"
+        base = datetime.fromisoformat(str(first_seed[10]["attempted_at"]))
+        for minute, selected_id in ((20, "sim_growth"), (40, "sim_career")):
+            played_at = base.replace(hour=12, minute=minute)
+            attempts.append(
+                {
+                    "seed": 0,
+                    "attempted_at": played_at.isoformat(),
+                    "context": simulation_context(played_at, minutes_since_last_output=20),
+                    "selected_id": selected_id,
+                }
             )
+        late_base = base.replace(day=base.day + 1, hour=23, minute=0)
+        for minute, selected_id in ((0, "sim_growth"), (20, "sim_career")):
+            played_at = late_base.replace(minute=minute)
+            attempts.append(
+                {
+                    "seed": 0,
+                    "attempted_at": played_at.isoformat(),
+                    "context": simulation_context(played_at, minutes_since_last_output=20),
+                    "selected_id": selected_id,
+                }
+            )
+        codes = issue_codes(
+            validate_corpus(rows, config, {"exceptions": []}, simulation_result=simulation)
         )
-        self.assertTrue({"simulation_hard_violation", "simulation_metric"} <= codes)
-
-    def test_simulation_recomputes_aggregates_and_rejects_zero_outputs_duplicates_and_unknown_keys(self) -> None:
-        aggregate_mismatch = clean_simulation()
-        metrics = aggregate_mismatch["metrics"]
-        assert isinstance(metrics, dict)
-        metrics["actual_output_count"] = 99
-        metrics["category_group_ratio"] = {"technical": 0.10, "easter_egg": 0.01}
-        self.assertIn(
-            "simulation_aggregate_mismatch",
-            issue_codes(
-                validate_corpus(
-                    [valid_line()],
-                    valid_config(),
-                    {"exceptions": []},
-                    simulation_result=aggregate_mismatch,
-                )
-            ),
+        self.assertTrue(
+            {
+                "simulation_hourly_budget_violation",
+                "simulation_late_night_budget_violation",
+                "simulation_adjacent_group_violation",
+                "simulation_recent_technical_violation",
+                "simulation_metric",
+            }
+            <= codes
         )
 
-        zero = clean_simulation()
-        zero["plays"] = []
+    def test_recent_user_direct_easter_question_and_zero_output_checks_use_real_rows(self) -> None:
+        rows, config, simulation = clean_simulation()
+        user = valid_line(
+            id="sim_user",
+            output_mode="user_direct",
+            required_context="ide_foreground",
+            cooldown_hours=1.0,
+            semantic_cooldown_hours=1.0,
+        )
+        question = valid_line(
+            id="sim_question",
+            text="这一句真的需要回答吗？",
+            cooldown_hours=1.0,
+            semantic_cooldown_hours=1.0,
+        )
+        rows.extend([user, question])
+        attempts = simulation["attempts"]
+        assert isinstance(attempts, list)
+        first_seed = [attempt for attempt in attempts if attempt["seed"] == 0]
+        for index in (0, 2, 4):
+            first_seed[index]["selected_id"] = "sim_user"
+            first_seed[index]["context"]["ide_foreground"] = True
+        first_seed[8]["selected_id"] = "sim_egg"
+        first_seed[12]["selected_id"] = "sim_egg"
+        first_seed[20]["selected_id"] = "sim_question"
+        rebind_simulation(simulation, rows, config)
+        codes = issue_codes(
+            validate_corpus(rows, config, {"exceptions": []}, simulation_result=simulation)
+        )
+        self.assertTrue(
+            {
+                "simulation_recent_user_direct_violation",
+                "simulation_recent_easter_egg_violation",
+                "simulation_question",
+            }
+            <= codes
+        )
+
+        zero = copy.deepcopy(simulation)
+        zero_attempts = zero["attempts"]
+        assert isinstance(zero_attempts, list)
+        for attempt in zero_attempts:
+            attempt["selected_id"] = None
         self.assertIn(
             "simulation_zero_outputs",
-            issue_codes(
-                validate_corpus(
-                    [valid_line()], valid_config(), {"exceptions": []}, simulation_result=zero
-                )
-            ),
-        )
-
-        duplicate_seed = clean_simulation()
-        duplicate_seed["seeds"] = list(range(10)) + [0]
-        self.assertIn(
-            "simulation_seed_count",
-            issue_codes(
-                validate_corpus(
-                    [valid_line()],
-                    valid_config(),
-                    {"exceptions": []},
-                    simulation_result=duplicate_seed,
-                )
-            ),
-        )
-
-        unknown = clean_simulation()
-        unknown["trusted"] = True
-        self.assertIn(
-            "simulation_format",
-            issue_codes(
-                validate_corpus(
-                    [valid_line()], valid_config(), {"exceptions": []}, simulation_result=unknown
-                )
-            ),
-        )
-
-    def test_simulation_requires_complete_finite_probability_distributions(self) -> None:
-        missing = clean_simulation()
-        metrics = missing["metrics"]
-        assert isinstance(metrics, dict)
-        group_ratio = metrics["category_group_ratio"]
-        assert isinstance(group_ratio, dict)
-        del group_ratio["growth"]
-        self.assertIn(
-            "simulation_metric",
-            issue_codes(
-                validate_corpus(
-                    [valid_line()], valid_config(), {"exceptions": []}, simulation_result=missing
-                )
-            ),
-        )
-
-        negative = clean_simulation()
-        metrics = negative["metrics"]
-        assert isinstance(metrics, dict)
-        group_ratio = metrics["category_group_ratio"]
-        assert isinstance(group_ratio, dict)
-        group_ratio["easter_egg"] = -0.01
-        self.assertIn(
-            "simulation_metric",
-            issue_codes(
-                validate_corpus(
-                    [valid_line()], valid_config(), {"exceptions": []}, simulation_result=negative
-                )
-            ),
+            issue_codes(validate_corpus(rows, config, {"exceptions": []}, simulation_result=zero)),
         )
 
 
@@ -938,6 +1125,45 @@ class FileAndCliTests(unittest.TestCase):
             command[3] = str(malformed)
             format_failure = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, encoding="utf-8")
             self.assertEqual(2, format_failure.returncode, format_failure.stdout + format_failure.stderr)
+
+    def test_cli_nested_config_type_failure_is_exit_two_without_traceback(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            corpus_path = root / "corpus.tsv"
+            corpus_path.write_bytes(serialize_v2([valid_line()]))
+            config = valid_config()
+            limits = config["runtime_limits"]
+            assert isinstance(limits, dict)
+            limits["block_adjacent_category_groups"] = [{}]
+            config_path = root / "config.json"
+            allowlist_path = root / "allowlist.json"
+            self.write_json(config_path, config)
+            self.write_json(
+                allowlist_path,
+                {
+                    "schema_version": 1,
+                    "corpus_sha256": hashlib.sha256(corpus_path.read_bytes()).hexdigest(),
+                    "exceptions": [],
+                },
+            )
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "tools/validate_corpus_v2.py",
+                    "--corpus",
+                    str(corpus_path),
+                    "--config",
+                    str(config_path),
+                    "--allowlist",
+                    str(allowlist_path),
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+            )
+            self.assertEqual(2, completed.returncode, completed.stdout + completed.stderr)
+            self.assertNotIn("Traceback", completed.stdout + completed.stderr)
 
     def test_issue_order_is_deterministic_across_input_order(self) -> None:
         rows = [

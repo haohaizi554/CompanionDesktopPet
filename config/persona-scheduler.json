@@ -32,6 +32,7 @@
     "user_direct_recent_max": 2,
     "easter_egg_recent_window": 50,
     "easter_egg_recent_max": 1,
+    "long_silence_minutes": 180,
     "interrupt_cost_minimum_intervals_minutes": {
       "0": 8,
       "1": 12,
