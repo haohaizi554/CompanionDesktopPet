@@ -23,8 +23,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <None Remove="Assets\character.png;Assets\pet.ico" />
-    <Resource Include="Assets\character.png;Assets\pet.ico" />
+    <None Remove="Assets\character.png;Assets\character-blink-closed.png;Assets\pet.ico" />
+    <Resource Include="Assets\character.png;Assets\character-blink-closed.png;Assets\pet.ico" />
     <EmbeddedResource Include="../../data/optimized/persona-corpus-v2.tsv"
                       LogicalName="CompanionDesktopPet.Assets.persona-corpus-v2.tsv" />
     <Compile Remove="Services/PersonaCorpus.EasterEggs.cs;Services/PersonaCorpus.Growth.cs;Services/PersonaCorpus.Life.cs;Services/PersonaCorpus.Technical.cs" />
