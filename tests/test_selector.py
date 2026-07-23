@@ -213,12 +213,28 @@ class SelectionHistoryTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(1, json.loads(first)["schema_version"])
 
+    def test_ambiguous_dst_timestamp_round_trip_uses_canonical_instant_equality(self) -> None:
+        eastern = ZoneInfo("America/New_York")
+        for fold in (0, 1):
+            ambiguous = datetime(2026, 11, 1, 1, 30, tzinfo=eastern, fold=fold)
+            record = self.record(played_at=ambiguous)
+            history = SelectionHistory([record])
+
+            restored = SelectionHistory.from_json(
+                history.to_json(), now=datetime(2026, 11, 1, 8, 0, tzinfo=UTC)
+            )
+
+            with self.subTest(fold=fold):
+                self.assertEqual(ambiguous.astimezone(UTC), record.played_at)
+                self.assertEqual(history.records, restored.records)
+
     def test_from_json_rejects_bad_version_unknown_or_missing_keys(self) -> None:
         good = json.loads(SelectionHistory([self.record()]).to_json())
         fixtures = []
-        bad_version = dict(good)
-        bad_version["schema_version"] = 2
-        fixtures.append(bad_version)
+        for version in (2, 1.0, True):
+            bad_version = dict(good)
+            bad_version["schema_version"] = version
+            fixtures.append(bad_version)
         extra_root = dict(good)
         extra_root["extra"] = True
         fixtures.append(extra_root)
@@ -349,6 +365,36 @@ class SchedulerConfigTests(unittest.TestCase):
         )
         self.assertIsNone(result)
         self.assertEqual((), history.records)
+
+    def test_float_schema_version_and_malformed_typed_config_fail_safe(self) -> None:
+        raw = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        raw["schema_version"] = 1.0
+        with self.assertRaises(SelectorConfigError):
+            SchedulerConfig.from_mapping(raw)
+
+        malformed_configs = (
+            replace(
+                DEFAULT_SCHEDULER_CONFIG,
+                category_group_weights={"character_life": "bad"},  # type: ignore[dict-item]
+            ),
+            replace(
+                DEFAULT_SCHEDULER_CONFIG,
+                interrupt_cost_minimum_intervals_minutes=[],  # type: ignore[arg-type]
+            ),
+        )
+        for malformed in malformed_configs:
+            history = SelectionHistory()
+            with self.subTest(config=malformed):
+                self.assertIsNone(
+                    select_line(
+                        [corpus_line()],
+                        context_at(),
+                        history,
+                        NOW,
+                        scheduler_config=malformed,
+                    )
+                )
+                self.assertEqual((), history.records)
 
     def test_default_config_has_no_current_working_directory_dependency(self) -> None:
         history = SelectionHistory()

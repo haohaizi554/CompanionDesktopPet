@@ -86,6 +86,7 @@ class HistoryRecord:
                 raise HistoryFormatError(f"{name} must be a non-blank trimmed string")
         if not _aware(self.played_at):
             raise HistoryFormatError("played_at must be timezone-aware")
+        object.__setattr__(self, "played_at", self.played_at.astimezone(UTC))
         if self.category_group not in _CATEGORY_GROUPS:
             raise HistoryFormatError("category_group is not controlled")
         if self.output_mode not in _OUTPUT_MODES:
@@ -192,8 +193,9 @@ class SelectionHistory:
             raise HistoryFormatError(f"invalid history JSON: {error}") from error
         if not isinstance(value, dict) or set(value) != _ROOT_KEYS:
             raise HistoryFormatError("history root must use exactly schema_version and records")
-        if value.get("schema_version") != HISTORY_SCHEMA_VERSION or isinstance(
-            value.get("schema_version"), bool
+        if (
+            type(value.get("schema_version")) is not int
+            or value.get("schema_version") != HISTORY_SCHEMA_VERSION
         ):
             raise HistoryFormatError(f"history schema_version must be {HISTORY_SCHEMA_VERSION}")
         raw_records = value.get("records")

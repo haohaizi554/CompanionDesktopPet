@@ -49,6 +49,8 @@ class SchedulerConfig:
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, object]) -> SchedulerConfig:
+        if type(value.get("schema_version")) is not int or value.get("schema_version") != 1:
+            raise SelectorConfigError("scheduler config schema_version must be integer 1")
         report = validate_config(value)
         if report.errors:
             detail = "; ".join(f"{issue.code}: {issue.message}" for issue in report.errors)
@@ -312,10 +314,45 @@ def _coerce_config(value: SchedulerConfig | Mapping[str, object] | None) -> Sche
     if value is None:
         return DEFAULT_SCHEDULER_CONFIG
     if isinstance(value, SchedulerConfig):
-        return value
+        try:
+            normalized = _scheduler_config_mapping(value)
+        except (AttributeError, TypeError, ValueError) as error:
+            raise SelectorConfigError("typed scheduler config cannot be normalized") from error
+        return SchedulerConfig.from_mapping(normalized)
     if isinstance(value, Mapping):
         return SchedulerConfig.from_mapping(value)
     raise SelectorConfigError("scheduler_config must be SchedulerConfig, mapping or None")
+
+
+def _scheduler_config_mapping(config: SchedulerConfig) -> dict[str, object]:
+    return {
+        "schema_version": config.schema_version,
+        "category_group_weights": dict(config.category_group_weights),
+        "output_mode_targets": dict(config.output_mode_targets),
+        "runtime_limits": {
+            "minimum_interval_minutes": config.minimum_interval_minutes,
+            "max_outputs_per_hour": config.max_outputs_per_hour,
+            "late_night_max_outputs_per_hour": config.late_night_max_outputs_per_hour,
+            "semantic_group_no_repeat": config.semantic_group_no_repeat,
+            "block_adjacent_category_groups": sorted(
+                config.block_adjacent_category_groups
+            ),
+            "technical_recent_window": config.technical_recent_window,
+            "technical_recent_max": config.technical_recent_max,
+            "user_direct_recent_window": config.user_direct_recent_window,
+            "user_direct_recent_max": config.user_direct_recent_max,
+            "easter_egg_recent_window": config.easter_egg_recent_window,
+            "easter_egg_recent_max": config.easter_egg_recent_max,
+            "long_silence_minutes": config.long_silence_minutes,
+            "interrupt_cost_minimum_intervals_minutes": {
+                str(cost): minutes
+                for cost, minutes in config.interrupt_cost_minimum_intervals_minutes.items()
+            },
+        },
+        "context_tokens": sorted(config.context_tokens),
+        "mvp_triggers": sorted(config.mvp_triggers),
+        "future_triggers": sorted(config.future_triggers),
+    }
 
 
 def select_line(
