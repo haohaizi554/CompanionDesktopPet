@@ -39,7 +39,7 @@ Exactly 29 independently authored replacements keep the enabled catalog at 800 w
 | EmotionalSupport | 5 | 2 |
 | Total | 29 | 10 |
 
-Every replacement is a standalone context-safe sentence, 20–24 Chinese characters long, with a unique `variant_id`, text, runtime topic role, and human-authored rationale. Their semantic cooldown is 168 hours, not lower than the 144-hour ID cooldown.
+Every replacement is a standalone context-safe sentence, 12-30 Chinese characters long, with a unique `variant_id`, text, runtime topic role, and human-authored rationale. Their semantic cooldown is 168 hours, not lower than the 144-hour ID cooldown.
 
 Retained stable IDs are unchanged because IDs remain derived solely from immutable `variant_id`. Retired IDs are deliberately absent, and newly authored entries receive new IDs.
 
