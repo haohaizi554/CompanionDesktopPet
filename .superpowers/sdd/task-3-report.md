@@ -238,3 +238,108 @@ All generated `src/persona_corpus/__pycache__`, `tests/__pycache__`, and `tools/
 - The full 800-entry materialized catalog is deliberately large because storing complete sentences is an explicit product and audit requirement.
 
 No remaining correctness issue was found in the Task 3 scope.
+
+## Review remediation (2026-07-23)
+
+The post-implementation review identified semantic-lineage, recovery, multi-risk,
+content-authorship, context-safety, stable-ID, and output-containment defects. A
+test-first repair wave was completed without modifying the 75,375-row legacy source.
+
+### RED evidence
+
+The expanded focused suite was run before implementation:
+
+```text
+python -B -m unittest tests.test_build -v
+Ran 29 tests in 49.232s
+FAILED (failures=6, errors=3)
+```
+
+The failures reproduced all review findings: missing immutable variant identity,
+text-derived IDs, category-wide recovery, inferred report output, 252 padded lines,
+27 unavailable-state claims, collapsed multi-risk review, arbitrary lineage, and
+technical source topics with more than two variants.
+
+A final read-only review then exposed three edge cases. Regression tests were added and
+observed failing before their fixes:
+
+```text
+python -B -m unittest tests.test_build -v
+Ran 32 tests in 12.654s
+FAILED (failures=4)
+```
+
+These failures covered taxonomy-dependent IDs, colliding/escaping output paths, and a
+real-corpus test dependency on a pre-staged rather than tracked source copy.
+
+### Implemented repairs
+
+- Added an explicit immutable `CatalogEntry.variant_id` and explicit
+  `CatalogEntry.source_reference`; `catalog_line_id()` now derives solely from the
+  immutable variant ID and ignores editable text or taxonomy metadata.
+- Bound all 596 rewritten/preserved entries to distinct source lines with matching
+  category and extracted topic. The other 204 entries use explicit catalog lineage.
+- Preserved each entry's declared `required_context` in runtime rows.
+- Limited every technical source topic to at most two enabled variants.
+- Made archive recovery exact by source line. Unmapped rows now have an empty rewrite
+  and `can_recover=false`; exactly 596 mapped source rows can recover.
+- Emits one review row per independent risk, with the risk type in the stable review
+  identity. Source line 75,122 now retains both `privacy_risk` and
+  `future_context_signal`.
+- Requires an explicit, contained `report_output` for flat/noncanonical outputs.
+  Automatic report placement is allowed only for the canonical `data/optimized` layout,
+  and all four normalized destination paths must be distinct before any write.
+- Replaced all 252 semicolon-padded variants with independently authored standalone
+  sentences. Rewrote the nine unsupported observation variants instead of inventing
+  runtime context gates. Two technical wordings were adjusted to avoid the unrelated
+  privacy-marker collision on the word `地址`.
+- Added literal authoritative archive/review header assertions and real-corpus
+  regression coverage for every item above. Real-corpus tests now require the tracked
+  canonical `data/source/persona-corpus.original.tsv` fixture and no longer silently skip.
+
+### Regenerated output audit
+
+| Check | Result |
+|---|---:|
+| Enabled rows | 800 |
+| Archive rows | 75,375 |
+| Review rows | 3,265 |
+| PII review rows | 1,248 |
+| Unique IDs / unique texts | 800 / 800 |
+| Legacy / catalog lineage | 596 / 204 |
+| Exact recoverable rows / bad recoveries | 596 / 0 |
+| Maximum technical variants per source topic | 2 |
+| Padded duplicate-sentence tails | 0 |
+| Unsupported current-state assertions | 0 |
+| Mean text length | 20.88125 |
+| 8-16 / 17-24 / 25-36 / over 36 | 25% / 45% / 30% / 0% |
+
+Formal output hashes after regeneration:
+
+```text
+persona-corpus-v2.tsv      1f9736697f2f2cdda993949dbb308a5cf6418fca3c1c3a9f725b5232de920597
+persona-corpus-archive.tsv 30730e9a2456360f970b135da70f462fb14fecb5bd5179a75024b9f0afa6fa1f
+persona-corpus-review.tsv  a251b1e01003a078d7912f71099e57c5c6830a75195558ea61428105990b866a
+pii-review.tsv             702037759f730759be83fb1c643a8f61382fa1c3f8f2a25e2c0351a177eec6e7
+```
+
+The immutable legacy source remained 7,961,787 bytes with SHA-256
+`3fd7356845df838c652f7a7668013f2b15b0e91ddfa5d784b2b71a514a2c7534`.
+
+### Fresh verification
+
+Focused review suite:
+
+```text
+python -B -m unittest tests.test_build -v
+Ran 32 tests in 13.523s
+OK
+```
+
+Full Python suite:
+
+```text
+python -B -m unittest discover -s tests -p "test_*.py" -v
+Ran 49 tests in 14.228s
+OK
+```

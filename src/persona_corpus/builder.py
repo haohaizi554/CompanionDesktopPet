@@ -70,6 +70,7 @@ FALSE_CONTEXT_MARKERS = (
 )
 INTIMACY_MARKERS = ("小笨蛋", "宝宝", "亲爱的", "只准", "不许离开", "永远陪我")
 QUESTION_MARKS = ("?", "？")
+LEGACY_REFERENCE = re.compile(r"legacy:(\d+);topic:([^;]+)")
 
 TONE_ALIASES = {
     "dry_warm": "dry",
@@ -88,6 +89,7 @@ SOURCE_KIND_ALIASES = {
     "curated_authored": "curated_standalone",
     "legacy_standalone": "preserved_easter_egg",
 }
+LEGACY_SOURCE_KINDS = frozenset(("topic_rewrite", "legacy_standalone"))
 
 
 def _runtime_trigger(entry: CatalogEntry) -> str:
@@ -95,10 +97,10 @@ def _runtime_trigger(entry: CatalogEntry) -> str:
     if entry.trigger == "idle":
         return "any"
     if entry.trigger == "time_event":
-        daypart = entry.topic_id.split(".", 2)[1]
+        daypart = entry.variant_id.split(".", 2)[1]
         return "morning" if daypart == "dawn" else daypart
     if entry.trigger == "date_event":
-        return "weekend" if ".weekend." in entry.topic_id else "day_changed"
+        return "weekend" if ".weekend." in entry.variant_id else "day_changed"
     if entry.trigger == "season_event":
         return "day_changed"
     if entry.trigger == "holiday_event":
@@ -125,6 +127,11 @@ def _slug(value: str) -> str:
     return slug or "line"
 
 
+def catalog_line_id(entry: CatalogEntry) -> str:
+    """Return a stable line ID derived only from immutable catalog identity."""
+    return f"v2_{_slug(entry.variant_id)}_{_stable_digest(entry.variant_id)}"
+
+
 def _looks_like_pii(text: str) -> bool:
     return any(marker in text for marker in PII_MARKERS) or any(
         pattern.search(text) for pattern in PII_PATTERNS
@@ -132,7 +139,7 @@ def _looks_like_pii(text: str) -> bool:
 
 
 def _pii_type(text: str) -> str:
-    if "雷琳玥" in text or "小玥" in text or "姓名" in text or "名字" in text:
+    if any(marker in text for marker in ("雷琳玥", "小玥", "姓名", "名字")):
         return "person_name"
     if any(marker in text for marker in ("湖南", "长沙", "广东", "住在", "地址")):
         return "location_or_history"
@@ -141,17 +148,21 @@ def _pii_type(text: str) -> str:
     return "direct_identifier"
 
 
-def _review_risk(text: str) -> tuple[str, str] | None:
+def _review_risks(text: str) -> tuple[tuple[str, str], ...]:
+    """Return every independent risk; one source line may require several reviews."""
+    risks: list[tuple[str, str]] = []
     if _looks_like_pii(text):
-        return (
-            "privacy_risk",
-            "疑似包含姓名、地点、收入、工作经历或直接标识，角色设定真实性尚未人工确认。",
+        risks.append(
+            (
+                "privacy_risk",
+                "疑似包含姓名、地点、收入、工作经历或直接标识，角色设定真实性尚未人工确认。",
+            )
         )
     if any(marker in text for marker in INTIMACY_MARKERS):
-        return ("uncertain_intimacy", "亲密程度可能超出默认关系边界。")
+        risks.append(("uncertain_intimacy", "亲密程度可能超出默认关系边界。"))
     if any(marker in text for marker in FALSE_CONTEXT_MARKERS):
-        return ("future_context_signal", "句子断言了当前无法可靠获得的用户状态。")
-    return None
+        risks.append(("future_context_signal", "句子断言了当前无法可靠获得的用户状态。"))
+    return tuple(risks)
 
 
 def _archive_reason(line: LegacyLine, mapping: SourceMapping) -> str:
@@ -205,27 +216,43 @@ def _validate_source_and_mappings(
     for source_line, line in source_by_line.items():
         mapping = mapping_by_line[source_line]
         if mapping.category != line.category or mapping.original_text != line.text:
-            raise ValueError(
-                f"source line {source_line} mapping does not match category/text"
-            )
+            raise ValueError(f"source line {source_line} mapping does not match category/text")
     return mapping_by_line
 
 
 def _catalog_reference(
-    entry: CatalogEntry,
-    sources_by_category: Mapping[str, Sequence[SourceMapping]],
-    category_offsets: dict[str, int],
+    entry: CatalogEntry, mapping_by_line: Mapping[int, SourceMapping]
 ) -> tuple[str, str]:
-    candidates = sources_by_category.get(entry.category, ())
-    if not candidates:
-        return (
-            entry.topic_id,
-            f"catalog:{entry.source_reference_hint or entry.topic_id}",
-        )
-    offset = category_offsets[entry.category]
-    mapping = candidates[offset % len(candidates)]
-    category_offsets[entry.category] = offset + 1
-    return mapping.topic_id, f"legacy:{mapping.source_line};topic:{mapping.topic_id}"
+    reference = entry.source_reference
+    legacy = LEGACY_REFERENCE.fullmatch(reference)
+    if legacy is not None:
+        source_line = int(legacy.group(1))
+        source_topic = legacy.group(2)
+        mapping = mapping_by_line.get(source_line)
+        if mapping is None:
+            raise ValueError(
+                f"catalog variant {entry.variant_id!r} references unknown source line {source_line}"
+            )
+        if mapping.category != entry.category or mapping.topic_id != source_topic:
+            raise ValueError(
+                f"catalog variant {entry.variant_id!r} source category/topic mismatch"
+            )
+        if entry.source_kind not in LEGACY_SOURCE_KINDS:
+            raise ValueError(
+                f"catalog variant {entry.variant_id!r} uses legacy lineage with {entry.source_kind!r}"
+            )
+        return source_topic, f"{reference};variant:{entry.variant_id}"
+
+    if reference.startswith("catalog:"):
+        if entry.source_kind in LEGACY_SOURCE_KINDS:
+            raise ValueError(
+                f"catalog variant {entry.variant_id!r} requires a verified legacy source"
+            )
+        return entry.variant_id, f"{reference};variant:{entry.variant_id}"
+
+    raise ValueError(
+        f"catalog variant {entry.variant_id!r} has invalid source_reference {reference!r}"
+    )
 
 
 def _catalog_to_corpus(
@@ -237,31 +264,21 @@ def _catalog_to_corpus(
         raise ValueError(f"enabled catalog entry contains PII risk: {entry.text!r}")
     if "\t" in entry.text or "\r" in entry.text or "\n" in entry.text:
         raise ValueError("catalog text must fit one physical TSV field")
-    line_id = (
-        f"v2_{_slug(entry.semantic_group)}_"
-        f"{_stable_digest(entry.category, entry.semantic_group, entry.text)}"
-    )
     return CorpusLine(
-        id=line_id,
+        id=catalog_line_id(entry),
         category=entry.category,
-        category_group=CATEGORY_GROUP_OVERRIDES.get(
-            entry.category, entry.category_group
-        ),
+        category_group=CATEGORY_GROUP_OVERRIDES.get(entry.category, entry.category_group),
         topic_id=topic_id,
         semantic_group=entry.semantic_group,
         output_mode=(
-            "system_observe"
-            if entry.category_group == "system_ambient"
-            else entry.output_mode
+            "system_observe" if entry.category_group == "system_ambient" else entry.output_mode
         ),
         trigger=_runtime_trigger(entry),
-        required_context="none",
+        required_context=entry.required_context,
         tone=TONE_ALIASES.get(entry.tone, entry.tone),
         interrupt_cost=entry.interrupt_cost,
         cooldown_hours=entry.cooldown_hours,
-        semantic_cooldown_hours=max(
-            entry.cooldown_hours, entry.semantic_cooldown_hours
-        ),
+        semantic_cooldown_hours=max(entry.cooldown_hours, entry.semantic_cooldown_hours),
         max_per_day=entry.max_per_day,
         weight=entry.weight,
         requires_reply=False,
@@ -282,25 +299,34 @@ def build_v2(
     mappings: Sequence[SourceMapping],
     seed: int,
     pii_policy: str = "review",
+    *,
+    catalog: Sequence[CatalogEntry] | None = None,
 ) -> BuildResult:
     """Create a deterministic, curated one-way corpus plus complete dispositions."""
     if pii_policy != "review":
         raise ValueError("pii_policy must be 'review'")
     mapping_by_line = _validate_source_and_mappings(source, mappings)
+    catalog_entries = tuple(CONTENT_CATALOG if catalog is None else catalog)
+    variants = [entry.variant_id for entry in catalog_entries]
+    if len(variants) != len(set(variants)):
+        raise ValueError("content catalog contains duplicate immutable variant IDs")
 
-    mappings_by_category: dict[str, list[SourceMapping]] = defaultdict(list)
-    for mapping in mappings:
-        mappings_by_category[mapping.category].append(mapping)
-    for category in mappings_by_category:
-        mappings_by_category[category].sort(key=lambda item: item.source_line)
-
-    category_offsets: dict[str, int] = defaultdict(int)
     enabled: list[CorpusLine] = []
-    for entry in CONTENT_CATALOG:
-        topic_id, source_reference = _catalog_reference(
-            entry, mappings_by_category, category_offsets
-        )
+    for entry in catalog_entries:
+        topic_id, source_reference = _catalog_reference(entry, mapping_by_line)
         enabled.append(_catalog_to_corpus(entry, topic_id, source_reference))
+
+    normalized = [normalize_text(row.text) for row in enabled]
+    if len(normalized) != len(set(normalized)):
+        raise ValueError("content catalog contains normalized duplicate enabled text")
+    if len(enabled) != len({row.id for row in enabled}):
+        raise ValueError("content catalog produced duplicate stable IDs")
+
+    suggestions_by_source: dict[int, set[str]] = defaultdict(set)
+    for row in enabled:
+        legacy = re.match(r"legacy:(\d+);", row.source_reference)
+        if legacy is not None:
+            suggestions_by_source[int(legacy.group(1))].add(row.text)
 
     enabled.sort(
         key=lambda row: (
@@ -308,15 +334,6 @@ def build_v2(
             row.id,
         )
     )
-    normalized = [normalize_text(row.text) for row in enabled]
-    if len(normalized) != len(set(normalized)):
-        raise ValueError("content catalog contains normalized duplicate enabled text")
-    if len(enabled) != len({row.id for row in enabled}):
-        raise ValueError("content catalog produced duplicate stable IDs")
-
-    suggestions: dict[str, str] = {}
-    for row in enabled:
-        suggestions.setdefault(row.category, row.text)
 
     archive: list[ArchiveRow] = []
     review: list[ReviewRow] = []
@@ -325,7 +342,8 @@ def build_v2(
     for line in sorted(source, key=lambda item: item.source_line):
         mapping = mapping_by_line[line.source_line]
         reason = _archive_reason(line, mapping)
-        suggested = suggestions.get(line.category, "")
+        source_suggestions = sorted(suggestions_by_source.get(line.source_line, ()))
+        suggested = source_suggestions[0] if source_suggestions else ""
         archive.append(
             ArchiveRow(
                 source_line=line.source_line,
@@ -334,45 +352,45 @@ def build_v2(
                 archive_reason=reason,
                 topic_id=mapping.topic_id,
                 suggested_rewrite=suggested,
-                can_recover=bool(suggested),
+                can_recover=bool(source_suggestions),
             )
         )
         dispositions[line.source_line].append(f"archive:{reason}")
 
-        risk = _review_risk(line.text)
-        if risk is None:
-            continue
-        risk_type, description = risk
-        review_id = f"review_{line.source_line}_{_stable_digest(line.category, line.text)}"
-        review.append(
-            ReviewRow(
-                review_id=review_id,
-                source_line=line.source_line,
-                category=line.category,
-                original_text=line.text,
-                risk_type=risk_type,
-                risk_description=description,
-                suggested_action="人工确认后改写；默认不得进入运行语料。",
-                suggested_rewrite=suggested,
-                default_enabled=False,
+        for risk_type, description in _review_risks(line.text):
+            review_id = (
+                f"review_{line.source_line}_"
+                f"{_stable_digest(line.category, line.text, risk_type)}"
             )
-        )
-        dispositions[line.source_line].append(f"review:{risk_type}")
-        if risk_type == "privacy_risk":
-            pii_review.append(
-                PiiReviewRow(
-                    review_id=f"pii_{line.source_line}_{_stable_digest(line.text)}",
+            review.append(
+                ReviewRow(
+                    review_id=review_id,
                     source_line=line.source_line,
                     category=line.category,
                     original_text=line.text,
-                    pii_type=_pii_type(line.text),
+                    risk_type=risk_type,
                     risk_description=description,
-                    suggested_action="确认角色设定为虚构且获授权前保持禁用。",
+                    suggested_action="人工确认后改写；默认不得进入运行语料。",
                     suggested_rewrite=suggested,
                     default_enabled=False,
                 )
             )
-            dispositions[line.source_line].append("pii_review")
+            dispositions[line.source_line].append(f"review:{risk_type}")
+            if risk_type == "privacy_risk":
+                pii_review.append(
+                    PiiReviewRow(
+                        review_id=f"pii_{line.source_line}_{_stable_digest(line.text)}",
+                        source_line=line.source_line,
+                        category=line.category,
+                        original_text=line.text,
+                        pii_type=_pii_type(line.text),
+                        risk_description=description,
+                        suggested_action="确认角色设定为虚构且获授权前保持禁用。",
+                        suggested_rewrite=suggested,
+                        default_enabled=False,
+                    )
+                )
+                dispositions[line.source_line].append("pii_review")
 
     frozen_dispositions = MappingProxyType(
         {line: tuple(values) for line, values in sorted(dispositions.items())}
@@ -459,21 +477,65 @@ def serialize_pii_review(rows: Iterable[PiiReviewRow]) -> bytes:
     return _serialize(PII_REVIEW_HEADER, rows)
 
 
-def write_build_outputs(result: BuildResult, output: Path) -> dict[str, Path]:
-    output = Path(output)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    archive = output.with_name("persona-corpus-archive.tsv")
-    review = output.with_name("persona-corpus-review.tsv")
-    pii_review = output.parents[1] / "reports" / "pii-review.tsv"
-    if output.parent.name == "optimized":
-        pii_review = output.parent.parent.parent / "reports" / "pii-review.tsv"
-    pii_review.parent.mkdir(parents=True, exist_ok=True)
+def _canonical_output_root(output: Path) -> Path | None:
+    if output.parent.name == "optimized" and output.parent.parent.name == "data":
+        return output.parent.parent.parent
+    return None
+
+
+def _derived_report_output(output: Path) -> Path:
+    root = _canonical_output_root(output)
+    if root is None:
+        raise ValueError(
+            "report_output is required unless output is inside a canonical data/optimized directory"
+        )
+    return root / "reports" / "pii-review.tsv"
+
+
+def _is_contained(path: Path, root: Path) -> bool:
+    try:
+        path.resolve(strict=False).relative_to(root.resolve(strict=False))
+    except ValueError:
+        return False
+    return True
+
+
+def _validated_output_paths(
+    output: Path, report_output: Path | None
+) -> dict[str, Path]:
+    canonical_root = _canonical_output_root(output)
+    if report_output is None:
+        pii_review = _derived_report_output(output)
+    else:
+        pii_review = Path(report_output)
+        containment_root = canonical_root or output.parent
+        if not _is_contained(pii_review, containment_root):
+            raise ValueError(
+                "report_output must be contained under the canonical root or output directory"
+            )
+
     paths = {
         "v2": output,
-        "archive": archive,
-        "review": review,
+        "archive": output.with_name("persona-corpus-archive.tsv"),
+        "review": output.with_name("persona-corpus-review.tsv"),
         "pii_review": pii_review,
     }
+    normalized = {path.resolve(strict=False) for path in paths.values()}
+    if len(normalized) != len(paths):
+        raise ValueError("all build output paths must be distinct")
+    return paths
+
+
+def write_build_outputs(
+    result: BuildResult,
+    output: Path,
+    *,
+    report_output: Path | None = None,
+) -> dict[str, Path]:
+    output = Path(output)
+    paths = _validated_output_paths(output, report_output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    paths["pii_review"].parent.mkdir(parents=True, exist_ok=True)
     payloads = {
         "v2": serialize_v2(result.enabled),
         "archive": serialize_archive(result.archive),

@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import re
 import subprocess
 import sys
 import tempfile
 import unittest
 from collections import Counter
-from dataclasses import fields
+from dataclasses import fields, replace
 from pathlib import Path
 
 from src.persona_corpus.builder import (
@@ -30,7 +31,7 @@ from src.persona_corpus.schema import (
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-SOURCE_PATH = REPOSITORY_ROOT / "src/CompanionDesktopPet/Assets/persona-corpus.tsv"
+SOURCE_PATH = REPOSITORY_ROOT / "data/source/persona-corpus.original.tsv"
 MAPPING_PATH = REPOSITORY_ROOT / "data/intermediate/source-line-map.tsv"
 
 
@@ -47,6 +48,8 @@ def mapping(line: LegacyLine, topic_id: str | None = None) -> SourceMapping:
 
 
 def fixture_result(seed: int = 20260722) -> BuildResult:
+    from src.persona_corpus.content_catalog import CatalogEntry
+
     source = [
         LegacyLine(1, "Debugging", "哈？空指针又来了，先看完整堆栈。"),
         LegacyLine(2, "WanderingLife", "今晚突然想起湖南的味道。"),
@@ -54,7 +57,71 @@ def fixture_result(seed: int = 20260722) -> BuildResult:
         LegacyLine(4, "EasterEgg", "雷琳玥把真名藏进了第七页。"),
         LegacyLine(5, "DailyCare", "你的杯子是不是又一口没动。"),
     ]
-    return build_v2(source, [mapping(line) for line in source], seed)
+    catalog = (
+        CatalogEntry(
+            category="Debugging",
+            category_group="technical",
+            variant_id="fixture.debugging.stack.01",
+            semantic_group="fixture.debugging.stack",
+            output_mode="self_talk",
+            trigger="idle",
+            required_context="none",
+            tone="dry_warm",
+            interrupt_cost=1,
+            cooldown_hours=24.0,
+            semantic_cooldown_hours=24.0,
+            max_per_day=1,
+            weight=1.0,
+            text="空指针出现时，完整堆栈比猜测更可靠。",
+            source_kind="topic_rewrite",
+            source_reference="legacy:1;topic:topic-1",
+            rewrite_reason="fixture rewrite with exact lineage",
+        ),
+        CatalogEntry(
+            category="EasterEgg",
+            category_group="easter_egg",
+            variant_id="fixture.easter.safe.01",
+            semantic_group="fixture.easter.safe",
+            output_mode="ambient",
+            trigger="app_start",
+            required_context="none",
+            tone="playful_rare",
+            interrupt_cost=0,
+            cooldown_hours=48.0,
+            semantic_cooldown_hours=48.0,
+            max_per_day=1,
+            weight=1.0,
+            text="第七页藏着一枚不透露真名的小彩蛋。",
+            source_kind="legacy_standalone",
+            source_reference="legacy:4;topic:topic-4",
+            rewrite_reason="fixture privacy-safe rewrite with exact lineage",
+        ),
+        CatalogEntry(
+            category="DailyCare",
+            category_group="daily_care",
+            variant_id="fixture.daily.water.01",
+            semantic_group="fixture.daily.water",
+            output_mode="ambient",
+            trigger="long_active",
+            required_context="none",
+            tone="soft_warm",
+            interrupt_cost=1,
+            cooldown_hours=24.0,
+            semantic_cooldown_hours=24.0,
+            max_per_day=1,
+            weight=1.0,
+            text="桌边放杯水，想起来时喝一口就好。",
+            source_kind="topic_rewrite",
+            source_reference="legacy:5;topic:topic-5",
+            rewrite_reason="fixture context-safe rewrite with exact lineage",
+        ),
+    )
+    return build_v2(
+        source,
+        [mapping(line) for line in source],
+        seed,
+        catalog=catalog,
+    )
 
 
 class BuildContractTests(unittest.TestCase):
@@ -115,6 +182,47 @@ class BuildContractTests(unittest.TestCase):
             V2_HEADER,
         )
         self.assertEqual(V2_HEADER, tuple(field.name for field in fields(CorpusLine)))
+
+    def test_archive_and_review_headers_match_authoritative_spec(self) -> None:
+        self.assertEqual(
+            (
+                "source_line", "category", "original_text", "archive_reason",
+                "topic_id", "suggested_rewrite", "can_recover",
+            ),
+            ARCHIVE_HEADER,
+        )
+        self.assertEqual(
+            (
+                "review_id", "source_line", "category", "original_text",
+                "risk_type", "risk_description", "suggested_action",
+                "suggested_rewrite", "default_enabled",
+            ),
+            REVIEW_HEADER,
+        )
+
+    def test_catalog_has_explicit_immutable_variant_and_source_reference(self) -> None:
+        from src.persona_corpus.content_catalog import CONTENT_CATALOG, CatalogEntry
+
+        catalog_fields = set(CatalogEntry.__dataclass_fields__)
+        self.assertIn("variant_id", catalog_fields)
+        self.assertIn("source_reference", catalog_fields)
+        self.assertNotIn("source_reference_hint", catalog_fields)
+        variants = [entry.variant_id for entry in CONTENT_CATALOG]
+        self.assertEqual(len(variants), len(set(variants)))
+        self.assertTrue(all(entry.source_reference for entry in CONTENT_CATALOG))
+
+    def test_copy_edit_does_not_change_stable_catalog_id(self) -> None:
+        from src.persona_corpus.builder import catalog_line_id
+        from src.persona_corpus.content_catalog import CONTENT_CATALOG
+
+        entry = CONTENT_CATALOG[0]
+        edited = replace(
+            entry,
+            text="改过文案以后，历史标识仍然保持不变。",
+            category="CopyEditedCategory",
+            semantic_group="copy.edited.group",
+        )
+        self.assertEqual(catalog_line_id(entry), catalog_line_id(edited))
 
     def test_enabled_lines_are_standalone_and_need_no_reply(self) -> None:
         result = fixture_result()
@@ -263,10 +371,12 @@ class BuildContractTests(unittest.TestCase):
     def test_writer_emits_all_four_exact_tsv_headers(self) -> None:
         result = fixture_result()
         with tempfile.TemporaryDirectory() as directory:
-            output = Path(directory) / "persona-corpus-v2.tsv"
+            root = Path(directory)
+            output = root / "data/optimized/persona-corpus-v2.tsv"
             paths = write_build_outputs(result, output)
 
             self.assertEqual(set(paths), {"v2", "archive", "review", "pii_review"})
+            self.assertEqual(root / "reports/pii-review.tsv", paths["pii_review"])
             expected_headers = {
                 "v2": V2_HEADER,
                 "archive": ARCHIVE_HEADER,
@@ -277,12 +387,61 @@ class BuildContractTests(unittest.TestCase):
                 header = path.read_text(encoding="utf-8").splitlines()[0]
                 self.assertEqual("\t".join(expected_headers[name]), header)
 
+    def test_flat_output_requires_explicit_contained_report_path(self) -> None:
+        result = fixture_result()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "persona-corpus-v2.tsv"
+            with self.assertRaisesRegex(ValueError, "report_output"):
+                write_build_outputs(result, output)
+
+            report_output = root / "reports/pii-review.tsv"
+            paths = write_build_outputs(result, output, report_output=report_output)
+            self.assertEqual(report_output, paths["pii_review"])
+            self.assertTrue(report_output.is_file())
+
+    def test_writer_rejects_colliding_output_paths_before_writing(self) -> None:
+        result = fixture_result()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            flat_output = root / "persona-corpus-v2.tsv"
+            with self.assertRaisesRegex(ValueError, "distinct"):
+                write_build_outputs(
+                    result,
+                    flat_output,
+                    report_output=flat_output,
+                )
+
+            canonical_collision = root / "data/optimized/persona-corpus-archive.tsv"
+            with self.assertRaisesRegex(ValueError, "distinct"):
+                write_build_outputs(result, canonical_collision)
+
+    def test_noncanonical_report_output_stays_under_output_directory(self) -> None:
+        result = fixture_result()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "nested/persona-corpus-v2.tsv"
+            escaping_report = root / "reports/pii-review.tsv"
+            with self.assertRaisesRegex(ValueError, "contained"):
+                write_build_outputs(
+                    result,
+                    output,
+                    report_output=escaping_report,
+                )
+
 
 class RealCorpusBuildTests(unittest.TestCase):
+    def test_real_source_fixture_is_the_tracked_canonical_copy(self) -> None:
+        self.assertEqual(
+            REPOSITORY_ROOT / "data/source/persona-corpus.original.tsv",
+            SOURCE_PATH,
+        )
+        self.assertTrue(SOURCE_PATH.is_file())
+
     @classmethod
     def setUpClass(cls) -> None:
-        if not SOURCE_PATH.exists() or not MAPPING_PATH.exists():
-            raise unittest.SkipTest("full corpus and mapping outputs are required")
+        if not SOURCE_PATH.is_file() or not MAPPING_PATH.is_file():
+            raise FileNotFoundError("tracked full corpus and mapping fixtures are required")
         from src.persona_corpus.builder import load_source_mappings
         from src.persona_corpus.loader import load_legacy
 
@@ -300,6 +459,101 @@ class RealCorpusBuildTests(unittest.TestCase):
         self.assertTrue(self.result.review)
         self.assertTrue(self.result.pii_review)
 
+    def test_real_lineage_matches_explicit_catalog_source_mapping(self) -> None:
+        from src.persona_corpus.builder import catalog_line_id, load_source_mappings
+        from src.persona_corpus.content_catalog import CONTENT_CATALOG
+
+        entries = {entry.variant_id: entry for entry in CONTENT_CATALOG}
+        mappings = {
+            mapping.source_line: mapping for mapping in load_source_mappings(MAPPING_PATH)
+        }
+        self.assertEqual(len(CONTENT_CATALOG), len(entries))
+        for row in self.result.enabled:
+            match = re.search(r"(?:^|;)variant:([^;]+)$", row.source_reference)
+            self.assertIsNotNone(match, row.source_reference)
+            variant_id = match.group(1)
+            entry = entries[variant_id]
+            self.assertEqual(catalog_line_id(entry), row.id)
+            self.assertEqual(entry.required_context, row.required_context)
+            if row.source_kind not in {"rewritten_topic", "preserved_easter_egg"}:
+                self.assertTrue(row.source_reference.startswith("catalog:"))
+                continue
+            legacy = re.fullmatch(
+                r"legacy:(\d+);topic:([^;]+);variant:([^;]+)",
+                row.source_reference,
+            )
+            self.assertIsNotNone(legacy, row.source_reference)
+            source_line = int(legacy.group(1))
+            source_topic = legacy.group(2)
+            self.assertEqual(variant_id, legacy.group(3))
+            self.assertEqual(entry.source_reference, f"legacy:{source_line};topic:{source_topic}")
+            self.assertEqual(entry.category, mappings[source_line].category)
+            self.assertEqual(source_topic, mappings[source_line].topic_id)
+            self.assertEqual(source_topic, row.topic_id)
+
+    def test_technical_source_topics_have_at_most_two_enabled_variants(self) -> None:
+        variants = Counter(
+            row.topic_id for row in self.result.enabled if row.category_group == "technical"
+        )
+        self.assertTrue(variants)
+        self.assertLessEqual(max(variants.values()), 2)
+        self.assertTrue(all(count in (1, 2) for count in variants.values()))
+
+    def test_real_archive_recovery_is_exact_and_never_category_wide(self) -> None:
+        enabled_by_source: dict[int, set[str]] = {}
+        for row in self.result.enabled:
+            match = re.match(r"legacy:(\d+);", row.source_reference)
+            if match:
+                enabled_by_source.setdefault(int(match.group(1)), set()).add(row.text)
+
+        recoverable_sources = set()
+        for row in self.result.archive:
+            if row.can_recover:
+                recoverable_sources.add(row.source_line)
+                self.assertIn(row.source_line, enabled_by_source)
+                self.assertIn(row.suggested_rewrite, enabled_by_source[row.source_line])
+            else:
+                self.assertEqual("", row.suggested_rewrite)
+        self.assertEqual(set(enabled_by_source), recoverable_sources)
+
+    def test_source_75122_preserves_each_independent_review_risk(self) -> None:
+        risks = {
+            row.risk_type for row in self.result.review if row.source_line == 75122
+        }
+        self.assertEqual({"privacy_risk", "future_context_signal"}, risks)
+        self.assertEqual(
+            len(risks),
+            len({row.review_id for row in self.result.review if row.source_line == 75122}),
+        )
+
+    def test_catalog_contains_no_semicolon_padded_duplicate_sentence(self) -> None:
+        from src.persona_corpus.content_catalog import CONTENT_CATALOG
+
+        complete = {entry.text.rstrip("。！") for entry in CONTENT_CATALOG}
+        padded = []
+        for entry in CONTENT_CATALOG:
+            if "；" not in entry.text:
+                continue
+            first_clause = entry.text.split("；", 1)[0].rstrip("。！")
+            if first_clause in complete:
+                padded.append((entry.variant_id, entry.text))
+        self.assertEqual([], padded)
+
+    def test_enabled_lines_do_not_assert_unavailable_current_state(self) -> None:
+        unsupported = (
+            "饭点到了", "困得眼睛都睁不开", "屏幕亮成这样",
+            "连续工作这么久", "咖啡喝太晚今晚又要睡不着",
+            "手腕酸了", "睡前还盯着报错", "胃不舒服还空腹扛着",
+            "空调吹久了",
+        )
+        offenders = [
+            (row.id, row.text)
+            for row in self.result.enabled
+            if row.required_context == "none"
+            and any(marker in row.text for marker in unsupported)
+        ]
+        self.assertEqual([], offenders)
+
     def test_real_build_has_unique_text_and_stable_ids(self) -> None:
         from src.persona_corpus.normalization import normalize_text
 
@@ -313,13 +567,22 @@ class RealCorpusBuildTests(unittest.TestCase):
         texts = [row.text for row in self.result.enabled]
         average = sum(map(len, texts)) / len(texts)
         over_36 = sum(len(text) > 36 for text in texts) / len(texts)
+        short_share = sum(8 <= len(text) <= 16 for text in texts) / len(texts)
+        medium_share = sum(17 <= len(text) <= 24 for text in texts) / len(texts)
+        long_share = sum(25 <= len(text) <= 36 for text in texts) / len(texts)
         catchphrases = ("哈？", "我靠", "我丢", "真的假的", "本姑娘", "笨蛋", "玥玥")
         catchphrase_share = sum(
             any(marker in text for marker in catchphrases) for text in texts
         ) / len(texts)
 
         self.assertGreaterEqual(average, 18)
-        self.assertLessEqual(average, 36)
+        self.assertLessEqual(average, 26)
+        self.assertGreaterEqual(short_share, 0.25)
+        self.assertLessEqual(short_share, 0.35)
+        self.assertGreaterEqual(medium_share, 0.35)
+        self.assertLessEqual(medium_share, 0.45)
+        self.assertGreaterEqual(long_share, 0.20)
+        self.assertLessEqual(long_share, 0.30)
         self.assertLessEqual(over_36, 0.08)
         self.assertLessEqual(catchphrase_share, 0.10)
 
@@ -334,11 +597,23 @@ class RealCorpusBuildTests(unittest.TestCase):
                 f"{width}-character opening {phrase!r} appears {count} times",
             )
 
+    def test_real_build_avoids_template_ending_dominance(self) -> None:
+        texts = [row.text for row in self.result.enabled]
+        for width in (4, 6, 8, 10):
+            endings = Counter(text[-width:] for text in texts if len(text) >= width)
+            phrase, count = endings.most_common(1)[0]
+            self.assertLessEqual(
+                count / len(texts),
+                0.02,
+                f"{width}-character ending {phrase!r} appears {count} times",
+            )
+
     def test_cli_double_build_is_byte_identical(self) -> None:
         with tempfile.TemporaryDirectory() as first_dir, tempfile.TemporaryDirectory() as second_dir:
-            outputs: list[Path] = []
+            output_sets: list[dict[str, Path]] = []
             for directory in (first_dir, second_dir):
-                output = Path(directory) / "persona-corpus-v2.tsv"
+                root = Path(directory)
+                output = root / "data/optimized/persona-corpus-v2.tsv"
                 command = [
                     sys.executable,
                     "tools/build_corpus_v2.py",
@@ -360,11 +635,19 @@ class RealCorpusBuildTests(unittest.TestCase):
                     encoding="utf-8",
                 )
                 self.assertEqual(0, completed.returncode, completed.stderr)
-                outputs.append(output)
+                output_sets.append(
+                    {
+                        "v2": output,
+                        "archive": output.with_name("persona-corpus-archive.tsv"),
+                        "review": output.with_name("persona-corpus-review.tsv"),
+                        "pii_review": root / "reports/pii-review.tsv",
+                    }
+                )
 
-            first_hash = hashlib.sha256(outputs[0].read_bytes()).hexdigest()
-            second_hash = hashlib.sha256(outputs[1].read_bytes()).hexdigest()
-            self.assertEqual(first_hash, second_hash)
+            for name in output_sets[0]:
+                first_hash = hashlib.sha256(output_sets[0][name].read_bytes()).hexdigest()
+                second_hash = hashlib.sha256(output_sets[1][name].read_bytes()).hexdigest()
+                self.assertEqual(first_hash, second_hash, name)
 
 
 if __name__ == "__main__":

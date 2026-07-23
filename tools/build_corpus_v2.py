@@ -29,6 +29,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=Path("data/intermediate/source-line-map.tsv"),
     )
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--report-output",
+        type=Path,
+        help="Explicit pii-review.tsv path for noncanonical output layouts.",
+    )
     parser.add_argument("--seed", type=int, default=20260722)
     parser.add_argument("--pii-policy", choices=("review",), default="review")
     return parser.parse_args(argv)
@@ -39,7 +44,11 @@ def main(argv: list[str] | None = None) -> int:
     source = load_legacy(args.input)
     mappings = load_source_mappings(args.mappings)
     result = build_v2(source, mappings, args.seed, pii_policy=args.pii_policy)
-    paths = write_build_outputs(result, args.output)
+    paths = write_build_outputs(
+        result,
+        args.output,
+        report_output=args.report_output,
+    )
     v2_hash = hashlib.sha256(paths["v2"].read_bytes()).hexdigest()
     print(f"enabled={len(result.enabled)}")
     print(f"archive={len(result.archive)}")
