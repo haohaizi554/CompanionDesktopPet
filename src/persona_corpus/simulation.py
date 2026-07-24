@@ -17,6 +17,7 @@ from .models import CorpusLine, LegacyLine
 from .normalization import normalize_text
 from .schema import ARCHIVE_HEADER, PII_REVIEW_HEADER, REVIEW_HEADER
 from .selector import SchedulerConfig, SelectorConfigError, select_line
+from .simulation_core.constraints import analyze_constraints, run_adversarial_suite
 from .simulation_core.scenarios import SUBSEED_DERIVATION_VERSION, derive_subseed
 from .validation import (
     CATCHPHRASES,

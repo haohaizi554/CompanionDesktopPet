@@ -7,18 +7,24 @@ import tempfile
 import unittest
 from copy import deepcopy
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from src.persona_corpus.builder import serialize_v2
+from src.persona_corpus.context import PersonaContext
 from src.persona_corpus.loader import load_v2
 from src.persona_corpus.simulation import (
     SUBSEED_DERIVATION_VERSION,
+    SimulationAttempt,
     SimulationError,
+    analyze_constraints,
     derive_subseed,
     render_simulation_report,
+    run_adversarial_suite,
     simulate,
     write_editorial_reports,
 )
+from src.persona_corpus.selector import SchedulerConfig
 from src.persona_corpus.validation import load_json_object, scheduler_config_sha256
 from src.persona_corpus.validation import validate_corpus
 from tools.simulate_persona import seed_sequence_from_count
@@ -308,14 +314,253 @@ class SimulationUnitTests(unittest.TestCase):
         self.assertNotIn(baseline, variants)
         self.assertEqual("persona-simulation-v2", SUBSEED_DERIVATION_VERSION)
 
-    def test_seed_order_and_corpus_order_do_not_change_selected_event_stream(self) -> None:
+    def _constraint_attempt(
+        self,
+        *,
+        when: datetime,
+        row_index: int,
+        elapsed_minutes: float,
+        interrupt_cost: int = 0,
+        category_group: str = "character_life",
+        output_mode: str = "self_talk",
+    ) -> SimulationAttempt:
+        source = self.corpus[row_index % len(self.corpus)]
+        row = replace(
+            source,
+            id=f"constraint-{row_index}",
+            category=f"constraint-category-{row_index}",
+            category_group=category_group,
+            semantic_group=f"constraint-semantic-{row_index}",
+            output_mode=output_mode,
+            trigger="any",
+            required_context="none",
+            interrupt_cost=interrupt_cost,
+            cooldown_hours=0.01,
+            semantic_cooldown_hours=0.01,
+            max_per_day=20,
+            requires_reply=False,
+            enabled=True,
+            text=f"constraint fixture {row_index}",
+        )
+        context = PersonaContext.from_datetime(
+            when,
+            minutes_since_last_output=elapsed_minutes,
+        )
+        return SimulationAttempt(seed=0, attempted_at=when, context=context, row=row)
+
+    def test_constraint_checker_enforces_7m59s_but_allows_exact_8m_boundary(self) -> None:
+        scheduler = SchedulerConfig.from_mapping(self.config)
+        start = datetime(2026, 7, 1, 8, 0, tzinfo=timezone(timedelta(hours=8)))
+        first = self._constraint_attempt(
+            when=start,
+            row_index=0,
+            elapsed_minutes=1440,
+        )
+        below = self._constraint_attempt(
+            when=start + timedelta(minutes=7, seconds=59),
+            row_index=1,
+            elapsed_minutes=7 + 59 / 60,
+        )
+        exact = self._constraint_attempt(
+            when=start + timedelta(minutes=8),
+            row_index=2,
+            elapsed_minutes=8,
+        )
+
+        self.assertIn(
+            "minimum_interval_violation",
+            analyze_constraints((first, below), scheduler).codes,
+        )
+        self.assertNotIn(
+            "minimum_interval_violation",
+            analyze_constraints((first, exact), scheduler).codes,
+        )
+
+    def test_constraint_checker_uses_each_interrupt_cost_exact_boundary(self) -> None:
+        scheduler = SchedulerConfig.from_mapping(self.config)
+        start = datetime(2026, 7, 1, 8, 0, tzinfo=timezone(timedelta(hours=8)))
+        for cost, required in sorted(
+            scheduler.interrupt_cost_minimum_intervals_minutes.items()
+        ):
+            if cost == 0:
+                continue
+            with self.subTest(cost=cost, required=required):
+                first = self._constraint_attempt(
+                    when=start,
+                    row_index=cost * 10,
+                    elapsed_minutes=1440,
+                )
+                below = self._constraint_attempt(
+                    when=start + timedelta(minutes=required, seconds=-1),
+                    row_index=cost * 10 + 1,
+                    elapsed_minutes=required - 1 / 60,
+                    interrupt_cost=cost,
+                )
+                exact = self._constraint_attempt(
+                    when=start + timedelta(minutes=required),
+                    row_index=cost * 10 + 2,
+                    elapsed_minutes=required,
+                    interrupt_cost=cost,
+                )
+                self.assertIn(
+                    "interrupt_budget_violation",
+                    analyze_constraints((first, below), scheduler).codes,
+                )
+                self.assertNotIn(
+                    "interrupt_budget_violation",
+                    analyze_constraints((first, exact), scheduler).codes,
+                )
+
+    def test_constraint_checker_honours_any_configured_blocked_group(self) -> None:
+        scheduler = replace(
+            SchedulerConfig.from_mapping(self.config),
+            block_adjacent_category_groups=frozenset({"character_life"}),
+        )
+        start = datetime(2026, 7, 1, 8, 0, tzinfo=timezone(timedelta(hours=8)))
+        attempts = (
+            self._constraint_attempt(
+                when=start,
+                row_index=70,
+                elapsed_minutes=1440,
+                category_group="character_life",
+            ),
+            self._constraint_attempt(
+                when=start + timedelta(minutes=8),
+                row_index=71,
+                elapsed_minutes=8,
+                category_group="character_life",
+            ),
+        )
+
+        result = analyze_constraints(attempts, scheduler)
+        self.assertIn("adjacent_group_violation:character_life", result.codes)
+
+    def test_constraint_checker_detects_rolling_hour_and_late_night_budgets(self) -> None:
+        scheduler = SchedulerConfig.from_mapping(self.config)
+        start = datetime(2026, 7, 1, 1, 0, tzinfo=timezone(timedelta(hours=8)))
+        attempts = tuple(
+            self._constraint_attempt(
+                when=start + timedelta(minutes=8 * index),
+                row_index=100 + index,
+                elapsed_minutes=1440 if index == 0 else 8,
+            )
+            for index in range(3)
+        )
+
+        codes = analyze_constraints(attempts, scheduler).codes
+        self.assertIn("hourly_budget_violation", codes)
+        self.assertIn("late_night_budget_violation", codes)
+
+    def test_constraint_checker_detects_daily_and_recent_window_quotas(self) -> None:
+        scheduler = SchedulerConfig.from_mapping(self.config)
+        start = datetime(2026, 7, 1, 8, 0, tzinfo=timezone(timedelta(hours=8)))
+
+        first = self._constraint_attempt(
+            when=start,
+            row_index=200,
+            elapsed_minutes=1440,
+        )
+        assert first.row is not None
+        repeated = replace(
+            self._constraint_attempt(
+                when=start + timedelta(minutes=8),
+                row_index=201,
+                elapsed_minutes=8,
+            ),
+            row=replace(first.row, max_per_day=1),
+        )
+        first = replace(first, row=replace(first.row, max_per_day=1))
+        self.assertIn(
+            "max_per_day_violation",
+            analyze_constraints((first, repeated), scheduler).codes,
+        )
+
+        groups = (
+            "technical",
+            "character_life",
+            "technical",
+            "character_life",
+            "technical",
+        )
+        technical = tuple(
+            self._constraint_attempt(
+                when=start + timedelta(minutes=61 * index),
+                row_index=220 + index,
+                elapsed_minutes=1440 if index == 0 else 61,
+                category_group=group,
+            )
+            for index, group in enumerate(groups)
+        )
+        self.assertIn(
+            "recent_technical_violation",
+            analyze_constraints(technical, scheduler).codes,
+        )
+
+        modes = ("user_direct", "ambient", "user_direct", "ambient", "user_direct")
+        directed = tuple(
+            self._constraint_attempt(
+                when=start + timedelta(minutes=61 * index),
+                row_index=240 + index,
+                elapsed_minutes=1440 if index == 0 else 61,
+                output_mode=mode,
+            )
+            for index, mode in enumerate(modes)
+        )
+        self.assertIn(
+            "recent_user_direct_violation",
+            analyze_constraints(directed, scheduler).codes,
+        )
+
+        easter = tuple(
+            self._constraint_attempt(
+                when=start + timedelta(minutes=61 * index),
+                row_index=260 + index,
+                elapsed_minutes=1440 if index == 0 else 61,
+                category_group=group,
+            )
+            for index, group in enumerate(
+                ("easter_egg", "character_life", "easter_egg")
+            )
+        )
+        self.assertIn(
+            "recent_easter_egg_violation",
+            analyze_constraints(easter, scheduler).codes,
+        )
+
+    def test_adversarial_suite_proves_every_configured_constraint_boundary(self) -> None:
+        scheduler = SchedulerConfig.from_mapping(self.config)
+        result = run_adversarial_suite(scheduler)
+        by_name = {case.name: case for case in result.cases}
+
+        self.assertEqual((), result.hard_violations)
+        self.assertIn("minimum_interval:7m59s:reject", by_name)
+        self.assertIn("minimum_interval:8m00s:allow", by_name)
+        for cost, minutes in sorted(
+            scheduler.interrupt_cost_minimum_intervals_minutes.items()
+        ):
+            if cost == 0:
+                continue
+            self.assertIn(f"interrupt_cost:{cost}:{minutes}m:reject_below", by_name)
+            self.assertIn(f"interrupt_cost:{cost}:{minutes}m:allow_exact", by_name)
+        self.assertIn("rolling_hour:max:reject", by_name)
+        self.assertIn("late_night:max:reject", by_name)
+        self.assertIn("max_per_day:reject", by_name)
+        self.assertIn("recent:technical:reject", by_name)
+        self.assertIn("recent:user_direct:reject", by_name)
+        self.assertIn("recent:easter_egg:reject", by_name)
+        for group in scheduler.block_adjacent_category_groups:
+            self.assertIn(f"adjacent_group:{group}:reject", by_name)
+
+    def test_seed_order_is_canonical_but_corpus_order_changes_replay_anchor(self) -> None:
         forward = simulate(self.corpus, self.config, days=1, seeds=(9, 3))
-        reverse = simulate(tuple(reversed(self.corpus)), self.config, days=1, seeds=(3, 9))
+        reverse = simulate(self.corpus, self.config, days=1, seeds=(3, 9))
+        reordered = simulate(tuple(reversed(self.corpus)), self.config, days=1, seeds=(3, 9))
         self.assertEqual((3, 9), forward.seeds)
         self.assertEqual((3, 9), reverse.seeds)
         forward_payload = forward.to_validation_payload()
         reverse_payload = reverse.to_validation_payload()
         self.assertEqual(forward_payload["attempts"], reverse_payload["attempts"])
+        self.assertNotEqual(forward.corpus_sha256, reordered.corpus_sha256)
 
     def test_simulation_does_not_mutate_global_random_state(self) -> None:
         random.seed(20260723)
