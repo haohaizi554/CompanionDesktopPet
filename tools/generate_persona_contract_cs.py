@@ -74,6 +74,16 @@ def render_contract() -> str:
         for group in limits["block_adjacent_category_groups"]
     )
     dry_sharp = PERSONA_CONTRACT.dry_sharp
+    seasoning = PERSONA_CONTRACT.lexical_exposure["seasoning"]
+    if not isinstance(seasoning, Mapping):
+        raise ValueError("shared lexical seasoning contract is malformed")
+    token_patterns = seasoning["token_patterns"]
+    if not isinstance(token_patterns, Mapping):
+        raise ValueError("shared lexical token patterns are malformed")
+    seasoning_token_patterns = ",\n".join(
+        "            " + f"[{_quoted(str(marker))}] = {_quoted(str(pattern))}"
+        for marker, pattern in token_patterns.items()
+    )
     identity_rules = ",\n".join(
         "            "
         f"[{_quoted(item.line_id)}] = new({_quoted(item.source_reference)}, "
@@ -112,6 +122,12 @@ internal static class PersonaContractGenerated
     public const double DrySharpSceneInventoryMaximum = {float(dry_sharp['scene_inventory_acceptance'][1]):.2f};
     public const string DrySharpSceneInventoryEnforcementProfile = {_quoted(str(dry_sharp['scene_inventory_enforcement_profile']))};
     public const string DrySharpRowInventoryPolicy = {_quoted(str(dry_sharp['row_inventory_policy']))};
+    public const double SeasoningCuratedCoreInventoryMaximum = {float(seasoning['inventory_profiles']['curated_core']['maximum']):.2f};
+    public const string SeasoningExpandedRuntimeInventoryPolicy = {_quoted(str(seasoning['inventory_profiles']['expanded_runtime']['policy']))};
+    public const double SeasoningPlaybackMinimum = {float(seasoning['playback_acceptance'][0]):.2f};
+    public const double SeasoningPlaybackMaximum = {float(seasoning['playback_acceptance'][1]):.2f};
+    public const int SeasoningRecentWindow = {int(seasoning['recent_window'])};
+    public const int SeasoningRecentMaximum = {int(seasoning['recent_max'])};
     public const int EasterEggRecentWindow = {int(limits['easter_egg_recent_window'])};
     public const int EasterEggRecentMaximum = {int(limits['easter_egg_recent_max'])};
     public const int DrySharpRecentWindow = {int(dry_sharp['recent_window'])};
@@ -164,6 +180,42 @@ internal static class PersonaContractGenerated
         {{
 {_set_lines(controlled['context_tokens'])}
         }};
+
+    public static IReadOnlyList<string> SeasoningSubstringMarkers {{ get; }} =
+        new[]
+        {{
+{_set_lines(seasoning['substring_markers'])}
+        }};
+
+    public static IReadOnlyDictionary<string, string> SeasoningTokenPatterns {{ get; }} =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {{
+{seasoning_token_patterns}
+        }};
+
+    public static IReadOnlySet<string> SeasoningExcludedIdentityMarkers {{ get; }} =
+        new HashSet<string>(StringComparer.Ordinal)
+        {{
+{_set_lines(seasoning['identity_markers_excluded'])}
+        }};
+
+    public static bool ContainsSeasoningMarker(string text)
+    {{
+        if (string.IsNullOrEmpty(text))
+        {{
+            return false;
+        }}
+
+        var normalized = text.Normalize(System.Text.NormalizationForm.FormKC);
+        return SeasoningSubstringMarkers.Any(marker =>
+                   normalized.Contains(marker, StringComparison.OrdinalIgnoreCase))
+               || SeasoningTokenPatterns.Values.Any(pattern =>
+                   System.Text.RegularExpressions.Regex.IsMatch(
+                       normalized,
+                       pattern,
+                       System.Text.RegularExpressions.RegexOptions.IgnoreCase
+                       | System.Text.RegularExpressions.RegexOptions.CultureInvariant));
+    }}
 
     public static IReadOnlySet<string> IdentityMarkers {{ get; }} =
         new HashSet<string>(StringComparer.Ordinal)

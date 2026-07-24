@@ -977,6 +977,17 @@ class ValidationContractTests(unittest.TestCase):
             issue_codes(validate_corpus(rows, valid_config(), {"exceptions": []})),
         )
 
+    def test_expanded_runtime_seasoning_inventory_is_observation_only(self) -> None:
+        row = valid_line(id="expanded-seasoning", text="我丢，这次先把日志看全。")
+
+        report = validate_corpus(
+            [row] * 50_000,
+            valid_config(),
+            {"exceptions": []},
+        )
+
+        self.assertNotIn("catchphrase_frequency", issue_codes(report))
+
     def test_opening_ending_and_length_distribution_are_enforced_on_real_samples(self) -> None:
         rows = [
             valid_line(

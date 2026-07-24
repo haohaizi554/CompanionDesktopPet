@@ -190,7 +190,7 @@
   "dry_sharp": {
     "scene_hash_namespace": "persona-dry-sharp-scene-v1",
     "scene_assignment_field": "semantic_group",
-    "scene_hash_threshold": 0.06,
+    "scene_hash_threshold": 0.07,
     "scene_inventory_target": 0.05,
     "scene_inventory_acceptance": [
       0.04,
@@ -222,6 +222,51 @@
       "time:late_night",
       "date:holiday"
     ]
+  },
+  "lexical_exposure": {
+    "seasoning": {
+      "normalization": "NFKC_casefold",
+      "substring_markers": [
+        "哈？",
+        "你认真的？",
+        "真的假的",
+        "啊推",
+        "我靠",
+        "我丢",
+        "我真的不想多说什么了",
+        "嗯嗯",
+        "嘿嘿",
+        "笨蛋",
+        "小笨蛋",
+        "本姑娘",
+        "哼"
+      ],
+      "token_patterns": {
+        "6": "(?<![\\w.])6(?![\\w.])",
+        "666": "(?<![\\w.])666(?![\\w.])",
+        "NB": "(?<!\\w)NB(?!\\w)"
+      },
+      "identity_markers_excluded": [
+        "玥玥",
+        "小玥",
+        "雷琳玥"
+      ],
+      "inventory_profiles": {
+        "curated_core": {
+          "policy": "maximum",
+          "maximum": 0.1
+        },
+        "expanded_runtime": {
+          "policy": "observation_only"
+        }
+      },
+      "playback_acceptance": [
+        0.03,
+        0.06
+      ],
+      "recent_window": 20,
+      "recent_max": 1
+    }
   },
   "temporal": {
     "daypart_hours": {

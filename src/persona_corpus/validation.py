@@ -26,6 +26,10 @@ from .loader import CorpusFormatError, load_v2
 from .editorial import is_exact_identity_easter_egg
 from .models import CorpusLine
 from .normalization import normalize_text
+from .lexical import (
+    SEASONING_MARKERS as CATCHPHRASES,
+    contains_seasoning_marker,
+)
 from .validation_rules.lineage_rules import (
     LineageRegistry,
     build_repository_registry,
@@ -217,17 +221,6 @@ STRONG_EMOTION_MARKERS = (
     "只有我懂你",
     "崩溃",
     "绝望",
-)
-CATCHPHRASES = (
-    "哈？",
-    "我丢",
-    "我靠",
-    "真的假的",
-    "啊推",
-    "小笨蛋",
-    "我真的不想多说什么了",
-    "本姑娘",
-    "玥玥",
 )
 ALLOWLIST_KEYS = frozenset(
     {"rule_code", "line_id", "normalized_text_sha256", "reason"}
@@ -956,13 +949,17 @@ def _distribution_issues(rows: Sequence[CorpusLine], issues: _Issues) -> None:
     texts = [row.text for row in rows if row.enabled is True and isinstance(row.text, str)]
     count = len(texts)
     if count >= 20:
-        catchphrase_lines = sum(
-            1 for text in texts if any(phrase in text for phrase in CATCHPHRASES)
-        )
-        if catchphrase_lines / count > 0.10 + 1e-12:
+        catchphrase_lines = sum(contains_seasoning_marker(text) for text in texts)
+        seasoning = PERSONA_CONTRACT.lexical_exposure["seasoning"]
+        profiles = seasoning["inventory_profiles"]
+        expanded_floor = PERSONA_CONTRACT.inventory["expanded_runtime"][0]
+        core_policy = profiles["curated_core"]
+        maximum = float(core_policy["maximum"])
+        if count < expanded_floor and catchphrase_lines / count > maximum + 1e-12:
             issues.error(
                 "catchphrase_frequency",
-                f"catchphrases appear in {catchphrase_lines}/{count} enabled texts, above 10%",
+                "seasoning markers appear in "
+                f"{catchphrase_lines}/{count} enabled texts, above {maximum:.0%}",
             )
 
         average = sum(map(len, texts)) / count

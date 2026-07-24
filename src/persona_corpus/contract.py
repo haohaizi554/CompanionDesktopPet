@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -20,6 +21,7 @@ _TOP_LEVEL_KEYS = frozenset(
         "controlled_values",
         "scheduler",
         "dry_sharp",
+        "lexical_exposure",
         "temporal",
         "lineage",
     }
@@ -95,6 +97,7 @@ class PersonaContract:
     future_triggers: frozenset[str]
     scheduler: Mapping[str, object]
     dry_sharp: Mapping[str, object]
+    lexical_exposure: Mapping[str, object]
     temporal: Mapping[str, object]
     lineage: Mapping[str, object]
     raw: Mapping[str, object]
@@ -221,6 +224,7 @@ def load_persona_contract(path: Path = DEFAULT_CONTRACT_PATH) -> PersonaContract
         )
 
     dry_sharp = _mapping(raw.get("dry_sharp"), "dry_sharp")
+    lexical_exposure = _mapping(raw.get("lexical_exposure"), "lexical_exposure")
     temporal = _mapping(raw.get("temporal"), "temporal")
     lineage = _mapping(raw.get("lineage"), "lineage")
     if "dry_sharp" not in tones:
@@ -292,6 +296,84 @@ def load_persona_contract(path: Path = DEFAULT_CONTRACT_PATH) -> PersonaContract
         raise PersonaContractError(
             "dry_sharp.scene_inventory_target must be inside its acceptance range"
         )
+
+    if set(lexical_exposure) != {"seasoning"}:
+        raise PersonaContractError("lexical_exposure uses an unexpected key set")
+    seasoning = _mapping(
+        lexical_exposure.get("seasoning"), "lexical_exposure.seasoning"
+    )
+    expected_seasoning_keys = {
+        "normalization",
+        "substring_markers",
+        "token_patterns",
+        "identity_markers_excluded",
+        "inventory_profiles",
+        "playback_acceptance",
+        "recent_window",
+        "recent_max",
+    }
+    if set(seasoning) != expected_seasoning_keys:
+        raise PersonaContractError("lexical seasoning uses an unexpected key set")
+    substring_markers = _string_tuple(
+        seasoning.get("substring_markers"), "seasoning.substring_markers"
+    )
+    identity_exclusions = _string_tuple(
+        seasoning.get("identity_markers_excluded"),
+        "seasoning.identity_markers_excluded",
+    )
+    token_patterns = _mapping(
+        seasoning.get("token_patterns"), "seasoning.token_patterns"
+    )
+    if (
+        seasoning.get("normalization") != "NFKC_casefold"
+        or any(not isinstance(pattern, str) or not pattern for pattern in token_patterns.values())
+        or set(substring_markers) & set(token_patterns)
+        or (set(substring_markers) | set(token_patterns)) & set(identity_exclusions)
+    ):
+        raise PersonaContractError("lexical seasoning marker policy is invalid")
+    try:
+        for pattern in token_patterns.values():
+            re.compile(str(pattern), re.IGNORECASE)
+    except re.error as error:
+        raise PersonaContractError(f"invalid seasoning token regex: {error}") from error
+    inventory_profiles = seasoning.get("inventory_profiles")
+    playback_acceptance = seasoning.get("playback_acceptance")
+    recent_window = seasoning.get("recent_window")
+    recent_max = seasoning.get("recent_max")
+    if (
+        not isinstance(playback_acceptance, list)
+        or len(playback_acceptance) != 2
+        or any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            for value in playback_acceptance
+        )
+        or not 0 <= float(playback_acceptance[0]) <= float(playback_acceptance[1]) <= 1
+        or type(recent_window) is not int
+        or recent_window <= 0
+        or type(recent_max) is not int
+        or not 0 <= recent_max <= recent_window
+    ):
+        raise PersonaContractError("lexical seasoning exposure limits are invalid")
+    if (
+        not isinstance(inventory_profiles, dict)
+        or set(inventory_profiles) != {"curated_core", "expanded_runtime"}
+        or inventory_profiles.get("expanded_runtime")
+        != {"policy": "observation_only"}
+    ):
+        raise PersonaContractError("lexical seasoning inventory profiles are invalid")
+    core_inventory = inventory_profiles.get("curated_core")
+    if (
+        not isinstance(core_inventory, dict)
+        or set(core_inventory) != {"policy", "maximum"}
+        or core_inventory.get("policy") != "maximum"
+        or isinstance(core_inventory.get("maximum"), bool)
+        or not isinstance(core_inventory.get("maximum"), (int, float))
+        or not math.isfinite(float(core_inventory["maximum"]))
+        or not 0 <= float(core_inventory["maximum"]) <= 1
+    ):
+        raise PersonaContractError("curated-core seasoning inventory policy is invalid")
     expected_lineage_keys = {
         "topic_id_role",
         "semantic_group_topic_policy",
@@ -355,6 +437,7 @@ def load_persona_contract(path: Path = DEFAULT_CONTRACT_PATH) -> PersonaContract
         future_triggers=future_triggers,
         scheduler=frozen_raw["scheduler"],
         dry_sharp=frozen_raw["dry_sharp"],
+        lexical_exposure=frozen_raw["lexical_exposure"],
         temporal=frozen_raw["temporal"],
         lineage=frozen_raw["lineage"],
         raw=frozen_raw,

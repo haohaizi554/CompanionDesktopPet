@@ -874,10 +874,10 @@ class RealCorpusBuildTests(unittest.TestCase):
         short_share = sum(8 <= len(text) <= 16 for text in texts) / len(texts)
         medium_share = sum(17 <= len(text) <= 24 for text in texts) / len(texts)
         long_share = sum(25 <= len(text) <= 36 for text in texts) / len(texts)
-        catchphrases = ("哈？", "我靠", "我丢", "真的假的", "本姑娘", "笨蛋", "玥玥")
-        catchphrase_share = sum(
-            any(marker in text for marker in catchphrases) for text in texts
-        ) / len(texts)
+        from src.persona_corpus.contract import PERSONA_CONTRACT
+        from src.persona_corpus.lexical import contains_seasoning_marker
+
+        catchphrase_share = sum(map(contains_seasoning_marker, texts)) / len(texts)
 
         self.assertGreaterEqual(average, 18)
         self.assertLessEqual(average, 26)
@@ -888,7 +888,11 @@ class RealCorpusBuildTests(unittest.TestCase):
         self.assertGreaterEqual(long_share, 0.20)
         self.assertLessEqual(long_share, 0.29)
         self.assertLessEqual(over_36, 0.08)
-        self.assertLessEqual(catchphrase_share, 0.10)
+        self.assertLessEqual(
+            catchphrase_share,
+            PERSONA_CONTRACT.lexical_exposure["seasoning"]["inventory_profiles"]
+            ["curated_core"]["maximum"],
+        )
 
     def test_real_build_avoids_template_opening_dominance(self) -> None:
         texts = [row.text for row in self.result.enabled]

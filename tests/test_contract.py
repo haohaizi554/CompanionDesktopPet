@@ -141,13 +141,36 @@ class PersonaContractFileTests(unittest.TestCase):
         self.assertEqual(
             "persona-dry-sharp-scene-v1", dry_sharp["scene_hash_namespace"]
         )
-        self.assertEqual(0.06, dry_sharp["scene_hash_threshold"])
+        self.assertEqual(0.07, dry_sharp["scene_hash_threshold"])
         self.assertEqual([0.04, 0.06], dry_sharp["scene_inventory_acceptance"])
         self.assertEqual(
             "expanded_runtime", dry_sharp["scene_inventory_enforcement_profile"]
         )
         self.assertEqual("observation_only", dry_sharp["row_inventory_policy"])
         self.assertNotIn("inventory_acceptance", dry_sharp)
+
+    def test_lexical_exposure_contract_is_single_source_and_identity_safe(self) -> None:
+        contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
+        seasoning = contract["lexical_exposure"]["seasoning"]
+
+        self.assertEqual([0.03, 0.06], seasoning["playback_acceptance"])
+        self.assertEqual(20, seasoning["recent_window"])
+        self.assertEqual(1, seasoning["recent_max"])
+        self.assertEqual(
+            {"policy": "maximum", "maximum": 0.10},
+            seasoning["inventory_profiles"]["curated_core"],
+        )
+        self.assertEqual(
+            {"policy": "observation_only"},
+            seasoning["inventory_profiles"]["expanded_runtime"],
+        )
+        self.assertEqual(
+            ["玥玥", "小玥", "雷琳玥"], seasoning["identity_markers_excluded"]
+        )
+        markers = set(seasoning["substring_markers"]) | set(
+            seasoning["token_patterns"]
+        )
+        self.assertTrue(set(seasoning["identity_markers_excluded"]).isdisjoint(markers))
 
     def test_csharp_contract_is_generated_and_current(self) -> None:
         generator = ROOT / "tools/generate_persona_contract_cs.py"

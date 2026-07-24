@@ -19,11 +19,17 @@ internal static class PersonaContractGenerated
     public const int ExpandedRuntimeMaximumRows = 60000;
     public const string DrySharpSceneHashNamespace = "persona-dry-sharp-scene-v1";
     public const string DrySharpSceneAssignmentField = "semantic_group";
-    public const double DrySharpSceneHashThreshold = 0.06;
+    public const double DrySharpSceneHashThreshold = 0.07;
     public const double DrySharpSceneInventoryMinimum = 0.04;
     public const double DrySharpSceneInventoryMaximum = 0.06;
     public const string DrySharpSceneInventoryEnforcementProfile = "expanded_runtime";
     public const string DrySharpRowInventoryPolicy = "observation_only";
+    public const double SeasoningCuratedCoreInventoryMaximum = 0.10;
+    public const string SeasoningExpandedRuntimeInventoryPolicy = "observation_only";
+    public const double SeasoningPlaybackMinimum = 0.03;
+    public const double SeasoningPlaybackMaximum = 0.06;
+    public const int SeasoningRecentWindow = 20;
+    public const int SeasoningRecentMaximum = 1;
     public const int EasterEggRecentWindow = 10;
     public const int EasterEggRecentMaximum = 1;
     public const int DrySharpRecentWindow = 20;
@@ -155,6 +161,58 @@ internal static class PersonaContractGenerated
         "date:holiday",
         "date:month_boundary"
         };
+
+    public static IReadOnlyList<string> SeasoningSubstringMarkers { get; } =
+        new[]
+        {
+        "哈？",
+        "你认真的？",
+        "真的假的",
+        "啊推",
+        "我靠",
+        "我丢",
+        "我真的不想多说什么了",
+        "嗯嗯",
+        "嘿嘿",
+        "笨蛋",
+        "小笨蛋",
+        "本姑娘",
+        "哼"
+        };
+
+    public static IReadOnlyDictionary<string, string> SeasoningTokenPatterns { get; } =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["6"] = "(?<![\\w.])6(?![\\w.])",
+            ["666"] = "(?<![\\w.])666(?![\\w.])",
+            ["NB"] = "(?<!\\w)NB(?!\\w)"
+        };
+
+    public static IReadOnlySet<string> SeasoningExcludedIdentityMarkers { get; } =
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+        "玥玥",
+        "小玥",
+        "雷琳玥"
+        };
+
+    public static bool ContainsSeasoningMarker(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return false;
+        }
+
+        var normalized = text.Normalize(System.Text.NormalizationForm.FormKC);
+        return SeasoningSubstringMarkers.Any(marker =>
+                   normalized.Contains(marker, StringComparison.OrdinalIgnoreCase))
+               || SeasoningTokenPatterns.Values.Any(pattern =>
+                   System.Text.RegularExpressions.Regex.IsMatch(
+                       normalized,
+                       pattern,
+                       System.Text.RegularExpressions.RegexOptions.IgnoreCase
+                       | System.Text.RegularExpressions.RegexOptions.CultureInvariant));
+    }
 
     public static IReadOnlySet<string> IdentityMarkers { get; } =
         new HashSet<string>(StringComparer.Ordinal)

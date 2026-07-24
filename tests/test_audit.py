@@ -162,7 +162,7 @@ class AuditTests(unittest.TestCase):
 
         self.assertEqual(3, result.total_lines)
         self.assertEqual({"Life": 2, "Debugging": 1}, result.category_counts)
-        self.assertEqual(2, result.catchphrase_counts["玥玥"])
+        self.assertNotIn("玥玥", result.catchphrase_counts)
         self.assertGreaterEqual(result.likely_pii_count, 2)
         self.assertEqual([7, 8], result.likely_pii_examples[:2])
         self.assertEqual(2, result.prefix_counts[4]["玥玥今天"])

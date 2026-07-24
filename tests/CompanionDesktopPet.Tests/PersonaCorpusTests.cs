@@ -48,11 +48,39 @@ public sealed class PersonaCorpusTests
     public void ApplicationAssembly_EmbedsTheExactEditorialIdentityPolicy()
     {
         Assert.Equal(29, PersonaCorpus.EditorialIdentityEasterEggIds.Count);
-        Assert.Equal(0.06, PersonaContractGenerated.DrySharpSceneHashThreshold, 8);
+        Assert.Equal(0.07, PersonaContractGenerated.DrySharpSceneHashThreshold, 8);
         Assert.Equal(0.04, PersonaContractGenerated.DrySharpSceneInventoryMinimum, 8);
         Assert.Equal(0.06, PersonaContractGenerated.DrySharpSceneInventoryMaximum, 8);
         Assert.Equal("expanded_runtime", PersonaContractGenerated.DrySharpSceneInventoryEnforcementProfile);
         Assert.Equal("observation_only", PersonaContractGenerated.DrySharpRowInventoryPolicy);
+        Assert.Equal(0.10, PersonaContractGenerated.SeasoningCuratedCoreInventoryMaximum, 8);
+        Assert.Equal("observation_only", PersonaContractGenerated.SeasoningExpandedRuntimeInventoryPolicy);
+    }
+
+    [Theory]
+    [InlineData("嗯嗯，这次可以。")]
+    [InlineData("这次 6，确实可以。")]
+    [InlineData("666！")]
+    [InlineData("这个结果 nb。")]
+    public void GeneratedSeasoningMatcher_AcceptsSharedLexicalMarkers(string text)
+    {
+        Assert.True(PersonaContractGenerated.ContainsSeasoningMarker(text));
+    }
+
+    [Theory]
+    [InlineData("Python 3.6")]
+    [InlineData("IPv6")]
+    [InlineData("6666")]
+    [InlineData("v666")]
+    [InlineData("第6次")]
+    [InlineData("6月")]
+    [InlineData("6个")]
+    [InlineData("SNBModel")]
+    [InlineData("nb_value")]
+    [InlineData("玥玥把书翻到下一页。")]
+    public void GeneratedSeasoningMatcher_RejectsSubstringsAndIdentityMarkers(string text)
+    {
+        Assert.False(PersonaContractGenerated.ContainsSeasoningMarker(text));
     }
 
     [Fact]

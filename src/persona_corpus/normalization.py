@@ -7,6 +7,7 @@ from difflib import SequenceMatcher
 from typing import Sequence
 
 from .models import AuditPair, AuditResult, LegacyLine
+from .lexical import SEASONING_MARKERS as CATCHPHRASES, match_seasoning_markers
 
 
 PREFIX_LENGTHS = range(2, 7)
@@ -23,7 +24,6 @@ HIGH_RISK_PATTERNS = (
     "你住在",
     "你工作",
 )
-CATCHPHRASES = ("玥玥", "哈？", "嘿嘿", "笨蛋", "本姑娘", "哼")
 PII_MARKERS = (
     "湖南",
     "长沙",
@@ -192,10 +192,9 @@ def audit_legacy(lines: Sequence[LegacyLine]) -> AuditResult:
             if pattern in line.text:
                 high_risk_patterns[pattern] += 1
                 _append_example(high_risk_examples, pattern, line.source_line)
-        for phrase in CATCHPHRASES:
-            if phrase in line.text:
-                catchphrase_counts[phrase] += 1
-                _append_example(catchphrase_examples, phrase, line.source_line)
+        for phrase in match_seasoning_markers(line.text):
+            catchphrase_counts[phrase] += 1
+            _append_example(catchphrase_examples, phrase, line.source_line)
         if _looks_like_pii(line.text):
             likely_pii_count += 1
             if len(likely_pii_examples) < MAX_EXAMPLES:
