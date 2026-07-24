@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from types import MappingProxyType
 from typing import Iterable, Mapping
@@ -326,6 +326,48 @@ def probe_inventory_coverage(
 
     stocked_triggers = set(index.by_trigger)
     stocked_contexts = set(index.by_required_context)
+
+    # Dimension probes deliberately neutralize the other dimension. Pair-level
+    # reachability remains disclosed separately in ``unreachable_pairs``.
+    for trigger in sorted(stocked_triggers - set(trigger_hits)):
+        match = _matching_context(trigger, "none", config)
+        if match is None:
+            continue
+        now, context = match
+        probe_rows = tuple(
+            replace(row, required_context="none") for row in index.by_trigger[trigger]
+        )
+        selected = select_line(
+            probe_rows,
+            context,
+            SelectionHistory(),
+            now,
+            seed=0,
+            scheduler_config=config,
+        )
+        if selected is not None:
+            trigger_hits[trigger] = selected.row.id
+
+    for required_context in sorted(stocked_contexts - set(context_hits)):
+        match = _matching_context("any", required_context, config)
+        if match is None:
+            continue
+        now, context = match
+        probe_rows = tuple(
+            replace(row, trigger="any")
+            for row in index.by_required_context[required_context]
+        )
+        selected = select_line(
+            probe_rows,
+            context,
+            SelectionHistory(),
+            now,
+            seed=0,
+            scheduler_config=config,
+        )
+        if selected is not None:
+            context_hits[required_context] = selected.row.id
+
     return InventoryCoverage(
         trigger_hits=MappingProxyType(dict(sorted(trigger_hits.items()))),
         context_hits=MappingProxyType(dict(sorted(context_hits.items()))),
@@ -333,4 +375,3 @@ def probe_inventory_coverage(
         context_misses=tuple(sorted(stocked_contexts - set(context_hits))),
         unreachable_pairs=tuple(sorted(unreachable_pairs)),
     )
-

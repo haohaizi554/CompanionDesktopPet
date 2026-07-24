@@ -137,6 +137,8 @@ class SimulationIntegrationTests(unittest.TestCase):
         self.assertEqual(SUBSEED_DERIVATION_VERSION, self.report.subseed_derivation_version)
         self.assertEqual(108, self.report.scenario_coverage.nullable_signal_combinations)
         self.assertTrue(self.report.inventory_coverage.trigger_hits)
+        self.assertEqual((), self.report.inventory_coverage.trigger_misses)
+        self.assertEqual((), self.report.inventory_coverage.context_misses)
 
     def test_combined_hard_status_requires_natural_and_adversarial_success(self) -> None:
         self.assertEqual([], combine_hard_violations((), ()))
