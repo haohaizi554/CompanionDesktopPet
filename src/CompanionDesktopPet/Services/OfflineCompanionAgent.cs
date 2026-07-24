@@ -139,8 +139,9 @@ public sealed class OfflineCompanionAgent : ICompanionDialogueAgent
     private DialogueLine SelectEligibleLine(SceneDefinition scene, DateTime localTime, Random random)
     {
         var eligible = _history.EligibleLines(scene, localTime);
-        var unused = eligible.Where(line => !_usedThisSession.Contains(line.Text)).ToArray();
-        return WeightedChoice(unused.Length > 0 ? unused : eligible, random);
+        var diverse = _history.PreferSurfaceExposure(eligible);
+        var unused = diverse.Where(line => !_usedThisSession.Contains(line.Text)).ToArray();
+        return WeightedChoice(unused.Length > 0 ? unused : diverse, random);
     }
 
     private static DialogueLine WeightedChoice(IReadOnlyList<DialogueLine> source, Random random)

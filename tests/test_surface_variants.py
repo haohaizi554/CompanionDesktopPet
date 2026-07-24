@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import re
 import unittest
+from dataclasses import fields, replace
 from pathlib import Path
 
 from src.persona_corpus.loader import load_v2
@@ -10,7 +11,9 @@ from src.persona_corpus.models import CorpusLine
 from src.persona_corpus.normalization import normalize_text
 from src.persona_corpus.schema import ArchiveRow
 from src.persona_corpus.surface_variants import (
+    apply_dry_sharp_scene_dose,
     legacy_surface_line_id,
+    materialize_legacy_surface_candidates,
     prepare_legacy_surface_candidates,
 )
 
@@ -18,6 +21,34 @@ from src.persona_corpus.surface_variants import (
 ROOT = Path(__file__).resolve().parents[1]
 ARCHIVE_PATH = ROOT / "data/optimized/persona-corpus-archive.tsv"
 V2_PATH = ROOT / "data/optimized/persona-corpus-v2.tsv"
+V2_FIELDS = tuple(field.name for field in fields(CorpusLine))
+SCHEDULING_FIELDS = (
+    "category",
+    "category_group",
+    "semantic_group",
+    "output_mode",
+    "trigger",
+    "required_context",
+    "tone",
+    "interrupt_cost",
+    "cooldown_hours",
+    "semantic_cooldown_hours",
+    "max_per_day",
+    "weight",
+    "requires_reply",
+    "enabled",
+)
+
+
+def metadata_summary(row: CorpusLine) -> tuple[object, ...]:
+    return (
+        row.category_group,
+        row.output_mode,
+        row.tone,
+        row.interrupt_cost,
+        row.cooldown_hours,
+        row.weight,
+    )
 
 
 def archive_row(
@@ -105,11 +136,11 @@ class LegacySurfaceCandidateTests(unittest.TestCase):
             archive_row(4, "要不要先看日志？"),
             archive_row(5, "雷琳玥今天说过这句话。"),
             archive_row(6, "必须马上重写整个模块。"),
-            archive_row(7, "这句本来安全但长度会超过三十六个汉字，所以它不应该作为桌面气泡运行时语料进入候选。"),
+            archive_row(7, "这句本来安全但长度会超过四十二个汉字，所以它不应该作为桌面气泡运行时语料进入候选，并且应继续留在归档里。"),
             archive_row(8, "能回复我一下吗。", category="ProactiveChat"),
             archive_row(
                 9,
-                "玥玥把一个小彩蛋藏进日志末尾。",
+                "第七码头把一个小彩蛋藏进日志末尾。",
                 category="EasterEgg",
                 reason="low_information",
                 topic_id="egg_safe",
@@ -126,6 +157,9 @@ class LegacySurfaceCandidateTests(unittest.TestCase):
                 "安全文本但归档原因不允许恢复。",
                 reason="privacy_risk",
             ),
+            archive_row(12, "手腕酸了就先停一下，别继续硬扛。", category="DailyCare"),
+            archive_row(13, "这个接口偶尔超时，先把重试次数记下来。", category="Backend"),
+            archive_row(14, "这个测试在你机器上过，环境差异要留意。", category="Debugging"),
         ]
         existing = [
             corpus_row(
@@ -140,6 +174,7 @@ class LegacySurfaceCandidateTests(unittest.TestCase):
         self.assertEqual([1, 9, 10], [row.source_line for row in prepared.candidates])
         self.assertEqual(1, prepared.cartesian_count)
         self.assertEqual(2, prepared.easter_egg_count)
+        self.assertEqual(3, prepared.safety_marker_counts["technical_current_object"])
         self.assertTrue(
             all(row.source_kind == "legacy_surface_variant" for row in prepared.candidates)
         )
@@ -150,12 +185,13 @@ class LegacySurfaceCandidateTests(unittest.TestCase):
         self.assertEqual(
             {
                 "archive_reason": 1,
-                "fake_context": 1,
+                "fake_context": 3,
                 "implicit_question": 1,
                 "overly_commanding": 1,
                 "pii": 1,
                 "question_or_reply": 2,
                 "too_long": 1,
+                "unavailable_state": 1,
             },
             dict(prepared.rejection_counts),
         )
@@ -171,26 +207,103 @@ class LegacySurfaceCandidateTests(unittest.TestCase):
         self.assertEqual([19], [row.source_line for row in prepared.candidates])
         self.assertEqual(1, prepared.rejection_counts["normalized_duplicate"])
 
+    def test_materialize_inherits_existing_scene_policy_without_copying_text(self) -> None:
+        existing = corpus_row("existing", "编辑过的场景文本。")
+        existing = CorpusLine(
+            **{
+                **{field: getattr(existing, field) for field in V2_FIELDS},
+                "category": "Debugging",
+                "category_group": "technical",
+                "topic_id": "topic_debug",
+                "semantic_group": "debug.scene",
+                "output_mode": "self_talk",
+                "tone": "dry",
+                "interrupt_cost": 1,
+                "cooldown_hours": 120.0,
+                "semantic_cooldown_hours": 120.0,
+                "weight": 1.0,
+            }
+        )
+        prepared = prepare_legacy_surface_candidates(
+            [archive_row(31, "先看日志，再动实现。", topic_id="topic_debug")],
+            [existing],
+        )
+
+        row = materialize_legacy_surface_candidates(prepared.candidates, [existing])[0]
+
+        self.assertEqual("先看日志，再动实现。", row.text)
+        self.assertEqual("debug.scene", row.semantic_group)
+        for field in SCHEDULING_FIELDS:
+            self.assertEqual(getattr(existing, field), getattr(row, field), field)
+        self.assertEqual("legacy_surface_variant", row.source_kind)
+
+    def test_materialize_assigns_explicit_defaults_to_new_legacy_topics(self) -> None:
+        prepared = prepare_legacy_surface_candidates(
+            [
+                archive_row(41, "完整堆栈比猜测可靠。", topic_id="new_debug"),
+                archive_row(
+                    42,
+                    "晚风路过时，脚步也可以慢一点。",
+                    category="WanderingLife",
+                    topic_id="new_wandering",
+                ),
+                archive_row(
+                    43,
+                    "第七码头藏着一个小彩蛋。",
+                    category="EasterEgg",
+                    reason="low_information",
+                    topic_id="new_egg",
+                ),
+            ],
+            (),
+        )
+
+        rows = materialize_legacy_surface_candidates(prepared.candidates, ())
+        by_topic = {row.topic_id: row for row in rows}
+
+        self.assertEqual(
+            ("technical", "self_talk", "dry", 1, 120.0, 1.0),
+            metadata_summary(by_topic["new_debug"]),
+        )
+        self.assertEqual(
+            ("character_life", "self_talk", "nostalgic", 0, 144.0, 1.0),
+            metadata_summary(by_topic["new_wandering"]),
+        )
+        self.assertEqual(
+            ("easter_egg", "self_talk", "playful", 0, 720.0, 0.1),
+            metadata_summary(by_topic["new_egg"]),
+        )
+
 
 class RealLegacySurfaceCandidateTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.existing = load_v2(V2_PATH)
+        cls.existing = [
+            row
+            for row in load_v2(V2_PATH)
+            if row.source_kind != "legacy_surface_variant"
+        ]
         cls.prepared = prepare_legacy_surface_candidates(load_archive(), cls.existing)
+        cls.materialized = materialize_legacy_surface_candidates(
+            cls.prepared.candidates, cls.existing
+        )
+        cls.undosed = [*cls.existing, *cls.materialized]
+        cls.dosed = apply_dry_sharp_scene_dose(cls.undosed)
 
     def test_exact_audited_candidate_counts(self) -> None:
-        self.assertEqual(49_018, self.prepared.cartesian_count)
+        self.assertEqual(51_134, self.prepared.cartesian_count)
         self.assertEqual(192, self.prepared.easter_egg_count)
-        self.assertEqual(49_210, len(self.prepared.candidates))
-        self.assertEqual(50_010, len(self.existing) + len(self.prepared.candidates))
+        self.assertEqual(51_326, len(self.prepared.candidates))
+        self.assertEqual(52_132, len(self.existing) + len(self.prepared.candidates))
 
     def test_safety_audit_reports_overlapping_marker_hits_and_first_dispositions(self) -> None:
         self.assertEqual(
             {
-                "direct_state": 206,
-                "implicit_question": 900,
-                "reply_hook": 1_617,
-                "technical_current_object": 1_009,
+                "direct_state": 208,
+                "implicit_question": 952,
+                "reply_hook": 1_822,
+                "technical_current_object": 2_640,
+                "unavailable_state": 1_872,
             },
             {
                 name: count
@@ -198,9 +311,10 @@ class RealLegacySurfaceCandidateTests(unittest.TestCase):
                 if count
             },
         )
-        self.assertEqual(900, self.prepared.rejection_counts["implicit_question"])
-        self.assertEqual(1_601, self.prepared.rejection_counts["reply_hook"])
-        self.assertEqual(1_009, self.prepared.rejection_counts["fake_context"])
+        self.assertEqual(952, self.prepared.rejection_counts["implicit_question"])
+        self.assertEqual(1_806, self.prepared.rejection_counts["reply_hook"])
+        self.assertEqual(2_640, self.prepared.rejection_counts["fake_context"])
+        self.assertEqual(1_584, self.prepared.rejection_counts["unavailable_state"])
 
     def test_candidates_have_unique_stable_ids_text_and_complete_lineage(self) -> None:
         ids = [row.id for row in self.prepared.candidates]
@@ -237,6 +351,85 @@ class RealLegacySurfaceCandidateTests(unittest.TestCase):
 
         self.assertEqual(79, len(unsafe_eggs))
         self.assertTrue(enabled_sources.isdisjoint(unsafe_eggs))
+
+    def test_materialized_inventory_has_consistent_scene_metadata(self) -> None:
+        combined = [*self.existing, *self.materialized]
+        metadata: dict[str, tuple[object, ...]] = {}
+        for row in combined:
+            signature = tuple(getattr(row, field) for field in SCHEDULING_FIELDS)
+            self.assertEqual(
+                signature,
+                metadata.setdefault(row.semantic_group, signature),
+                row.semantic_group,
+            )
+
+        self.assertEqual(52_132, len(combined))
+        self.assertEqual(533, len(metadata))
+        self.assertEqual(len(combined), len({row.id for row in combined}))
+        self.assertEqual(
+            len(combined),
+            len({normalize_text(row.text) for row in combined}),
+        )
+
+    def test_dry_sharp_inventory_is_scene_atomic_deterministic_and_in_contract(self) -> None:
+        dry = [row for row in self.dosed if row.tone == "dry_sharp"]
+        tone_by_scene: dict[str, set[str]] = {}
+        for row in self.dosed:
+            tone_by_scene.setdefault(row.semantic_group, set()).add(row.tone)
+
+        dry_scenes = sum(tones == {"dry_sharp"} for tones in tone_by_scene.values())
+        scene_ratio = dry_scenes / len(tone_by_scene)
+        self.assertGreaterEqual(scene_ratio, 0.04)
+        self.assertLessEqual(scene_ratio, 0.06)
+        self.assertGreater(len(dry) / len(self.dosed), 0)
+        self.assertTrue(all(len(tones) == 1 for tones in tone_by_scene.values()))
+        self.assertTrue(
+            all(
+                row.category_group in {"technical", "growth", "career"}
+                and row.trigger not in {"late_night", "holiday", "anniversary"}
+                and row.required_context == "none"
+                for row in dry
+            )
+        )
+        reversed_result = apply_dry_sharp_scene_dose(
+            list(reversed(self.undosed))
+        )
+        self.assertEqual(
+            {row.id: row.tone for row in self.dosed},
+            {row.id: row.tone for row in reversed_result},
+        )
+
+    def test_dry_sharp_scene_set_is_invariant_when_a_neutral_scene_gains_variants(self) -> None:
+        original_groups = {row.semantic_group for row in self.undosed}
+        original_dry = {
+            row.semantic_group for row in self.dosed if row.tone == "dry_sharp"
+        }
+        template = next(
+            row
+            for row in self.undosed
+            if row.tone == "dry"
+            and row.category_group in {"technical", "growth", "career"}
+            and row.semantic_group not in original_dry
+        )
+        expanded = [
+            *self.undosed,
+            *[
+                replace(
+                    template,
+                    id=f"{template.id}.expanded.{index}",
+                    text=f"{template.text} variant-{index}",
+                )
+                for index in range(3_000)
+            ],
+        ]
+
+        expanded_dry = {
+            row.semantic_group
+            for row in apply_dry_sharp_scene_dose(expanded)
+            if row.tone == "dry_sharp" and row.semantic_group in original_groups
+        }
+
+        self.assertEqual(original_dry, expanded_dry)
 
 
 if __name__ == "__main__":

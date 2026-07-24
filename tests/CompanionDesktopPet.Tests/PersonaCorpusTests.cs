@@ -63,6 +63,7 @@ public sealed class PersonaCorpusTests
 
     [Theory]
     [InlineData("嗯嗯，这次可以。")]
+    [InlineData("哈？这次可以。")]
     [InlineData("这次 6，确实可以。")]
     [InlineData("666！")]
     [InlineData("这个结果 nb。")]
@@ -94,17 +95,22 @@ public sealed class PersonaCorpusTests
         Assert.NotNull(stream);
         GC.Collect();
         var before = GC.GetTotalMemory(true);
+        var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
         var stopwatch = Stopwatch.StartNew();
 
         var lines = PersonaCorpus.Load(stream!);
 
         stopwatch.Stop();
+        var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
         var retainedBytes = Math.Max(0, GC.GetTotalMemory(true) - before);
+        Console.WriteLine(
+            $"corpus parse: elapsed={stopwatch.Elapsed} allocated={allocatedBytes:N0} retained={retainedBytes:N0}");
         Assert.InRange(
             lines.Count,
             PersonaContractGenerated.ExpandedRuntimeMinimumRows,
             PersonaContractGenerated.ExpandedRuntimeMaximumRows);
         Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(5), stopwatch.Elapsed.ToString());
+        Assert.True(allocatedBytes < 256L * 1024 * 1024, $"allocated bytes: {allocatedBytes:N0}");
         Assert.True(retainedBytes < 128L * 1024 * 1024, $"retained bytes: {retainedBytes:N0}");
     }
 
@@ -234,7 +240,6 @@ public sealed class PersonaCorpusTests
     [InlineData("calm", "curated_standalone", "not_fullscreen")]
     [InlineData("sleepy", "preserved_easter_egg", "time:dawn")]
     [InlineData("encouraging", "new_ambient", "date:month_boundary")]
-    [InlineData("dry_sharp", "legacy_surface_variant", "none")]
     public void Load_AcceptsEveryControlledFieldFamily(string tone, string sourceKind, string context)
     {
         using var stream = CorpusStream(
@@ -251,6 +256,35 @@ public sealed class PersonaCorpusTests
     }
 
     [Fact]
+    public void Load_ValidatesLegacySurfaceStableIdVariantAndTopicBinding()
+    {
+        var values = new (string Name, string Value)[]
+        {
+            ("id", "v2_surface_42_topic_test_008be622ad56"),
+            ("topic_id", "topic.test"),
+            ("source_kind", "legacy_surface_variant"),
+            ("source_reference", "legacy:42;topic:topic.test;variant:surface_42_008be622ad56")
+        };
+        using (var valid = CorpusStream(new UTF8Encoding(false, true), values))
+        {
+            Assert.Single(PersonaCorpus.Load(valid));
+        }
+
+        foreach (var mutation in new[]
+                 {
+                     ("id", "v2_surface_42_topic_test_000000000000"),
+                     ("source_reference", "legacy:42;topic:wrong.topic;variant:surface_42_008be622ad56"),
+                     ("source_reference", "legacy:42;topic:topic.test;variant:surface_42_000000000000")
+                 })
+        {
+            using var invalid = CorpusStream(
+                new UTF8Encoding(false, true),
+                [.. values.Where(item => item.Name != mutation.Item1), mutation]);
+            Assert.Throws<InvalidDataException>(() => PersonaCorpus.Load(invalid));
+        }
+    }
+
+    [Fact]
     public void Corpus_IdentityEasterEggsAreExactAndPrivacyScoped()
     {
         var fullName = "\u96f7\u7433\u73a5";
@@ -263,7 +297,10 @@ public sealed class PersonaCorpusTests
             .ToArray();
 
         Assert.Equal(29, PersonaCorpus.EditorialIdentityEasterEggIds.Count);
-        Assert.InRange(identityLines.Length, 2, PersonaCorpus.EditorialIdentityEasterEggIds.Count);
+        Assert.Equal(29, identityLines.Length);
+        Assert.True(
+            identityLines.Select(line => line.Id).ToHashSet(StringComparer.Ordinal)
+                .SetEquals(PersonaCorpus.EditorialIdentityEasterEggIds));
         Assert.All(identityLines, line =>
             Assert.Contains(line.Id, PersonaCorpus.EditorialIdentityEasterEggIds));
         Assert.Single(identityLines, line => line.Text.Contains(fullName, StringComparison.Ordinal));

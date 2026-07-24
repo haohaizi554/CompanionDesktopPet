@@ -5,13 +5,14 @@ import time
 import unittest
 from collections.abc import Iterator, Sequence
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from src.persona_corpus.context import PersonaContext
-from src.persona_corpus.history import SelectionHistory
+from src.persona_corpus.history import HistoryRecord, SelectionHistory
 from src.persona_corpus.models import CorpusLine
 from src.persona_corpus.selector import PreparedCorpus, prepare_corpus, select_line
+from src.persona_corpus.surface_exposure import surface_exposure
 
 
 NOW = datetime(2026, 7, 24, 10, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
@@ -46,6 +47,20 @@ def line(line_id: str, semantic_group: str, **overrides: object) -> CorpusLine:
 
 def context() -> PersonaContext:
     return PersonaContext.from_datetime(NOW, minutes_since_last_output=600)
+
+
+def record(row: CorpusLine, minutes_ago: int) -> HistoryRecord:
+    return HistoryRecord(
+        selected_id=row.id,
+        played_at=NOW - timedelta(minutes=minutes_ago),
+        category=row.category,
+        category_group=row.category_group,
+        semantic_group=row.semantic_group,
+        output_mode=row.output_mode,
+        trigger=row.trigger,
+        interrupt_cost=row.interrupt_cost,
+        was_seasoning=False,
+    )
 
 
 class CountingSequence(Sequence[CorpusLine]):
@@ -152,7 +167,14 @@ class PreparedCorpusTests(unittest.TestCase):
 
     def test_surface_stage_reaches_alternatives_without_global_random_mutation(self) -> None:
         prepared = prepare_corpus(
-            [line(f"variant-{index}", "scene.only") for index in range(40)]
+            [
+                line(
+                    f"variant-{index}",
+                    "scene.only",
+                    text=f"scene.only 的 alpha{index} 稳定表述。",
+                )
+                for index in range(40)
+            ]
         )
         random.seed(2407)
         before = random.getstate()
@@ -164,6 +186,184 @@ class PreparedCorpusTests(unittest.TestCase):
 
         self.assertGreaterEqual(len(selected_ids), 35)
         self.assertEqual(before, random.getstate())
+
+    def test_surface_stage_hard_limits_seasoning_and_uses_a_neutral_variant(self) -> None:
+        spicy = line(
+            "spicy",
+            "scene.only",
+            text="哈？这行先收一收。",
+        )
+        neutral = line(
+            "neutral",
+            "scene.only",
+            text="这行先安静地收一收。",
+        )
+        filler = line("filler", "retired.scene", trigger="holiday")
+        prior = record(filler, 20 * 70)
+        prior = replace(prior, was_seasoning=True)
+        fillers = [
+            replace(record(filler, (19 - index) * 70), selected_id=f"filler-{index}")
+            for index in range(18)
+        ]
+        history = SelectionHistory([prior, *fillers])
+
+        selected = select_line(
+            prepare_corpus([spicy, neutral]),
+            context(),
+            history,
+            NOW,
+            seed=1,
+        )
+
+        self.assertIsNotNone(selected)
+        self.assertEqual(neutral.id, selected.row.id)
+        self.assertFalse(history.records[-1].was_seasoning)
+
+    def test_legacy_history_with_unknown_exposure_conservatively_blocks_seasoning(self) -> None:
+        spicy = line("legacy-spicy", "scene.only", text="哈？旧历史先保守限流。")
+        neutral = line("legacy-neutral", "scene.only", text="旧历史先保守选择中性句。")
+        legacy_records = [
+            HistoryRecord(
+                selected_id=f"retired-{index}",
+                played_at=NOW - timedelta(minutes=(19 - index) * 70),
+                category="CharacterLife",
+                category_group="character_life",
+                semantic_group=f"retired.{index}",
+                output_mode="self_talk",
+                trigger="any",
+                interrupt_cost=0,
+            )
+            for index in range(19)
+        ]
+
+        selected = select_line(
+            prepare_corpus([spicy, neutral]),
+            context(),
+            SelectionHistory(legacy_records),
+            NOW,
+            seed=1,
+        )
+
+        self.assertIsNotNone(selected)
+        self.assertEqual(neutral.id, selected.row.id)
+
+    def test_surface_stage_avoids_recent_opening_ending_and_template(self) -> None:
+        repeated = line(
+            "repeated",
+            "scene.only",
+            text="今天窗边换成了慢慢的雨。",
+        )
+        fresh = line(
+            "fresh",
+            "scene.only",
+            text="午后书页翻过一小段晴光。",
+        )
+        played = surface_exposure("今天窗边有一点很轻的风。")
+        prior = HistoryRecord(
+            selected_id="retired",
+            played_at=NOW - timedelta(minutes=70),
+            category="CharacterLife",
+            category_group="character_life",
+            semantic_group="retired.scene",
+            output_mode="self_talk",
+            trigger="any",
+            interrupt_cost=0,
+            surface_opening=played.opening,
+            surface_ending=played.ending,
+            surface_template=played.template,
+        )
+
+        selected = select_line(
+            prepare_corpus([repeated, fresh]),
+            context(),
+            SelectionHistory([prior]),
+            NOW,
+            seed=1,
+        )
+
+        self.assertIsNotNone(selected)
+        self.assertEqual(fresh.id, selected.row.id)
+
+    def test_dry_sharp_recent_window_blocks_and_releases_at_shared_boundary(self) -> None:
+        candidate = line(
+            "dry-candidate",
+            "dry.candidate",
+            tone="dry_sharp",
+            category="Study",
+            category_group="growth",
+        )
+        prior_dry = line(
+            "dry-prior",
+            "dry.prior",
+            tone="dry_sharp",
+            category="Study",
+            category_group="growth",
+            trigger="holiday",
+        )
+        fillers = [
+            line(f"filler-{index}", f"filler.{index}", trigger="holiday")
+            for index in range(19)
+        ]
+        prepared = prepare_corpus([candidate, prior_dry, *fillers])
+
+        blocked_rows = [prior_dry, *fillers[:18]]
+        blocked_history = SelectionHistory(
+            [
+                record(row, (len(blocked_rows) - index) * 70)
+                for index, row in enumerate(blocked_rows)
+            ]
+        )
+        boundary_rows = [prior_dry, *fillers]
+        boundary_history = SelectionHistory(
+            [
+                record(row, (len(boundary_rows) - index) * 70)
+                for index, row in enumerate(boundary_rows)
+            ]
+        )
+
+        self.assertIsNone(
+            select_line(prepared, context(), blocked_history, NOW, seed=1)
+        )
+        self.assertEqual((), tuple(row for row in blocked_history.records if row.selected_id == candidate.id))
+        selected = select_line(prepared, context(), boundary_history, NOW, seed=1)
+        self.assertIsNotNone(selected)
+        self.assertEqual(candidate.id, selected.row.id)
+
+    def test_dry_sharp_history_uses_semantic_group_across_corpus_versions(self) -> None:
+        candidate = line(
+            "dry-candidate-v2",
+            "dry.candidate",
+            tone="dry_sharp",
+            category="Study",
+            category_group="growth",
+        )
+        prior_scene = line(
+            "dry-prior-v2",
+            "dry.prior",
+            tone="dry_sharp",
+            category="Study",
+            category_group="growth",
+            trigger="holiday",
+        )
+        prepared = prepare_corpus([candidate, prior_scene])
+        migrated_history = SelectionHistory(
+            [
+                HistoryRecord(
+                    selected_id="retired-v1-line-id",
+                    played_at=NOW - timedelta(minutes=70),
+                    category="Study",
+                    category_group="growth",
+                    semantic_group="dry.prior",
+                    output_mode="self_talk",
+                    trigger="any",
+                    interrupt_cost=0,
+                )
+            ]
+        )
+
+        self.assertIsNone(
+            select_line(prepared, context(), migrated_history, NOW, seed=1)
+        )
 
     def test_fifty_thousand_row_prepare_and_repeated_selection_have_bounded_cost(self) -> None:
         rows = [

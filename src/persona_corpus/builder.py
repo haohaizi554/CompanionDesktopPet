@@ -19,10 +19,19 @@ from .schema import (
     ARCHIVE_HEADER,
     PII_REVIEW_HEADER,
     REVIEW_HEADER,
+    SURFACE_MANIFEST_HEADER,
     V2_HEADER,
     ArchiveRow,
     PiiReviewRow,
     ReviewRow,
+    SurfaceManifestRow,
+)
+from .surface_variants import (
+    apply_dry_sharp_scene_dose,
+    legacy_surface_line_id,
+    legacy_surface_variant_token,
+    materialize_legacy_surface_candidates,
+    prepare_legacy_surface_candidates,
 )
 
 
@@ -74,6 +83,7 @@ FALSE_CONTEXT_MARKERS = (
 INTIMACY_MARKERS = ("小笨蛋", "宝宝", "亲爱的", "只准", "不许离开", "永远陪我")
 QUESTION_MARKS = ("?", "？")
 LEGACY_REFERENCE = re.compile(r"legacy:(\d+);topic:([^;]+)")
+SURFACE_REFERENCE = re.compile(r"legacy:(\d+);topic:([^;]+);variant:([^;]+)")
 
 TONE_ALIASES = {
     "dry_warm": "dry",
@@ -122,6 +132,7 @@ class BuildResult:
     archive: tuple[ArchiveRow, ...]
     review: tuple[ReviewRow, ...]
     pii_review: tuple[PiiReviewRow, ...]
+    surface_manifest: tuple[SurfaceManifestRow, ...]
     dispositions: Mapping[int, tuple[str, ...]]
 
 
@@ -324,6 +335,58 @@ def _catalog_has_non_identity_pii(text: str) -> bool:
     ) or any(pattern.search(text) for pattern in PII_PATTERNS)
 
 
+def _build_surface_manifest(
+    rows: Sequence[CorpusLine],
+    source: Sequence[LegacyLine],
+) -> tuple[SurfaceManifestRow, ...]:
+    source_by_line = {row.source_line: row for row in source}
+    manifest: list[SurfaceManifestRow] = []
+    for row in rows:
+        if row.source_kind != "legacy_surface_variant":
+            continue
+        match = SURFACE_REFERENCE.fullmatch(row.source_reference)
+        if match is None:
+            raise ValueError(f"surface row {row.id!r} has invalid lineage")
+        source_line = int(match.group(1))
+        topic_id = match.group(2)
+        variant_id = match.group(3)
+        original = source_by_line.get(source_line)
+        if original is None:
+            raise ValueError(f"surface row {row.id!r} references missing source {source_line}")
+        expected_id = legacy_surface_line_id(source_line, topic_id, original.text)
+        expected_variant = legacy_surface_variant_token(source_line, topic_id, original.text)
+        if (
+            row.id != expected_id
+            or variant_id != expected_variant
+            or row.category != original.category
+            or row.topic_id != topic_id
+            or row.text != original.text
+            or row.category_group != category_group_for(original.category)
+        ):
+            raise ValueError(f"surface row {row.id!r} does not exactly match its legacy source")
+        text_digest = hashlib.sha256(row.text.encode("utf-8")).hexdigest()
+        source_digest = hashlib.sha256(original.text.encode("utf-8")).hexdigest()
+        manifest.append(
+            SurfaceManifestRow(
+                line_id=row.id,
+                variant_id=variant_id,
+                source_line=source_line,
+                category=row.category,
+                category_group=row.category_group,
+                topic_id=row.topic_id,
+                source_reference=row.source_reference,
+                text_sha256=text_digest,
+                source_text_sha256=source_digest,
+            )
+        )
+    manifest.sort(key=lambda item: item.line_id)
+    if len(manifest) != len({item.line_id for item in manifest}):
+        raise ValueError("surface manifest contains duplicate line IDs")
+    if len(manifest) != len({item.variant_id for item in manifest}):
+        raise ValueError("surface manifest contains duplicate variant IDs")
+    return tuple(manifest)
+
+
 def build_v2(
     source: Sequence[LegacyLine],
     mappings: Sequence[SourceMapping],
@@ -363,6 +426,24 @@ def build_v2(
         topic_id, source_reference = _catalog_reference(entry, mapping_by_line)
         enabled.append(_catalog_to_corpus(entry, topic_id, source_reference))
 
+    archive_basis = tuple(
+        ArchiveRow(
+            source_line=line.source_line,
+            category=line.category,
+            original_text=line.text,
+            archive_reason=_archive_reason(line, mapping_by_line[line.source_line]),
+            topic_id=mapping_by_line[line.source_line].topic_id,
+            suggested_rewrite="",
+            can_recover=False,
+        )
+        for line in sorted(source, key=lambda item: item.source_line)
+    )
+    prepared_surfaces = prepare_legacy_surface_candidates(archive_basis, enabled)
+    enabled.extend(
+        materialize_legacy_surface_candidates(prepared_surfaces.candidates, enabled)
+    )
+    enabled = list(apply_dry_sharp_scene_dose(enabled))
+
     normalized = [normalize_text(row.text) for row in enabled]
     if len(normalized) != len(set(normalized)):
         raise ValueError("content catalog contains normalized duplicate enabled text")
@@ -374,6 +455,10 @@ def build_v2(
         legacy = re.match(r"legacy:(\d+);", row.source_reference)
         if legacy is not None:
             suggestions_by_source[int(legacy.group(1))].add(row.text)
+
+    surface_sources = {
+        row.source_line for row in prepared_surfaces.candidates
+    }
 
     enabled.sort(
         key=lambda row: (
@@ -403,6 +488,8 @@ def build_v2(
             )
         )
         dispositions[line.source_line].append(f"archive:{reason}")
+        if line.source_line in surface_sources:
+            dispositions[line.source_line].append("enable:legacy_surface_variant")
 
         for risk_type, description in _review_risks(line.text):
             review_id = (
@@ -442,11 +529,13 @@ def build_v2(
     frozen_dispositions = MappingProxyType(
         {line: tuple(values) for line, values in sorted(dispositions.items())}
     )
+    surface_manifest = _build_surface_manifest(enabled, source)
     return BuildResult(
         enabled=tuple(enabled),
         archive=tuple(archive),
         review=tuple(review),
         pii_review=tuple(pii_review),
+        surface_manifest=surface_manifest,
         dispositions=frozen_dispositions,
     )
 
@@ -524,6 +613,10 @@ def serialize_pii_review(rows: Iterable[PiiReviewRow]) -> bytes:
     return _serialize(PII_REVIEW_HEADER, rows)
 
 
+def serialize_surface_manifest(rows: Iterable[SurfaceManifestRow]) -> bytes:
+    return _serialize(SURFACE_MANIFEST_HEADER, rows)
+
+
 def _canonical_output_root(output: Path) -> Path | None:
     if output.parent.name == "optimized" and output.parent.parent.name == "data":
         return output.parent.parent.parent
@@ -566,6 +659,7 @@ def _validated_output_paths(
         "archive": output.with_name("persona-corpus-archive.tsv"),
         "review": output.with_name("persona-corpus-review.tsv"),
         "pii_review": pii_review,
+        "surface_manifest": output.with_name("persona-surface-manifest.tsv"),
     }
     normalized = {path.resolve(strict=False) for path in paths.values()}
     if len(normalized) != len(paths):
@@ -588,6 +682,7 @@ def write_build_outputs(
         "archive": serialize_archive(result.archive),
         "review": serialize_review(result.review),
         "pii_review": serialize_pii_review(result.pii_review),
+        "surface_manifest": serialize_surface_manifest(result.surface_manifest),
     }
     for name, path in paths.items():
         path.write_bytes(payloads[name])

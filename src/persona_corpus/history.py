@@ -8,7 +8,7 @@ from typing import Any, Iterable
 
 HISTORY_SCHEMA_VERSION = 1
 _ROOT_KEYS = frozenset({"schema_version", "records"})
-_RECORD_KEYS = frozenset(
+_RECORD_REQUIRED_KEYS = frozenset(
     {
         "selected_id",
         "played_at",
@@ -20,6 +20,16 @@ _RECORD_KEYS = frozenset(
         "interrupt_cost",
     }
 )
+_RECORD_OPTIONAL_KEYS = frozenset(
+    {
+        "was_dry_sharp",
+        "was_seasoning",
+        "surface_opening",
+        "surface_ending",
+        "surface_template",
+    }
+)
+_RECORD_KEYS = _RECORD_REQUIRED_KEYS | _RECORD_OPTIONAL_KEYS
 _CATEGORY_GROUPS = frozenset(
     {
         "technical",
@@ -78,6 +88,11 @@ class HistoryRecord:
     output_mode: str
     trigger: str
     interrupt_cost: int
+    was_dry_sharp: bool = False
+    was_seasoning: bool | None = None
+    surface_opening: str = ""
+    surface_ending: str = ""
+    surface_template: str = ""
 
     def __post_init__(self) -> None:
         for name in ("selected_id", "category", "semantic_group"):
@@ -99,6 +114,15 @@ class HistoryRecord:
             or not 0 <= self.interrupt_cost <= 5
         ):
             raise HistoryFormatError("interrupt_cost must be an integer in [0, 5]")
+        if (
+            type(self.was_dry_sharp) is not bool
+            or (self.was_seasoning is not None and type(self.was_seasoning) is not bool)
+        ):
+            raise HistoryFormatError("playback exposure flags must be boolean or legacy null")
+        for name in ("surface_opening", "surface_ending", "surface_template"):
+            value = getattr(self, name)
+            if not isinstance(value, str) or value != value.strip():
+                raise HistoryFormatError(f"{name} must be a trimmed string")
 
 
 def _reject_constant(value: str) -> None:
@@ -167,6 +191,11 @@ class SelectionHistory:
                     "output_mode": record.output_mode,
                     "trigger": record.trigger,
                     "interrupt_cost": record.interrupt_cost,
+                    "was_dry_sharp": record.was_dry_sharp,
+                    "was_seasoning": record.was_seasoning,
+                    "surface_opening": record.surface_opening,
+                    "surface_ending": record.surface_ending,
+                    "surface_template": record.surface_template,
                 }
                 for record in self._records
             ],
@@ -203,7 +232,10 @@ class SelectionHistory:
             raise HistoryFormatError("history records must be an array")
         records: list[HistoryRecord] = []
         for index, raw in enumerate(raw_records):
-            if not isinstance(raw, dict) or set(raw) != _RECORD_KEYS:
+            if (
+                not isinstance(raw, dict)
+                or not _RECORD_REQUIRED_KEYS <= set(raw) <= _RECORD_KEYS
+            ):
                 raise HistoryFormatError(f"history record {index} uses unknown or missing keys")
             try:
                 record = HistoryRecord(
@@ -215,6 +247,11 @@ class SelectionHistory:
                     output_mode=raw["output_mode"],
                     trigger=raw["trigger"],
                     interrupt_cost=raw["interrupt_cost"],
+                    was_dry_sharp=raw.get("was_dry_sharp", False),
+                    was_seasoning=raw.get("was_seasoning"),
+                    surface_opening=raw.get("surface_opening", ""),
+                    surface_ending=raw.get("surface_ending", ""),
+                    surface_template=raw.get("surface_template", ""),
                 )
             except (KeyError, TypeError, HistoryFormatError) as error:
                 if isinstance(error, HistoryFormatError):

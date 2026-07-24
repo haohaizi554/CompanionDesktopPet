@@ -608,6 +608,62 @@ class ValidationContractTests(unittest.TestCase):
         self.assertIn("requires_reply", codes)
         self.assertIn("question", codes)
 
+    def test_legacy_surface_rows_reject_hidden_reply_state_and_length_risks(self) -> None:
+        rows = [
+            valid_line(
+                id="implicit",
+                source_kind="legacy_surface_variant",
+                text="是不是又想让我猜一下。",
+            ),
+            valid_line(
+                id="reply",
+                source_kind="legacy_surface_variant",
+                text="学会了拿来跟我显摆一下。",
+            ),
+            valid_line(
+                id="state",
+                source_kind="legacy_surface_variant",
+                text="手腕酸了就先停一下。",
+            ),
+            valid_line(
+                id="long",
+                source_kind="legacy_surface_variant",
+                text="这是一条长度明显超过四十二个字符并且不能作为普通桌面气泡表述保留的旧语料内容，后面再补上一段确认它确实越界。",
+            ),
+        ]
+
+        issues = validate_corpus(rows, valid_config(), {"exceptions": []}).errors
+        by_id = {(issue.line_id, issue.code) for issue in issues}
+
+        self.assertIn(("implicit", "surface_reply_hook"), by_id)
+        self.assertIn(("reply", "surface_reply_hook"), by_id)
+        self.assertIn(("state", "surface_fake_context"), by_id)
+        self.assertIn(("long", "surface_length"), by_id)
+
+    def test_technical_deictic_objects_and_user_environment_claims_are_rejected(self) -> None:
+        rows = [
+            valid_line(
+                id="interface",
+                category="Backend",
+                category_group="technical",
+                source_kind="legacy_surface_variant",
+                text="这个接口偶尔超时，先别假装看见了现场。",
+            ),
+            valid_line(
+                id="machine",
+                category="Testing",
+                category_group="technical",
+                source_kind="legacy_surface_variant",
+                text="这个测试在你机器上过，也不能当成已知事实。",
+            ),
+        ]
+
+        issues = validate_corpus(rows, valid_config(), {"exceptions": []}).errors
+        by_id = {(issue.line_id, issue.code) for issue in issues}
+
+        self.assertIn(("interface", "surface_fake_context"), by_id)
+        self.assertIn(("machine", "surface_fake_context"), by_id)
+
     def test_original_text_control_characters_are_rejected_before_normalization(self) -> None:
         rows = [valid_line(text="一行里不能有\t制表符和\n换行。")]
         self.assertIn(
@@ -1001,6 +1057,72 @@ class ValidationContractTests(unittest.TestCase):
         self.assertTrue(
             {"opening_frequency", "ending_frequency", "length_distribution"} <= codes
         )
+
+    def test_surface_inventory_catchphrase_excess_is_not_hidden(self) -> None:
+        rows = [
+            valid_line(
+                id=f"surface_catch_{index}",
+                source_kind="legacy_surface_variant",
+                topic_id=f"surface.topic.{index}",
+                semantic_group=f"surface.topic.{index}",
+                text=(
+                    f"啊推，surface inventory phrase {index}."
+                    if index < 30
+                    else f"neutral surface inventory phrase {index}."
+                ),
+            )
+            for index in range(100)
+        ]
+
+        report = validate_corpus(rows, valid_config(), {"exceptions": []})
+
+        self.assertIn("surface_catchphrase_inventory", issue_codes(report))
+
+    def test_surface_inventory_opening_and_ending_concentration_is_bounded(self) -> None:
+        rows = [
+            valid_line(
+                id=f"surface_frame_{index}",
+                source_kind="legacy_surface_variant",
+                topic_id=f"surface.topic.{index}",
+                semantic_group=f"surface.topic.{index}",
+                text=f"same-opening surface phrase {index:03d} same-ending",
+            )
+            for index in range(100)
+        ]
+
+        codes = issue_codes(validate_corpus(rows, valid_config(), {"exceptions": []}))
+
+        self.assertIn("surface_opening_inventory", codes)
+        self.assertIn("surface_ending_inventory", codes)
+
+    def test_surface_topic_cartesian_grid_and_repeated_faces_are_audited(self) -> None:
+        rows = []
+        for prefix_index, prefix in enumerate(("aa", "bb", "cc")):
+            for suffix_index, suffix in enumerate(("xxxx", "yyyy", "zzzz")):
+                rows.append(
+                    valid_line(
+                        id=f"surface_grid_{prefix_index}_{suffix_index}",
+                        source_kind="legacy_surface_variant",
+                        topic_id="surface.grid",
+                        semantic_group="surface.grid",
+                        text=f"{prefix}middle{suffix}",
+                    )
+                )
+        rows.extend(
+            valid_line(
+                id=f"surface_face_{index}",
+                source_kind="legacy_surface_variant",
+                topic_id="surface.face",
+                semantic_group="surface.face",
+                text=f"ff unique middle {index:03d} tail",
+            )
+            for index in range(20)
+        )
+
+        codes = issue_codes(validate_corpus(rows, valid_config(), {"exceptions": []}))
+
+        self.assertIn("surface_cartesian_topics", codes)
+        self.assertIn("surface_topic_face_frequency", codes)
 
 
 class AllowlistTests(unittest.TestCase):

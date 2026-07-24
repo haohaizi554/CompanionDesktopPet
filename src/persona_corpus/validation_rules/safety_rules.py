@@ -3,6 +3,12 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 
 from ..models import CorpusLine
+from ..surface_safety import (
+    IMPLICIT_QUESTION_MARKERS,
+    MAX_SURFACE_TEXT_LENGTH,
+    REPLY_HOOK_MARKERS,
+    UNAVAILABLE_STATE_MARKERS,
+)
 from .common import IssueSink
 
 
@@ -27,6 +33,28 @@ def validate_safety_preflight(
         issues.error("requires_reply", "text must not require a reply", line_id, row_number)
     if "?" in text or "？" in text:
         issues.error("question", "original text contains a question mark", line_id, row_number)
+    if row.source_kind == "legacy_surface_variant":
+        if row.category_group != "easter_egg" and len(text) > MAX_SURFACE_TEXT_LENGTH:
+            issues.error(
+                "surface_length",
+                f"legacy surface text exceeds {MAX_SURFACE_TEXT_LENGTH} characters",
+                line_id,
+                row_number,
+            )
+        if any(marker in text for marker in (*IMPLICIT_QUESTION_MARKERS, *REPLY_HOOK_MARKERS)):
+            issues.error(
+                "surface_reply_hook",
+                "legacy surface text contains an implicit question or reply hook",
+                line_id,
+                row_number,
+            )
+        if any(marker in text for marker in UNAVAILABLE_STATE_MARKERS):
+            issues.error(
+                "surface_fake_context",
+                "legacy surface text asserts unavailable body or environment state",
+                line_id,
+                row_number,
+            )
 
     direct_state = next((pattern for pattern in direct_state_patterns if pattern in text), None)
     if direct_state and not has_context:
@@ -67,6 +95,13 @@ def validate_safety_preflight(
             line_id,
             row_number,
         )
+        if row.source_kind == "legacy_surface_variant":
+            issues.error(
+                "surface_fake_context",
+                "legacy surface text claims an unavailable current technical object or environment",
+                line_id,
+                row_number,
+            )
     identity_marker = has_identity_marker(text)
     if looks_like_non_identity_pii(text) or (
         identity_marker and not identity_pii_is_adjudicated(row)

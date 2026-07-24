@@ -122,6 +122,9 @@ internal static class PersonaContractGenerated
     public const double DrySharpSceneInventoryMaximum = {float(dry_sharp['scene_inventory_acceptance'][1]):.2f};
     public const string DrySharpSceneInventoryEnforcementProfile = {_quoted(str(dry_sharp['scene_inventory_enforcement_profile']))};
     public const string DrySharpRowInventoryPolicy = {_quoted(str(dry_sharp['row_inventory_policy']))};
+    public const double DrySharpPlaybackTarget = {float(dry_sharp['playback_target']):.2f};
+    public const double DrySharpPlaybackMinimum = {float(dry_sharp['playback_acceptance'][0]):.2f};
+    public const double DrySharpPlaybackMaximum = {float(dry_sharp['playback_acceptance'][1]):.2f};
     public const double SeasoningCuratedCoreInventoryMaximum = {float(seasoning['inventory_profiles']['curated_core']['maximum']):.2f};
     public const string SeasoningExpandedRuntimeInventoryPolicy = {_quoted(str(seasoning['inventory_profiles']['expanded_runtime']['policy']))};
     public const double SeasoningPlaybackMinimum = {float(seasoning['playback_acceptance'][0]):.2f};
@@ -208,7 +211,9 @@ internal static class PersonaContractGenerated
 
         var normalized = text.Normalize(System.Text.NormalizationForm.FormKC);
         return SeasoningSubstringMarkers.Any(marker =>
-                   normalized.Contains(marker, StringComparison.OrdinalIgnoreCase))
+                   normalized.Contains(
+                       marker.Normalize(System.Text.NormalizationForm.FormKC),
+                       StringComparison.OrdinalIgnoreCase))
                || SeasoningTokenPatterns.Values.Any(pattern =>
                    System.Text.RegularExpressions.Regex.IsMatch(
                        normalized,

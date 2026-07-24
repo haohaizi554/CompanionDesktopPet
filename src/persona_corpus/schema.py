@@ -60,6 +60,18 @@ PII_REVIEW_HEADER = (
     "default_enabled",
 )
 
+SURFACE_MANIFEST_HEADER = (
+    "line_id",
+    "variant_id",
+    "source_line",
+    "category",
+    "category_group",
+    "topic_id",
+    "source_reference",
+    "text_sha256",
+    "source_text_sha256",
+)
+
 
 @dataclass(frozen=True, slots=True)
 class ArchiveRow:
@@ -96,3 +108,16 @@ class PiiReviewRow:
     suggested_action: str
     suggested_rewrite: str
     default_enabled: bool
+
+
+@dataclass(frozen=True, slots=True)
+class SurfaceManifestRow:
+    line_id: str
+    variant_id: str
+    source_line: int
+    category: str
+    category_group: str
+    topic_id: str
+    source_reference: str
+    text_sha256: str
+    source_text_sha256: str

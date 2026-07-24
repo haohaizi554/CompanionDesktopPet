@@ -11,8 +11,11 @@ from types import MappingProxyType
 from typing import Mapping, Sequence
 
 from .context import ContextError, PersonaContext, daypart_for
+from .contract import PERSONA_CONTRACT
 from .history import HistoryFormatError, HistoryRecord, SelectionHistory
+from .lexical import contains_seasoning_marker
 from .models import CorpusLine
+from .surface_exposure import SURFACE_RECENT_WINDOW, surface_exposure
 from .validation import ValidationInputError, load_json_object, validate_config
 
 
@@ -151,10 +154,20 @@ _SCENE_SCHEDULING_FIELDS = (
 class PreparedScene:
     semantic_group: str
     variants: tuple[CorpusLine, ...]
+    seasoning_variants: tuple[CorpusLine, ...]
+    neutral_variants: tuple[CorpusLine, ...]
 
     @property
     def representative(self) -> CorpusLine:
         return self.variants[0]
+
+    @property
+    def has_seasoning_variant(self) -> bool:
+        return bool(self.seasoning_variants)
+
+    @property
+    def has_neutral_variant(self) -> bool:
+        return bool(self.neutral_variants)
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,6 +175,7 @@ class PreparedCorpus:
     input_row_count: int
     scenes: tuple[PreparedScene, ...]
     scenes_by_trigger: Mapping[str, tuple[PreparedScene, ...]]
+    dry_sharp_semantic_groups: frozenset[str]
     duplicate_ids: tuple[str, ...]
     rejected_semantic_groups: tuple[str, ...]
 
@@ -207,7 +221,18 @@ def prepare_corpus(corpus: Sequence[CorpusLine] | PreparedCorpus) -> PreparedCor
         if any(_scene_signature(row) != signature for row in ordered[1:]):
             rejected.append(semantic_group)
             continue
-        scenes.append(PreparedScene(semantic_group=semantic_group, variants=ordered))
+        seasoning_rows: list[CorpusLine] = []
+        neutral_rows: list[CorpusLine] = []
+        for row in ordered:
+            (seasoning_rows if contains_seasoning_marker(row.text) else neutral_rows).append(row)
+        scenes.append(
+            PreparedScene(
+                semantic_group=semantic_group,
+                variants=ordered,
+                seasoning_variants=tuple(seasoning_rows),
+                neutral_variants=tuple(neutral_rows),
+            )
+        )
 
     by_trigger: dict[str, list[PreparedScene]] = {}
     for scene in scenes:
@@ -220,6 +245,11 @@ def prepare_corpus(corpus: Sequence[CorpusLine] | PreparedCorpus) -> PreparedCor
                 trigger: tuple(trigger_scenes)
                 for trigger, trigger_scenes in sorted(by_trigger.items())
             }
+        ),
+        dry_sharp_semantic_groups=frozenset(
+            scene.semantic_group
+            for scene in scenes
+            if scene.representative.tone == "dry_sharp"
         ),
         duplicate_ids=duplicate_ids,
         rejected_semantic_groups=tuple(rejected),
@@ -360,6 +390,7 @@ def _score(
     row: CorpusLine,
     records: Sequence[HistoryRecord],
     config: SchedulerConfig,
+    dry_sharp_semantic_groups: frozenset[str],
 ) -> _ScoredCandidate:
     recent = records[-SCORE_HISTORY_WINDOW:]
     total = len(recent)
@@ -369,6 +400,16 @@ def _score(
     group_observed = group_count / total if total else 0.0
     mode_observed = mode_count / total if total else 0.0
     category_observed = category_count / total if total else 0.0
+    dry_sharp_observed = (
+        sum(
+            record.was_dry_sharp
+            or record.semantic_group in dry_sharp_semantic_groups
+            for record in recent
+        )
+        / total
+        if total
+        else 0.0
+    )
     group_target = config.category_group_weights[row.category_group]
     mode_target = config.output_mode_targets[row.output_mode]
     group_deficit = group_target - group_observed
@@ -376,12 +417,16 @@ def _score(
     row_weight_bonus = float(row.weight) * 0.5
     interrupt_penalty = row.interrupt_cost * 0.75
     category_repeat_penalty = category_observed * 5.0
+    dry_sharp_target = float(PERSONA_CONTRACT.dry_sharp["playback_target"])
+    dry_sharp_deficit = dry_sharp_target - dry_sharp_observed
+    dry_sharp_bonus = dry_sharp_deficit * 200.0 if row.tone == "dry_sharp" else 0.0
     score = (
         group_deficit * 100.0
         + mode_deficit * 35.0
         + row_weight_bonus
         - interrupt_penalty
         - category_repeat_penalty
+        + dry_sharp_bonus
     )
     # Row weight chooses among peers; it must not first exclude the lighter peer
     # by moving otherwise-identical candidates into different score bands.
@@ -396,6 +441,8 @@ def _score(
         f"row_weight_bonus={row_weight_bonus:.6f}",
         f"interrupt_penalty={interrupt_penalty:.6f}",
         f"category_repeat_penalty={category_repeat_penalty:.6f}",
+        f"dry_sharp_deficit={dry_sharp_deficit:.6f}",
+        f"dry_sharp_bonus={dry_sharp_bonus:.6f}",
     )
     return _ScoredCandidate(row=row, score=score, score_band=band, reasons=reasons)
 
@@ -466,6 +513,47 @@ def _scheduler_config_mapping(config: SchedulerConfig) -> dict[str, object]:
     }
 
 
+def _prefer_surface_exposure(
+    variants: Sequence[CorpusLine],
+    records: Sequence[HistoryRecord],
+) -> tuple[CorpusLine, ...]:
+    """Prefer a fresh surface face, then steer seasoning toward its playback band."""
+
+    if not variants:
+        return ()
+    recent_surface = records[-SURFACE_RECENT_WINDOW:]
+    openings = {record.surface_opening for record in recent_surface if record.surface_opening}
+    endings = {record.surface_ending for record in recent_surface if record.surface_ending}
+    templates = {record.surface_template for record in recent_surface if record.surface_template}
+
+    profiled = tuple((row, surface_exposure(row.text)) for row in variants)
+    conflict_counts = {
+        row.id: int(profile.opening in openings)
+        + int(profile.ending in endings)
+        + int(profile.template in templates)
+        for row, profile in profiled
+    }
+    least_conflicts = min(conflict_counts.values())
+    diverse = tuple(row for row, _ in profiled if conflict_counts[row.id] == least_conflicts)
+
+    seasoning = PERSONA_CONTRACT.lexical_exposure["seasoning"]
+    acceptance = seasoning["playback_acceptance"]
+    target = (float(acceptance[0]) + float(acceptance[1])) / 2.0
+    score_window = records[-SCORE_HISTORY_WINDOW:]
+    observed = (
+        sum(record.was_seasoning is not False for record in score_window) / len(score_window)
+        if score_window
+        else 0.0
+    )
+    seasoning_rows = tuple(row for row in diverse if contains_seasoning_marker(row.text))
+    neutral_rows = tuple(row for row in diverse if not contains_seasoning_marker(row.text))
+    if observed + _EPSILON < target and seasoning_rows:
+        return seasoning_rows
+    if observed > target + _EPSILON and neutral_rows:
+        return neutral_rows
+    return diverse
+
+
 def select_line(
     corpus: Sequence[CorpusLine] | PreparedCorpus,
     context: PersonaContext,
@@ -512,12 +600,32 @@ def select_line(
         if record.played_at.astimezone(now.tzinfo).date() == local_date:
             today_counts[record.selected_id] += 1
 
+    seasoning_policy = PERSONA_CONTRACT.lexical_exposure["seasoning"]
+    seasoning_window = int(seasoning_policy["recent_window"])
+    seasoning_maximum = int(seasoning_policy["recent_max"])
+    seasoning_blocked = (
+        sum(record.was_seasoning is not False for record in records[-max(0, seasoning_window - 1) :])
+        >= seasoning_maximum
+    )
+
     def variant_available(row: CorpusLine) -> bool:
         return _outside_cooldown(
             now,
             records_by_id.get(row.id),
             float(row.cooldown_hours),
         ) and today_counts[row.id] < row.max_per_day
+
+    def scene_available_variants(scene: PreparedScene) -> tuple[CorpusLine, ...]:
+        exposure_candidates = (
+            scene.neutral_variants if seasoning_blocked else scene.variants
+        )
+        return tuple(row for row in exposure_candidates if variant_available(row))
+
+    def scene_has_available_variant(scene: PreparedScene) -> bool:
+        exposure_candidates = (
+            scene.neutral_variants if seasoning_blocked else scene.variants
+        )
+        return any(variant_available(row) for row in exposure_candidates)
 
     # 1-3. Static preparation has removed duplicate/disabled rows. Runtime
     # trigger and context checks now visit one representative per semantic scene.
@@ -539,7 +647,7 @@ def select_line(
     candidates = [
         scene
         for scene in candidates
-        if any(variant_available(row) for row in scene.variants)
+        if scene_has_available_variant(scene)
         and _outside_cooldown(
             now,
             semantic_records.get(scene.semantic_group),
@@ -592,6 +700,43 @@ def select_line(
         <= config.user_direct_recent_max
     ]
 
+    dry_sharp_window = int(PERSONA_CONTRACT.dry_sharp["recent_window"])
+    dry_sharp_maximum = int(PERSONA_CONTRACT.dry_sharp["recent_max"])
+    dry_sharp_playback_window = SCORE_HISTORY_WINDOW
+    dry_sharp_playback_maximum = math.floor(
+        float(PERSONA_CONTRACT.dry_sharp["playback_acceptance"][1])
+        * dry_sharp_playback_window
+        + _EPSILON
+    )
+
+    def history_was_dry_sharp(record: HistoryRecord) -> bool:
+        return (
+            record.was_dry_sharp
+            or record.semantic_group in prepared.dry_sharp_semantic_groups
+        )
+
+    candidates = [
+        scene
+        for scene in candidates
+        if scene.representative.tone != "dry_sharp"
+        or (
+            _candidate_window_count(
+                records,
+                dry_sharp_window,
+                True,
+                history_was_dry_sharp,
+            )
+            <= dry_sharp_maximum
+            and _candidate_window_count(
+                records,
+                dry_sharp_playback_window,
+                True,
+                history_was_dry_sharp,
+            )
+            <= dry_sharp_playback_maximum
+        )
+    ]
+
     # 9. interruption budgets use absolute rolling windows (now-60m, now].
     if records and actual_elapsed + _EPSILON < config.minimum_interval_minutes:
         candidates = []
@@ -624,7 +769,15 @@ def select_line(
 
     # 10. A scene receives exactly one score regardless of surface variant count.
     scored = [
-        _ScoredScene(scene=scene, scored=_score(scene.representative, records, config))
+        _ScoredScene(
+            scene=scene,
+            scored=_score(
+                scene.representative,
+                records,
+                config,
+                prepared.dry_sharp_semantic_groups,
+            ),
+        )
         for scene in candidates
     ]
 
@@ -635,8 +788,9 @@ def select_line(
         candidate for candidate in scored if candidate.scored.score_band == highest_band
     ]
     chosen_scene = _weighted_scene_choice(highest, seed)
-    eligible_variants = tuple(
-        row for row in chosen_scene.scene.variants if variant_available(row)
+    eligible_variants = _prefer_surface_exposure(
+        scene_available_variants(chosen_scene.scene),
+        records,
     )
     if not eligible_variants:
         return None
@@ -644,6 +798,7 @@ def select_line(
         _selector_subseed(seed, "surface", chosen_scene.scene.semantic_group)
     )
     chosen_row = eligible_variants[variant_rng.randrange(len(eligible_variants))]
+    surface = surface_exposure(chosen_row.text)
 
     # 12. history mutates exactly once and only after a candidate is selected.
     try:
@@ -657,6 +812,11 @@ def select_line(
                 output_mode=chosen_row.output_mode,
                 trigger=chosen_row.trigger,
                 interrupt_cost=chosen_row.interrupt_cost,
+                was_dry_sharp=chosen_row.tone == "dry_sharp",
+                was_seasoning=contains_seasoning_marker(chosen_row.text),
+                surface_opening=surface.opening,
+                surface_ending=surface.ending,
+                surface_template=surface.template,
             )
         )
     except HistoryFormatError:

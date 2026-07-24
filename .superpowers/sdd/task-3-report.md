@@ -62,12 +62,15 @@ Technical, growth, and career now each contain a meaningful mixture of one- and 
 
 | File | Data rows | SHA-256 |
 | --- | ---: | --- |
-| `persona-corpus-v2.tsv` | 806 | `f10e53148ac329b6116ed59467f1c838b709532351917ead2630d673ccb6cfa1` |
-| `persona-corpus-archive.tsv` | 75,375 | `1c9c5afc86feae7e3642aee33f0f6fd1427bd02b28cebaabb51aa9fdaba82eb8` |
+| `persona-corpus-v2.tsv` | 52,132 | `3335d72e695528892ddec92076f0f02abacf58fff02ed6bd0aadf67d1cf0cc40` |
+| `persona-corpus-archive.tsv` | 75,375 | `b7d9a5f2fd6f4750ea2b688206f77bf45a2b59ca12c09f36281c72efc620721d` |
 | `persona-corpus-review.tsv` | 3,265 | `a251b1e01003a078d7912f71099e57c5c6830a75195558ea61428105990b866a` |
 | `pii-review.tsv` | 1,248 | `702037759f730759be83fb1c643a8f61382fa1c3f8f2a25e2c0351a177eec6e7` |
+| `persona-surface-manifest.tsv` | 51,326 | `bcf9c97be0e4b1d7b7db11fcb46f44de17ef0ade6cb2e79d69f8af69bdbc637d` |
 
-All four generated files contain LF only. The v2 output has 800 unique stable IDs and 800 unique normalized texts. Its length buckets are 216 short (8–16 characters), 352 medium (17–24), and 232 long (25–36), with no line over 36 characters; mean length is 20.8025. These shares are 27%, 44%, and 29%, leaving 2, 1, and 1 percentage points of margin against the configured boundaries.
+All five generated files contain LF only. The v2 runtime now contains 52,132 unique stable IDs and normalized texts: 806 curated rows plus 51,326 audited legacy surface variants. Those variants are grouped under 533 semantic scenes, so their inventory count does not multiply scene scheduling weight. The bubble-derived surface limit is 42 characters. The resulting 52,132 rows retain the user-requested 50k minimum without restoring a risk line, and the separate manifest binds every surface row to its immutable source text and stable ID inputs.
+
+The surface safety audit rejected 952 implicit questions, 1,806 reply hooks, 2,640 generic fake-current-context rows, and 1,584 unavailable-state rows. It preserved 192 independent safe low-information EasterEgg lines while the separate 78 privacy and one fake-context EasterEgg sources remain disabled. Stable scene hashing marks 22/533 scenes (4.1276%) and 3,878 rows as `dry_sharp`, always by whole semantic group and only in the contract-allowed groups; row share remains observation-only.
 
 ## Verification evidence
 

@@ -24,6 +24,9 @@ internal static class PersonaContractGenerated
     public const double DrySharpSceneInventoryMaximum = 0.06;
     public const string DrySharpSceneInventoryEnforcementProfile = "expanded_runtime";
     public const string DrySharpRowInventoryPolicy = "observation_only";
+    public const double DrySharpPlaybackTarget = 0.03;
+    public const double DrySharpPlaybackMinimum = 0.02;
+    public const double DrySharpPlaybackMaximum = 0.04;
     public const double SeasoningCuratedCoreInventoryMaximum = 0.10;
     public const string SeasoningExpandedRuntimeInventoryPolicy = "observation_only";
     public const double SeasoningPlaybackMinimum = 0.03;
@@ -205,7 +208,9 @@ internal static class PersonaContractGenerated
 
         var normalized = text.Normalize(System.Text.NormalizationForm.FormKC);
         return SeasoningSubstringMarkers.Any(marker =>
-                   normalized.Contains(marker, StringComparison.OrdinalIgnoreCase))
+                   normalized.Contains(
+                       marker.Normalize(System.Text.NormalizationForm.FormKC),
+                       StringComparison.OrdinalIgnoreCase))
                || SeasoningTokenPatterns.Values.Any(pattern =>
                    System.Text.RegularExpressions.Regex.IsMatch(
                        normalized,

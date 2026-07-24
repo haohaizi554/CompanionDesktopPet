@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.IO;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace CompanionDesktopPet.Services;
@@ -94,6 +95,27 @@ public sealed record DialogueLine(
     string SourceReference,
     string RewriteReason)
 {
+    private string _text = Text;
+    private bool? _hasSeasoningMarker;
+    private SurfaceExposureProfile? _surfaceExposure;
+
+    public string Text
+    {
+        get => _text;
+        init
+        {
+            _text = value;
+            _hasSeasoningMarker = null;
+            _surfaceExposure = null;
+        }
+    }
+
+    public bool HasSeasoningMarker =>
+        _hasSeasoningMarker ??= PersonaContractGenerated.ContainsSeasoningMarker(Text);
+
+    internal SurfaceExposureProfile SurfaceExposureProfile =>
+        _surfaceExposure ??= SurfaceExposure.Profile(Text);
+
     public TimeSpan Cooldown => TimeSpan.FromHours(CooldownHours);
 
     public TimeSpan SemanticCooldown => TimeSpan.FromHours(SemanticCooldownHours);
@@ -178,6 +200,21 @@ public static class PersonaCorpus
         var lines = new List<DialogueLine>(MaximumRuntimeRows);
         var ids = new HashSet<string>(StringComparer.Ordinal);
         var normalizedTexts = new HashSet<string>(StringComparer.Ordinal);
+        var sharedStrings = new Dictionary<string, string>(StringComparer.Ordinal);
+        var sharedContexts = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+        var categoryGroupCache = new Dictionary<string, DialogueCategoryGroup>(StringComparer.Ordinal);
+        var outputModeCache = new Dictionary<string, DialogueOutputMode>(StringComparer.Ordinal);
+        var triggerCache = new Dictionary<string, DialogueTrigger>(StringComparer.Ordinal);
+        var topicSlugCache = new Dictionary<string, string>(StringComparer.Ordinal);
+        string Share(string value)
+        {
+            if (sharedStrings.TryGetValue(value, out var existing))
+            {
+                return existing;
+            }
+            sharedStrings[value] = value;
+            return value;
+        }
         var lineNumber = 1;
         while (reader.ReadLine() is { } raw)
         {
@@ -197,8 +234,13 @@ public static class PersonaCorpus
             var enabled = ParseBoolean(Value("enabled"), "enabled", lineNumber);
             var id = Required(Value("id"), "id", lineNumber);
             var category = ParseEnum<DialogueCategory>(Value("category"), "category", lineNumber);
-            var categoryGroup = ParseSnakeEnum<DialogueCategoryGroup>(
-                Value("category_group"), "category_group", lineNumber);
+            var rawCategoryGroup = Value("category_group");
+            if (!categoryGroupCache.TryGetValue(rawCategoryGroup, out var categoryGroup))
+            {
+                categoryGroup = ParseSnakeEnum<DialogueCategoryGroup>(
+                    rawCategoryGroup, "category_group", lineNumber);
+                categoryGroupCache[rawCategoryGroup] = categoryGroup;
+            }
             if (!PersonaContractGenerated.CategoryGroupByCategory.TryGetValue(category, out var expectedGroup)
                 || categoryGroup != expectedGroup)
             {
@@ -207,9 +249,14 @@ public static class PersonaCorpus
                     $"category {category} must use category_group "
                     + $"{expectedGroup}");
             }
-            var topicId = Required(Value("topic_id"), "topic_id", lineNumber);
-            var semanticGroup = Required(Value("semantic_group"), "semantic_group", lineNumber);
-            var outputMode = ParseSnakeEnum<DialogueOutputMode>(Value("output_mode"), "output_mode", lineNumber);
+            var topicId = Share(Required(Value("topic_id"), "topic_id", lineNumber));
+            var semanticGroup = Share(Required(Value("semantic_group"), "semantic_group", lineNumber));
+            var rawOutputMode = Value("output_mode");
+            if (!outputModeCache.TryGetValue(rawOutputMode, out var outputMode))
+            {
+                outputMode = ParseSnakeEnum<DialogueOutputMode>(rawOutputMode, "output_mode", lineNumber);
+                outputModeCache[rawOutputMode] = outputMode;
+            }
             if (!PersonaContractGenerated.CategoryGroupOutputModes.TryGetValue(
                     categoryGroup, out var expectedOutputMode)
                 || outputMode != expectedOutputMode)
@@ -218,10 +265,22 @@ public static class PersonaCorpus
                     lineNumber,
                     $"category_group {categoryGroup} must use output_mode {expectedOutputMode}");
             }
-            var trigger = ParseSnakeEnum<DialogueTrigger>(Value("trigger"), "trigger", lineNumber);
-            var requiredContext = ParseContext(Value("required_context"), lineNumber);
-            var tone = ParseControlled(
-                Value("tone"), "tone", PersonaContractGenerated.ControlledTones, lineNumber);
+            var rawTrigger = Value("trigger");
+            if (!triggerCache.TryGetValue(rawTrigger, out var trigger))
+            {
+                trigger = ParseSnakeEnum<DialogueTrigger>(rawTrigger, "trigger", lineNumber);
+                triggerCache[rawTrigger] = trigger;
+            }
+            var rawContext = Value("required_context");
+            if (!sharedContexts.TryGetValue(rawContext, out var requiredContext))
+            {
+                requiredContext = ParseContext(rawContext, lineNumber)
+                    .Select(Share)
+                    .ToArray();
+                sharedContexts[rawContext] = requiredContext;
+            }
+            var tone = Share(ParseControlled(
+                Value("tone"), "tone", PersonaContractGenerated.ControlledTones, lineNumber));
             var interruptionCost = ParseInteger(Value("interrupt_cost"), "interrupt_cost", lineNumber);
             var cooldown = ParseMinimumDouble(Value("cooldown_hours"), "cooldown_hours", 1, lineNumber);
             var semanticCooldown = ParseMinimumDouble(
@@ -230,18 +289,58 @@ public static class PersonaCorpus
             var weight = ParsePositiveDouble(Value("weight"), "weight", lineNumber);
             var requiresReply = ParseBoolean(Value("requires_reply"), "requires_reply", lineNumber);
             var text = Required(Value("text"), "text", lineNumber);
-            var sourceKind = ParseControlled(
-                Value("source_kind"), "source_kind", PersonaContractGenerated.ControlledSourceKinds, lineNumber);
+            var sourceKind = Share(ParseControlled(
+                Value("source_kind"), "source_kind", PersonaContractGenerated.ControlledSourceKinds, lineNumber));
             var sourceReference = Required(Value("source_reference"), "source_reference", lineNumber);
-            var rewriteReason = Required(Value("rewrite_reason"), "rewrite_reason", lineNumber);
+            var rewriteReason = Share(Required(Value("rewrite_reason"), "rewrite_reason", lineNumber));
             var normalized = Normalize(text);
 
-            var identityHits = PersonaContractGenerated.IdentityMarkers
-                .Where(marker => text.Contains(marker, StringComparison.Ordinal))
-                .ToHashSet(StringComparer.Ordinal);
+            if (sourceKind == "legacy_surface_variant")
+            {
+                if (!topicSlugCache.TryGetValue(topicId, out var topicSlug))
+                {
+                    var slugBuilder = new StringBuilder(topicId.Length);
+                    var previousUnderscore = false;
+                    foreach (var character in topicId.ToLowerInvariant())
+                    {
+                        if (character is >= 'a' and <= 'z' or >= '0' and <= '9')
+                        {
+                            slugBuilder.Append(character);
+                            previousUnderscore = false;
+                        }
+                        else if (!previousUnderscore && slugBuilder.Length > 0)
+                        {
+                            slugBuilder.Append('_');
+                            previousUnderscore = true;
+                        }
+                    }
+                    topicSlug = slugBuilder.ToString().Trim('_');
+                    if (topicSlug.Length == 0)
+                    {
+                        topicSlug = "topic";
+                    }
+                    topicSlugCache[topicId] = topicSlug;
+                }
+                ValidateLegacySurfaceLineage(
+                    id,
+                    topicId,
+                    normalized,
+                    sourceReference,
+                    topicSlug,
+                    lineNumber);
+            }
+
+            string[] identityHits = [];
+            if (PersonaContractGenerated.IdentityMarkers.Any(marker =>
+                    text.Contains(marker, StringComparison.Ordinal)))
+            {
+                identityHits = PersonaContractGenerated.IdentityMarkers
+                    .Where(marker => text.Contains(marker, StringComparison.Ordinal))
+                    .ToArray();
+            }
             var hasIdentityRule = PersonaContractGenerated.IdentityEasterEggRules.TryGetValue(
                 id, out var identityRule);
-            if (identityHits.Count > 0 || hasIdentityRule)
+            if (identityHits.Length > 0 || hasIdentityRule)
             {
                 var digest = Convert.ToHexString(
                         System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(text)))
@@ -255,7 +354,8 @@ public static class PersonaCorpus
                     || sourceReference != identityRule.SourceReference
                     || topicId != identityRule.TopicId
                     || digest != identityRule.TextSha256
-                    || !identityHits.SetEquals(identityRule.AllowedMarkers)
+                    || identityHits.Length != identityRule.AllowedMarkers.Count
+                    || identityHits.Any(marker => !identityRule.AllowedMarkers.Contains(marker))
                     || cooldown != identityRule.CooldownHours
                     || maxPerDay != identityRule.MaxPerDay
                     || weight != identityRule.Weight)
@@ -420,6 +520,56 @@ public static class PersonaCorpus
         }
 
         return builder.ToString();
+    }
+
+    private static void ValidateLegacySurfaceLineage(
+        string id,
+        string topicId,
+        string normalizedText,
+        string sourceReference,
+        string topicSlug,
+        int lineNumber)
+    {
+        const string legacyPrefix = "legacy:";
+        const string topicMarker = ";topic:";
+        const string variantMarker = ";variant:";
+        var topicMarkerAt = sourceReference.IndexOf(topicMarker, StringComparison.Ordinal);
+        var variantMarkerAt = sourceReference.IndexOf(
+            variantMarker,
+            Math.Max(0, topicMarkerAt + topicMarker.Length),
+            StringComparison.Ordinal);
+        if (!sourceReference.StartsWith(legacyPrefix, StringComparison.Ordinal)
+            || topicMarkerAt <= legacyPrefix.Length
+            || variantMarkerAt <= topicMarkerAt + topicMarker.Length)
+        {
+            throw Error(lineNumber, "legacy surface source_reference is malformed or topic-unbound");
+        }
+
+        var sourceLine = sourceReference[legacyPrefix.Length..topicMarkerAt];
+        var referenceTopic = sourceReference[
+            (topicMarkerAt + topicMarker.Length)..variantMarkerAt];
+        var variant = sourceReference[(variantMarkerAt + variantMarker.Length)..];
+        if (sourceLine.Length == 0
+            || sourceLine[0] == '0'
+            || sourceLine.Any(character => character is < '0' or > '9')
+            || referenceTopic != topicId)
+        {
+            throw Error(lineNumber, "legacy surface source_reference is malformed or topic-unbound");
+        }
+
+        var identity = sourceLine + "\0" + topicId + "\0" + normalizedText;
+        Span<byte> hash = stackalloc byte[32];
+        var byteCount = Encoding.UTF8.GetByteCount(identity);
+        Span<byte> utf8 = byteCount <= 512 ? stackalloc byte[byteCount] : new byte[byteCount];
+        Encoding.UTF8.GetBytes(identity, utf8);
+        SHA256.HashData(utf8, hash);
+        var digest = Convert.ToHexString(hash[..6]).ToLowerInvariant();
+        var expectedVariant = $"surface_{sourceLine}_{digest}";
+        var expectedId = $"v2_surface_{sourceLine}_{topicSlug}_{digest}";
+        if (variant != expectedVariant || id != expectedId)
+        {
+            throw Error(lineNumber, "legacy surface id or variant digest does not match immutable lineage");
+        }
     }
 
     private static InvalidDataException Error(int lineNumber, string detail) =>

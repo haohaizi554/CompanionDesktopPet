@@ -12,6 +12,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from src.persona_corpus.context import ContextError, PersonaContext
+from src.persona_corpus.contract import EXPANDED_RUNTIME_ROWS
 from src.persona_corpus.history import HistoryFormatError, HistoryRecord, SelectionHistory
 from src.persona_corpus.loader import load_v2
 from src.persona_corpus.models import CorpusLine
@@ -20,8 +21,10 @@ from src.persona_corpus.selector import (
     SchedulerConfig,
     SelectorConfigError,
     load_scheduler_config,
+    prepare_corpus,
     select_line,
 )
+from src.persona_corpus.surface_exposure import surface_exposure
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -72,6 +75,7 @@ def history_record(
         "output_mode": row.output_mode,
         "trigger": row.trigger,
         "interrupt_cost": row.interrupt_cost,
+        "was_seasoning": False,
     }
     values.update(overrides)
     return HistoryRecord(**values)  # type: ignore[arg-type]
@@ -200,9 +204,32 @@ class SelectionHistoryTests(unittest.TestCase):
                 "output_mode",
                 "trigger",
                 "interrupt_cost",
+                "was_dry_sharp",
+                "was_seasoning",
+                "surface_opening",
+                "surface_ending",
+                "surface_template",
             },
             set(json.loads(payload)["records"][0]),
         )
+
+    def test_old_history_without_playback_exposure_fields_remains_readable(self) -> None:
+        payload = json.loads(SelectionHistory([self.record()]).to_json())
+        for key in (
+            "was_dry_sharp",
+            "was_seasoning",
+            "surface_opening",
+            "surface_ending",
+            "surface_template",
+        ):
+            del payload["records"][0][key]
+
+        restored = SelectionHistory.from_json(json.dumps(payload))
+
+        record = restored.records[0]
+        self.assertFalse(record.was_dry_sharp)
+        self.assertIsNone(record.was_seasoning)
+        self.assertEqual("", record.surface_template)
 
     def test_json_schema_and_key_order_are_deterministic(self) -> None:
         history = SelectionHistory([self.record()])
@@ -891,6 +918,7 @@ class SelectorScoringAndMutationTests(unittest.TestCase):
 
         self.assertIsNotNone(selected)
         self.assertEqual(1, len(history.records))
+        surface = surface_exposure(row.text)
         self.assertEqual(
             HistoryRecord(
                 selected_id=row.id,
@@ -901,6 +929,11 @@ class SelectorScoringAndMutationTests(unittest.TestCase):
                 output_mode=row.output_mode,
                 trigger=row.trigger,
                 interrupt_cost=row.interrupt_cost,
+                was_dry_sharp=False,
+                was_seasoning=False,
+                surface_opening=surface.opening,
+                surface_ending=surface.ending,
+                surface_template=surface.template,
             ),
             history.records[0],
         )
@@ -918,12 +951,23 @@ class SelectorScoringAndMutationTests(unittest.TestCase):
         self.assertIsNone(selected)
         self.assertEqual(before, history.to_json())
 
-    def test_real_800_line_corpus_smoke_and_repeat_are_deterministic(self) -> None:
+    def test_real_expanded_corpus_smoke_and_repeat_are_deterministic(self) -> None:
         rows = load_v2(CORPUS_PATH)
-        self.assertEqual(806, len(rows))
+        self.assertGreaterEqual(
+            len(rows), EXPANDED_RUNTIME_ROWS[0]
+        )
+        self.assertLessEqual(
+            len(rows), EXPANDED_RUNTIME_ROWS[1]
+        )
 
-        first = select_line(rows, context_at(), SelectionHistory(), NOW, seed=2026)
-        second = select_line(list(reversed(rows)), context_at(), SelectionHistory(), NOW, seed=2026)
+        first = select_line(prepare_corpus(rows), context_at(), SelectionHistory(), NOW, seed=2026)
+        second = select_line(
+            prepare_corpus(list(reversed(rows))),
+            context_at(),
+            SelectionHistory(),
+            NOW,
+            seed=2026,
+        )
 
         self.assertIsNotNone(first)
         self.assertEqual(first.row.id, second.row.id if second else None)
@@ -935,6 +979,7 @@ class SelectorScoringAndMutationTests(unittest.TestCase):
         random.Random(73).shuffle(shuffled)
 
         def run(order: list[CorpusLine]) -> tuple[list[str], Counter[str]]:
+            prepared = prepare_corpus(order)
             history = SelectionHistory()
             ids: list[str] = []
             groups: Counter[str] = Counter()
@@ -942,7 +987,7 @@ class SelectorScoringAndMutationTests(unittest.TestCase):
             for index in range(60):
                 now = start + timedelta(minutes=70 * index)
                 selected = select_line(
-                    order,
+                    prepared,
                     context_at(now, minutes_since_last_output=600 if index == 0 else 70),
                     history,
                     now,

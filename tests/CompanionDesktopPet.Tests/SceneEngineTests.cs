@@ -184,6 +184,118 @@ public sealed class SceneEngineTests
     }
 
     [Fact]
+    public void History_SeasoningQuotaFiltersTheSurfaceVariantAndReleasesAtWindowBoundary()
+    {
+        var basis = PersonaCorpus.All.First(line => line.CategoryGroup == DialogueCategoryGroup.CharacterLife);
+        var spicy = basis with { Id = basis.Id + ".spicy", Text = "哈？这行先收一收。" };
+        var neutral = basis with { Id = basis.Id + ".neutral", Text = "这行先安静地收一收。" };
+        Assert.True(spicy.HasSeasoningMarker);
+        Assert.False(neutral.HasSeasoningMarker);
+        var scene = SceneCatalog.CreateScene("seasoning-candidate", [spicy, neutral]);
+        var now = new DateTime(2026, 7, 24, 15, 0, 0, DateTimeKind.Local);
+        var entries = new List<SceneHistoryEntry>
+        {
+            new(
+                "retired-seasoning",
+                "retired.seasoning",
+                now.AddHours(-40),
+                "哈？旧句。",
+                "retired-seasoning-line",
+                basis.Category,
+                basis.CategoryGroup,
+                basis.OutputMode,
+                basis.Trigger,
+                basis.InterruptionCost,
+                DateOnly.FromDateTime(now),
+                WasSeasoning: true)
+        };
+        entries.AddRange(Enumerable.Range(0, 18).Select(index => new SceneHistoryEntry(
+            $"neutral-{index}",
+            $"neutral.{index}",
+            now.AddHours(-38 + index * 2),
+            $"neutral {index}",
+            $"neutral-line-{index}",
+            basis.Category,
+            basis.CategoryGroup,
+            basis.OutputMode,
+            basis.Trigger,
+            basis.InterruptionCost,
+            DateOnly.FromDateTime(now),
+            WasSeasoning: false)));
+        var history = new SceneHistory();
+        history.Restore(entries);
+
+        Assert.Equal([neutral.Id], history.EligibleLines(scene, now).Select(line => line.Id));
+
+        history.Restore([
+            .. entries,
+            new SceneHistoryEntry(
+                "neutral-boundary",
+                "neutral.boundary",
+                now.AddMinutes(-1),
+                "neutral boundary",
+                "neutral-boundary-line",
+                basis.Category,
+                basis.CategoryGroup,
+                basis.OutputMode,
+                basis.Trigger,
+                basis.InterruptionCost,
+                DateOnly.FromDateTime(now),
+                WasSeasoning: false)
+        ]);
+        Assert.Contains(spicy, history.EligibleLines(scene, now));
+    }
+
+    [Fact]
+    public void History_SurfaceStageAvoidsRecentOpeningEndingAndTemplateBeforeFallback()
+    {
+        var basis = PersonaCorpus.All.First(line => line.CategoryGroup == DialogueCategoryGroup.CharacterLife);
+        var played = basis with { Id = basis.Id + ".played", Text = "今天窗边有一点很轻的风。" };
+        var repeated = basis with { Id = basis.Id + ".repeated", Text = "今天窗边换成了慢慢的雨。" };
+        var fresh = basis with { Id = basis.Id + ".fresh", Text = "午后书页翻过一小段晴光。" };
+        var playedScene = SceneCatalog.CreateScene("surface-played", [played]);
+        var history = new SceneHistory();
+        var now = new DateTime(2026, 7, 24, 15, 0, 0, DateTimeKind.Local);
+        history.Record(playedScene, now.AddHours(-2), played);
+
+        var preferred = history.PreferSurfaceExposure([repeated, fresh]);
+
+        Assert.Equal(fresh.Id, Assert.Single(preferred).Id);
+        var persisted = Assert.Single(history.Entries);
+        Assert.False(string.IsNullOrEmpty(persisted.SurfaceOpening));
+        Assert.False(string.IsNullOrEmpty(persisted.SurfaceEnding));
+        Assert.False(string.IsNullOrEmpty(persisted.SurfaceTemplate));
+    }
+
+    [Fact]
+    public void History_LegacySnapshotInfersSeasoningFromPersistedVariantText()
+    {
+        var basis = PersonaCorpus.All.First(line => line.CategoryGroup == DialogueCategoryGroup.CharacterLife);
+        var spicy = basis with { Id = basis.Id + ".legacy-spicy", Text = "哈？这句也先限流。" };
+        var neutral = basis with { Id = basis.Id + ".legacy-neutral", Text = "这句安静地先限流。" };
+        var scene = SceneCatalog.CreateScene("legacy-seasoning-candidate", [spicy, neutral]);
+        var now = new DateTime(2026, 7, 24, 15, 0, 0, DateTimeKind.Local);
+        var entries = Enumerable.Range(0, 19)
+            .Select(index => new SceneHistoryEntry(
+                $"legacy-{index}",
+                $"legacy.{index}",
+                now.AddHours(-38 + index * 2),
+                index == 0 ? "哈？旧快照没有新字段。" : $"旧快照中性句 {index}",
+                $"legacy-line-{index}",
+                basis.Category,
+                basis.CategoryGroup,
+                basis.OutputMode,
+                basis.Trigger,
+                basis.InterruptionCost,
+                DateOnly.FromDateTime(now)))
+            .ToArray();
+        var history = new SceneHistory();
+        history.Restore(entries);
+
+        Assert.Equal([neutral.Id], history.EligibleLines(scene, now).Select(line => line.Id));
+    }
+
+    [Fact]
     public void ClickDeepFallbackPreservesEasterEggAndDrySharpRareQuotas()
     {
         var dry = SceneCatalog.PersonaScenes.Where(scene => scene.Tone == "dry_sharp").Take(2).ToArray();

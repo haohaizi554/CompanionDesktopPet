@@ -18,15 +18,19 @@ from src.persona_corpus.builder import (
     serialize_archive,
     serialize_pii_review,
     serialize_review,
+    serialize_surface_manifest,
     serialize_v2,
     write_build_outputs,
 )
 from src.persona_corpus.extraction import SourceMapping
+from src.persona_corpus.content_catalog import CONTENT_CATALOG
+from src.persona_corpus.contract import EXPANDED_RUNTIME_ROWS
 from src.persona_corpus.models import CorpusLine, LegacyLine
 from src.persona_corpus.schema import (
     ARCHIVE_HEADER,
     PII_REVIEW_HEADER,
     REVIEW_HEADER,
+    SURFACE_MANIFEST_HEADER,
     V2_HEADER,
 )
 
@@ -494,6 +498,10 @@ class BuildContractTests(unittest.TestCase):
             serialize_pii_review(first.pii_review),
             serialize_pii_review(second.pii_review),
         )
+        self.assertEqual(
+            serialize_surface_manifest(first.surface_manifest),
+            serialize_surface_manifest(second.surface_manifest),
+        )
         self.assertEqual(len(first.enabled), len({row.id for row in first.enabled}))
 
     def test_every_source_line_has_a_migration_disposition(self) -> None:
@@ -553,20 +561,24 @@ class BuildContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "pii_policy"):
             build_v2([line], [mapping(line)], 20260722, pii_policy="ignore")
 
-    def test_writer_emits_all_four_exact_tsv_headers(self) -> None:
+    def test_writer_emits_all_five_exact_tsv_headers(self) -> None:
         result = fixture_result()
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             output = root / "data/optimized/persona-corpus-v2.tsv"
             paths = write_build_outputs(result, output)
 
-            self.assertEqual(set(paths), {"v2", "archive", "review", "pii_review"})
+            self.assertEqual(
+                set(paths),
+                {"v2", "archive", "review", "pii_review", "surface_manifest"},
+            )
             self.assertEqual(root / "reports/pii-review.tsv", paths["pii_review"])
             expected_headers = {
                 "v2": V2_HEADER,
                 "archive": ARCHIVE_HEADER,
                 "review": REVIEW_HEADER,
                 "pii_review": PII_REVIEW_HEADER,
+                "surface_manifest": SURFACE_MANIFEST_HEADER,
             }
             for name, path in paths.items():
                 header = path.read_text(encoding="utf-8").splitlines()[0]
@@ -671,8 +683,28 @@ class RealCorpusBuildTests(unittest.TestCase):
             20260722,
         )
 
-    def test_real_build_has_curated_target_size_and_traceability(self) -> None:
-        self.assertEqual(806, len(self.result.enabled))
+    def test_real_build_has_runtime_surface_inventory_and_traceability(self) -> None:
+        self.assertGreaterEqual(
+            len(self.result.enabled),
+            EXPANDED_RUNTIME_ROWS[0],
+        )
+        self.assertLessEqual(
+            len(self.result.enabled),
+            EXPANDED_RUNTIME_ROWS[1],
+        )
+        self.assertEqual(
+            len(self.result.enabled) - len(CONTENT_CATALOG),
+            sum(row.source_kind == "legacy_surface_variant" for row in self.result.enabled),
+        )
+        tone_by_scene = {
+            row.semantic_group: row.tone for row in self.result.enabled
+        }
+        dry_sharp_scene_ratio = (
+            sum(tone == "dry_sharp" for tone in tone_by_scene.values())
+            / len(tone_by_scene)
+        )
+        self.assertGreaterEqual(dry_sharp_scene_ratio, 0.04)
+        self.assertLessEqual(dry_sharp_scene_ratio, 0.06)
         self.assertEqual(75375, len(self.result.dispositions))
         self.assertTrue(self.result.archive)
         self.assertTrue(self.result.review)
@@ -691,6 +723,16 @@ class RealCorpusBuildTests(unittest.TestCase):
             match = re.search(r"(?:^|;)variant:([^;]+)$", row.source_reference)
             self.assertIsNotNone(match, row.source_reference)
             variant_id = match.group(1)
+            if row.source_kind == "legacy_surface_variant":
+                legacy = re.fullmatch(
+                    r"legacy:(\d+);topic:([^;]+);variant:surface_\d+_[0-9a-f]{12}",
+                    row.source_reference,
+                )
+                self.assertIsNotNone(legacy, row.source_reference)
+                source_line = int(legacy.group(1))
+                self.assertEqual(row.category, mappings[source_line].category)
+                self.assertEqual(row.topic_id, mappings[source_line].topic_id)
+                continue
             entry = entries[variant_id]
             self.assertEqual(catalog_line_id(entry), row.id)
             self.assertEqual(entry.runtime_topic_id, row.topic_id)
@@ -723,7 +765,9 @@ class RealCorpusBuildTests(unittest.TestCase):
             "system_ambient": (5, 5),
         }
         variants = Counter(
-            (row.category_group, row.topic_id) for row in self.result.enabled
+            (row.category_group, row.topic_id)
+            for row in self.result.enabled
+            if row.source_kind != "legacy_surface_variant"
         )
         self.assertEqual(
             set(expected_ranges),
@@ -736,7 +780,9 @@ class RealCorpusBuildTests(unittest.TestCase):
 
     def test_technical_growth_and_career_have_meaningful_one_two_topic_mix(self) -> None:
         topic_sizes = Counter(
-            (row.category_group, row.topic_id) for row in self.result.enabled
+            (row.category_group, row.topic_id)
+            for row in self.result.enabled
+            if row.source_kind != "legacy_surface_variant"
         )
         for group in ("technical", "growth", "career"):
             sizes = [
@@ -766,6 +812,7 @@ class RealCorpusBuildTests(unittest.TestCase):
             "persona-corpus-archive.tsv": REPOSITORY_ROOT / "data/optimized/persona-corpus-archive.tsv",
             "persona-corpus-review.tsv": REPOSITORY_ROOT / "data/optimized/persona-corpus-review.tsv",
             "pii-review.tsv": REPOSITORY_ROOT / "reports/pii-review.tsv",
+            "persona-surface-manifest.tsv": REPOSITORY_ROOT / "data/optimized/persona-surface-manifest.tsv",
         }
         reported = {
             name: (int(count.replace(",", "")), digest)
@@ -868,7 +915,11 @@ class RealCorpusBuildTests(unittest.TestCase):
         self.assertEqual(len(texts), len({row.id for row in self.result.enabled}))
 
     def test_real_build_meets_bubble_length_and_voice_limits(self) -> None:
-        texts = [row.text for row in self.result.enabled]
+        texts = [
+            row.text
+            for row in self.result.enabled
+            if row.source_kind != "legacy_surface_variant"
+        ]
         average = sum(map(len, texts)) / len(texts)
         over_36 = sum(len(text) > 36 for text in texts) / len(texts)
         short_share = sum(8 <= len(text) <= 16 for text in texts) / len(texts)
@@ -895,7 +946,11 @@ class RealCorpusBuildTests(unittest.TestCase):
         )
 
     def test_real_build_avoids_template_opening_dominance(self) -> None:
-        texts = [row.text for row in self.result.enabled]
+        texts = [
+            row.text
+            for row in self.result.enabled
+            if row.source_kind != "legacy_surface_variant"
+        ]
         for width in range(2, 7):
             starts = Counter(text[:width] for text in texts if len(text) >= width)
             phrase, count = starts.most_common(1)[0]
@@ -906,7 +961,11 @@ class RealCorpusBuildTests(unittest.TestCase):
             )
 
     def test_real_build_avoids_template_ending_dominance(self) -> None:
-        texts = [row.text for row in self.result.enabled]
+        texts = [
+            row.text
+            for row in self.result.enabled
+            if row.source_kind != "legacy_surface_variant"
+        ]
         for width in (4, 6, 8, 10):
             endings = Counter(text[-width:] for text in texts if len(text) >= width)
             phrase, count = endings.most_common(1)[0]
@@ -949,6 +1008,7 @@ class RealCorpusBuildTests(unittest.TestCase):
                         "archive": output.with_name("persona-corpus-archive.tsv"),
                         "review": output.with_name("persona-corpus-review.tsv"),
                         "pii_review": root / "reports/pii-review.tsv",
+                        "surface_manifest": output.with_name("persona-surface-manifest.tsv"),
                     }
                 )
 
@@ -956,6 +1016,20 @@ class RealCorpusBuildTests(unittest.TestCase):
                 first_hash = hashlib.sha256(output_sets[0][name].read_bytes()).hexdigest()
                 second_hash = hashlib.sha256(output_sets[1][name].read_bytes()).hexdigest()
                 self.assertEqual(first_hash, second_hash, name)
+
+            tracked_outputs = {
+                "v2": REPOSITORY_ROOT / "data/optimized/persona-corpus-v2.tsv",
+                "archive": REPOSITORY_ROOT / "data/optimized/persona-corpus-archive.tsv",
+                "review": REPOSITORY_ROOT / "data/optimized/persona-corpus-review.tsv",
+                "pii_review": REPOSITORY_ROOT / "reports/pii-review.tsv",
+                "surface_manifest": REPOSITORY_ROOT / "data/optimized/persona-surface-manifest.tsv",
+            }
+            for name, tracked in tracked_outputs.items():
+                self.assertEqual(
+                    tracked.read_bytes(),
+                    output_sets[0][name].read_bytes(),
+                    f"tracked canonical {name} drifted from immutable-source regeneration",
+                )
 
 
 if __name__ == "__main__":

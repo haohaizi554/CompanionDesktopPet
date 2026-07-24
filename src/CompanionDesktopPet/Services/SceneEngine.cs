@@ -58,7 +58,11 @@ public sealed record SceneHistoryEntry(
     [property: JsonRequired] DialogueTrigger DialogueTrigger = DialogueTrigger.Any,
     [property: JsonRequired] int InterruptionCost = 0,
     [property: JsonRequired] DateOnly? PlayedLocalDate = null,
-    bool WasDrySharp = false);
+    bool WasDrySharp = false,
+    bool? WasSeasoning = null,
+    string SurfaceOpening = "",
+    string SurfaceEnding = "",
+    string SurfaceTemplate = "");
 
 public sealed class SceneHistory
 {
@@ -70,6 +74,11 @@ public sealed class SceneHistory
     public const int EasterEggRecentMaximum = PersonaContractGenerated.EasterEggRecentMaximum;
     public const int DrySharpRecentWindow = PersonaContractGenerated.DrySharpRecentWindow;
     public const int DrySharpRecentMaximum = PersonaContractGenerated.DrySharpRecentMaximum;
+    public const int DrySharpPlaybackWindow = 50;
+    public const int DrySharpPlaybackMaximum =
+        (int)(PersonaContractGenerated.DrySharpPlaybackMaximum * DrySharpPlaybackWindow);
+    public const int SeasoningRecentWindow = PersonaContractGenerated.SeasoningRecentWindow;
+    public const int SeasoningRecentMaximum = PersonaContractGenerated.SeasoningRecentMaximum;
 
     private readonly List<SceneHistoryEntry> _entries = [];
     private readonly Dictionary<string, SceneHistoryEntry> _lastBySceneId = new(StringComparer.Ordinal);
@@ -84,6 +93,7 @@ public sealed class SceneHistory
     {
         ArgumentNullException.ThrowIfNull(scene);
         ArgumentNullException.ThrowIfNull(line);
+        var surface = line.SurfaceExposureProfile;
         var entry = new SceneHistoryEntry(
             scene.Id,
             line.SemanticGroup,
@@ -96,7 +106,11 @@ public sealed class SceneHistory
             line.Trigger,
             line.InterruptionCost,
             DateOnly.FromDateTime(playedAt),
-            line.Tone == "dry_sharp");
+            line.Tone == "dry_sharp",
+            line.HasSeasoningMarker,
+            surface.Opening,
+            surface.Ending,
+            surface.Template);
         _entries.Add(entry);
         Index(entry);
         if (Trim())
@@ -176,16 +190,91 @@ public sealed class SceneHistory
         }
 
         return scene.Tone != "dry_sharp"
-               || CandidateWindowCount(DrySharpRecentWindow,
-                   entry => entry.WasDrySharp
-                            || SceneCatalog.DrySharpSemanticGroups.Contains(entry.SemanticGroup))
-               <= DrySharpRecentMaximum;
+               || (CandidateWindowCount(DrySharpRecentWindow, IsDrySharpEntry)
+                   <= DrySharpRecentMaximum
+                   && CandidateWindowCount(DrySharpPlaybackWindow, IsDrySharpEntry)
+                   <= DrySharpPlaybackMaximum);
     }
 
     public IReadOnlyList<DialogueLine> EligibleLines(SceneDefinition scene, DateTime now) =>
         scene.Lines
-            .Where(line => !IsLineCoolingDown(line, now) && IsBelowDailyMaximum(line, now))
+            .Where(line => MeetsLineExposureQuota(line)
+                           && !IsLineCoolingDown(line, now)
+                           && IsBelowDailyMaximum(line, now))
             .ToArray();
+
+    public bool MeetsLineExposureQuota(DialogueLine line) =>
+        !line.HasSeasoningMarker
+        || CandidateWindowCount(
+            SeasoningRecentWindow,
+            IsSeasoningEntry) <= SeasoningRecentMaximum;
+
+    public IReadOnlyList<DialogueLine> PreferSurfaceExposure(IReadOnlyList<DialogueLine> lines)
+    {
+        if (lines.Count == 0)
+        {
+            return lines;
+        }
+
+        var recentStart = Math.Max(0, _entries.Count - SurfaceExposure.RecentWindow);
+        var diverse = new List<DialogueLine>(lines.Count);
+        var minimumConflicts = int.MaxValue;
+        foreach (var line in lines)
+        {
+            var profile = line.SurfaceExposureProfile;
+            var openingConflict = false;
+            var endingConflict = false;
+            var templateConflict = false;
+            for (var index = recentStart; index < _entries.Count; index++)
+            {
+                var entry = _entries[index];
+                openingConflict |= profile.Opening.Length > 0
+                                   && entry.SurfaceOpening == profile.Opening;
+                endingConflict |= profile.Ending.Length > 0
+                                  && entry.SurfaceEnding == profile.Ending;
+                templateConflict |= profile.Template.Length > 0
+                                    && entry.SurfaceTemplate == profile.Template;
+            }
+            var conflicts = Convert.ToInt32(openingConflict)
+                            + Convert.ToInt32(endingConflict)
+                            + Convert.ToInt32(templateConflict);
+            if (conflicts < minimumConflicts)
+            {
+                diverse.Clear();
+                minimumConflicts = conflicts;
+            }
+            if (conflicts == minimumConflicts)
+            {
+                diverse.Add(line);
+            }
+        }
+
+        var scoreStart = Math.Max(0, _entries.Count - 50);
+        var seasoningCount = 0;
+        for (var index = scoreStart; index < _entries.Count; index++)
+        {
+            seasoningCount += Convert.ToInt32(IsSeasoningEntry(_entries[index]));
+        }
+        var scoreCount = _entries.Count - scoreStart;
+        var observed = scoreCount == 0 ? 0 : seasoningCount / (double)scoreCount;
+        var target = (PersonaContractGenerated.SeasoningPlaybackMinimum
+                      + PersonaContractGenerated.SeasoningPlaybackMaximum) / 2;
+        var seasoning = new List<DialogueLine>(diverse.Count);
+        var neutral = new List<DialogueLine>(diverse.Count);
+        foreach (var line in diverse)
+        {
+            (line.HasSeasoningMarker ? seasoning : neutral).Add(line);
+        }
+        if (observed < target && seasoning.Count > 0)
+        {
+            return seasoning.ToArray();
+        }
+        if (observed > target && neutral.Count > 0)
+        {
+            return neutral.ToArray();
+        }
+        return diverse.ToArray();
+    }
 
     public bool HasEligibleLine(SceneDefinition scene, DateTime now)
     {
@@ -194,14 +283,23 @@ public sealed class SceneHistory
             return false;
         }
 
-        if (!_seenLineIdsBySemanticGroup.TryGetValue(scene.SemanticGroup, out var seen)
-            || scene.Lines.Count > seen.Count)
+        _seenLineIdsBySemanticGroup.TryGetValue(scene.SemanticGroup, out var seen);
+        foreach (var line in scene.Lines)
         {
-            return true;
+            if (!MeetsLineExposureQuota(line))
+            {
+                continue;
+            }
+            if (seen is null || !seen.Contains(line.Id))
+            {
+                return true;
+            }
+            if (!IsLineCoolingDown(line, now) && IsBelowDailyMaximum(line, now))
+            {
+                return true;
+            }
         }
-
-        return scene.Lines.Any(line =>
-            !IsLineCoolingDown(line, now) && IsBelowDailyMaximum(line, now));
+        return false;
     }
 
     public DateTime NextEligibleAt(SceneDefinition scene, DateTime now)
@@ -245,6 +343,14 @@ public sealed class SceneHistory
 
     private int CandidateWindowCount(int window, Func<SceneHistoryEntry, bool> predicate) =>
         _entries.TakeLast(Math.Max(0, window - 1)).Count(predicate) + 1;
+
+    private static bool IsDrySharpEntry(SceneHistoryEntry entry) =>
+        entry.WasDrySharp
+        || SceneCatalog.DrySharpSemanticGroups.Contains(entry.SemanticGroup);
+
+    private static bool IsSeasoningEntry(SceneHistoryEntry entry) =>
+        entry.WasSeasoning
+        ?? PersonaContractGenerated.ContainsSeasoningMarker(entry.Variant);
 
     private static DateTime Later(DateTime left, DateTime right) => left >= right ? left : right;
 
@@ -432,7 +538,8 @@ public sealed class SceneScheduler
         var reusableScenes = AvailableScenes(context)
             .Where(scene => TriggerAndContextMatch(scene, context, contextTokens, history))
             .Where(history.MeetsRareRecentQuotas)
-            .Where(scene => scene.Lines.Any(line => line.Enabled))
+            .Where(scene => scene.Lines.Any(line =>
+                line.Enabled && history.MeetsLineExposureQuota(line)))
             .ToArray();
         if (reusableScenes.Length == 0)
         {
@@ -506,7 +613,10 @@ public sealed class SceneScheduler
         var lastLineId = history.Entries.LastOrDefault()?.DialogueLineId;
         var recent = RecentHistoryProfile.Create(history);
         var hasNonRepeatingLine = quotaEligibleScenes.Any(scene =>
-            scene.Lines.Any(line => line.Enabled && line.Id != lastLineId));
+            scene.Lines.Any(line =>
+                line.Enabled
+                && history.MeetsLineExposureQuota(line)
+                && line.Id != lastLineId));
         var lastPlayedAt = new Dictionary<string, DateTime>(StringComparer.Ordinal);
         foreach (var entry in history.Entries)
         {
@@ -516,6 +626,7 @@ public sealed class SceneScheduler
         var scenesWithUnusedLines = quotaEligibleScenes
             .Where(scene => scene.Lines.Any(line =>
                 line.Enabled
+                && history.MeetsLineExposureQuota(line)
                 && (!hasNonRepeatingLine || line.Id != lastLineId)
                 && !lastPlayedAt.ContainsKey(line.Id)))
             .Select(scene => Score(scene, recent))
@@ -525,12 +636,13 @@ public sealed class SceneScheduler
             var unusedLines = unusedScene.Lines
                 .Where(line =>
                     line.Enabled
+                    && history.MeetsLineExposureQuota(line)
                     && (!hasNonRepeatingLine || line.Id != lastLineId)
                     && !lastPlayedAt.ContainsKey(line.Id))
                 .ToArray();
             return new ClickFallbackSelection(
                 unusedScene,
-                WeightedLineChoice(unusedLines, random));
+                WeightedLineChoice(history.PreferSurfaceExposure(unusedLines), random));
         }
 
         var oldest = DateTime.MaxValue;
@@ -538,7 +650,9 @@ public sealed class SceneScheduler
         {
             foreach (var line in scene.Lines)
             {
-                if (!line.Enabled || (hasNonRepeatingLine && line.Id == lastLineId))
+                if (!line.Enabled
+                    || !history.MeetsLineExposureQuota(line)
+                    || (hasNonRepeatingLine && line.Id == lastLineId))
                 {
                     continue;
                 }
@@ -559,6 +673,7 @@ public sealed class SceneScheduler
         var oldestScenes = quotaEligibleScenes
             .Where(scene => scene.Lines.Any(line =>
                 line.Enabled
+                && history.MeetsLineExposureQuota(line)
                 && (!hasNonRepeatingLine || line.Id != lastLineId)
                 && lastPlayedAt.GetValueOrDefault(line.Id, DateTime.MinValue) == oldest))
             .Select(scene => Score(scene, recent))
@@ -572,13 +687,14 @@ public sealed class SceneScheduler
         var leastRecentlyUsed = selectedScene.Lines
             .Where(line =>
                 line.Enabled
+                && history.MeetsLineExposureQuota(line)
                 && (!hasNonRepeatingLine || line.Id != lastLineId)
                 && lastPlayedAt.GetValueOrDefault(line.Id, DateTime.MinValue) == oldest)
             .ToArray();
 
         return new ClickFallbackSelection(
             selectedScene,
-            WeightedLineChoice(leastRecentlyUsed, random));
+            WeightedLineChoice(history.PreferSurfaceExposure(leastRecentlyUsed), random));
     }
 
     private static DialogueLine WeightedLineChoice(
@@ -692,11 +808,15 @@ public sealed class SceneScheduler
         var categoryObserved = total == 0
             ? 0
             : recent.Categories.GetValueOrDefault(scene.Category) / (double)total;
+        var drySharpObserved = total == 0 ? 0 : recent.DrySharpCount / (double)total;
+        var drySharpDeficit = PersonaContractGenerated.DrySharpPlaybackTarget - drySharpObserved;
+        var drySharpBonus = scene.Tone == "dry_sharp" ? drySharpDeficit * 200 : 0;
         var score = (DialogueForest.CategoryGroupWeights[scene.CategoryGroup] - groupObserved) * 100
                     + (DialogueForest.OutputModeTargets[scene.OutputMode] - modeObserved) * 35
                     + scene.Weight * 0.5
                     - scene.InterruptionCost * 0.75
-                    - categoryObserved * 5;
+                    - categoryObserved * 5
+                    + drySharpBonus;
         return new ScoredScene(scene, score, (int)Math.Floor(score));
     }
 
@@ -704,7 +824,8 @@ public sealed class SceneScheduler
         int Total,
         IReadOnlyDictionary<DialogueCategoryGroup, int> CategoryGroups,
         IReadOnlyDictionary<DialogueOutputMode, int> OutputModes,
-        IReadOnlyDictionary<DialogueCategory, int> Categories)
+        IReadOnlyDictionary<DialogueCategory, int> Categories,
+        int DrySharpCount)
     {
         public static RecentHistoryProfile Create(SceneHistory history)
         {
@@ -712,13 +833,24 @@ public sealed class SceneScheduler
             var outputModes = new Dictionary<DialogueOutputMode, int>();
             var categories = new Dictionary<DialogueCategory, int>();
             var recent = history.Entries.TakeLast(50).ToArray();
+            var drySharpCount = 0;
             foreach (var entry in recent)
             {
                 categoryGroups[entry.CategoryGroup] = categoryGroups.GetValueOrDefault(entry.CategoryGroup) + 1;
                 outputModes[entry.OutputMode] = outputModes.GetValueOrDefault(entry.OutputMode) + 1;
                 categories[entry.Category] = categories.GetValueOrDefault(entry.Category) + 1;
+                if (entry.WasDrySharp
+                    || SceneCatalog.DrySharpSemanticGroups.Contains(entry.SemanticGroup))
+                {
+                    drySharpCount++;
+                }
             }
-            return new RecentHistoryProfile(recent.Length, categoryGroups, outputModes, categories);
+            return new RecentHistoryProfile(
+                recent.Length,
+                categoryGroups,
+                outputModes,
+                categories,
+                drySharpCount);
         }
     }
 

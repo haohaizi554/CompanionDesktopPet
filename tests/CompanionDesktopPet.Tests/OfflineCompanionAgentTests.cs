@@ -201,6 +201,9 @@ public sealed class OfflineCompanionAgentTests
     [Fact]
     public void Respond_RepeatedClicksDoNotBecomePermanentlySilent()
     {
+        // Startup owns corpus/catalog materialization; this gate measures the
+        // steady interactive path after that one-time prewarm.
+        _ = SceneCatalog.All.Count;
         var agent = new OfflineCompanionAgent();
         var random = new Random(20260724);
         var start = new DateTime(2026, 7, 24, 9, 0, 0, DateTimeKind.Local);
@@ -260,18 +263,53 @@ public sealed class OfflineCompanionAgentTests
         var p99Latency = orderedLatencies[(int)Math.Ceiling(orderedLatencies.Length * 0.99) - 1];
         var coldLatency = clickLatencies[0];
         var warmMaximumLatency = clickLatencies.Skip(1).Max();
+        var playback = agent.History.Entries.ToArray();
+        var seasoningRatio = playback.Count(entry => entry.WasSeasoning is true) / (double)playback.Length;
+        var drySharpRatio = playback.Count(entry => entry.WasDrySharp) / (double)playback.Length;
+        var openingRepeatRatio = RecentSurfaceRepeatRatio(playback, entry => entry.SurfaceOpening);
+        var endingRepeatRatio = RecentSurfaceRepeatRatio(playback, entry => entry.SurfaceEnding);
+        var templateRepeatRatio = RecentSurfaceRepeatRatio(playback, entry => entry.SurfaceTemplate);
         Console.WriteLine(
             $"900 clicks: mean={meanLatency:F3}ms p95={p95Latency:F3}ms "
             + $"p99={p99Latency:F3}ms cold={coldLatency:F3}ms warm_max={warmMaximumLatency:F3}ms "
-            + $"allocated={allocatedBytes:N0} elapsed={stopwatch.Elapsed}");
+            + $"allocated={allocatedBytes:N0} elapsed={stopwatch.Elapsed} "
+            + $"seasoning={seasoningRatio:P2} dry_sharp={drySharpRatio:P2} "
+            + $"recent20_opening_repeat={openingRepeatRatio:P2} "
+            + $"ending_repeat={endingRepeatRatio:P2} template_repeat={templateRepeatRatio:P2}");
 
         Assert.True(usedDeepFallback);
         Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(20), stopwatch.Elapsed.ToString());
-        Assert.True(allocatedBytes < 512L * 1024 * 1024, $"allocated bytes: {allocatedBytes:N0}");
+        Assert.True(allocatedBytes < 256L * 1024 * 1024, $"allocated bytes: {allocatedBytes:N0}");
         Assert.True(p95Latency < 50, $"p95 click latency: {p95Latency:F3}ms");
         Assert.True(p99Latency < 100, $"p99 click latency: {p99Latency:F3}ms");
         Assert.True(coldLatency < 3_000, $"cold click latency: {coldLatency:F3}ms");
         Assert.True(warmMaximumLatency < 500, $"warm maximum click latency: {warmMaximumLatency:F3}ms");
+        Assert.InRange(
+            seasoningRatio,
+            PersonaContractGenerated.SeasoningPlaybackMinimum,
+            PersonaContractGenerated.SeasoningPlaybackMaximum);
+        Assert.InRange(
+            drySharpRatio,
+            PersonaContractGenerated.DrySharpPlaybackMinimum,
+            PersonaContractGenerated.DrySharpPlaybackMaximum);
+        Assert.InRange(openingRepeatRatio, 0, 0.01);
+        Assert.InRange(endingRepeatRatio, 0, 0.01);
+        Assert.InRange(templateRepeatRatio, 0, 0.01);
+        Assert.All(
+            Enumerable.Range(0, playback.Length),
+            index => Assert.True(
+                playback.Skip(Math.Max(0, index - 19)).Take(Math.Min(20, index + 1))
+                    .Count(entry => entry.WasSeasoning is true) <= PersonaContractGenerated.SeasoningRecentMaximum));
+        Assert.All(
+            Enumerable.Range(0, playback.Length),
+            index => Assert.True(
+                playback.Skip(Math.Max(0, index - 19)).Take(Math.Min(20, index + 1))
+                    .Count(entry => entry.WasDrySharp) <= PersonaContractGenerated.DrySharpRecentMaximum));
+        Assert.All(
+            Enumerable.Range(0, playback.Length),
+            index => Assert.True(
+                playback.Skip(Math.Max(0, index - 49)).Take(Math.Min(50, index + 1))
+                    .Count(entry => entry.WasDrySharp) <= SceneHistory.DrySharpPlaybackMaximum));
 
         var automatic = agent.Respond(
             CompanionEvent.Automatic,
@@ -279,6 +317,29 @@ public sealed class OfflineCompanionAgentTests
             random);
         Assert.False(automatic.ShouldDisplayText);
         Assert.Equal("intentional_silence", automatic.SceneId);
+    }
+
+    private static double RecentSurfaceRepeatRatio(
+        IReadOnlyList<SceneHistoryEntry> entries,
+        Func<SceneHistoryEntry, string> key)
+    {
+        var repeats = 0;
+        for (var index = 0; index < entries.Count; index++)
+        {
+            var current = key(entries[index]);
+            if (current.Length == 0)
+            {
+                continue;
+            }
+            if (entries
+                .Skip(Math.Max(0, index - SurfaceExposure.RecentWindow))
+                .Take(Math.Min(SurfaceExposure.RecentWindow, index))
+                .Any(entry => key(entry) == current))
+            {
+                repeats++;
+            }
+        }
+        return entries.Count == 0 ? 0 : repeats / (double)entries.Count;
     }
 
     [Fact]
