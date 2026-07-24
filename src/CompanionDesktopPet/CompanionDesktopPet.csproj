@@ -7,6 +7,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
+    <!-- Keep one virtualized desktop coordinate space; WorkAreaService converts every
+         monitor with the system (primary) DPI scale. PerMonitorV2 requires physical
+         HWND positioning throughout and must not be enabled as a one-line toggle. -->
+    <ApplicationHighDpiMode>SystemAware</ApplicationHighDpiMode>
     <AssemblyName>CompanionDesktopPet</AssemblyName>
     <RootNamespace>CompanionDesktopPet</RootNamespace>
     <ApplicationIcon>Assets\pet.ico</ApplicationIcon>

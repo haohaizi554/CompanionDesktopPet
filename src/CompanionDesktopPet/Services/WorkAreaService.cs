@@ -61,6 +61,10 @@ public static class WorkAreaService
             return [primaryLogicalArea];
         }
 
+        // The application is intentionally SystemAware. WPF window coordinates therefore
+        // share one virtualized system-DPI space across every monitor, while WinForms Screen
+        // exposes desktop pixel rectangles. Use the primary/system scale for the whole virtual
+        // desktop; applying each monitor's DPI independently would mix incompatible origins.
         var scaleX = primaryLogicalArea.Width / primaryPixels.Width;
         var scaleY = primaryLogicalArea.Height / primaryPixels.Height;
         var result = new List<ScreenRect>(pixelWorkAreas.Count)

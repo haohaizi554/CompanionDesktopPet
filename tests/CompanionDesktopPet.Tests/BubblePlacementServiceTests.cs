@@ -95,6 +95,55 @@ public sealed class BubblePlacementServiceTests
     }
 
     [Theory]
+    [InlineData(BubblePlacementSide.Above)]
+    [InlineData(BubblePlacementSide.Below)]
+    public void Place_WhenNeitherSideHasTheFullGap_StaysInsideAndPreservesThePreviousSide(
+        BubblePlacementSide previousSide)
+    {
+        var workArea = new ScreenRect(10, 10, 780, 580);
+        var character = new ScreenRect(205, 105, 390, 390);
+        var bubble = new ScreenSize(276, 100);
+
+        var actual = BubblePlacementService.Place(
+            character,
+            bubble,
+            workArea,
+            previousSide);
+
+        Assert.Equal(previousSide, actual.Side);
+        Assert.InRange(actual.Origin.Y, workArea.Top, workArea.Bottom - bubble.Height);
+        Assert.InRange(
+            actual.Origin.Y + bubble.Height,
+            workArea.Top + bubble.Height,
+            workArea.Bottom);
+    }
+
+    [Theory]
+    [InlineData(0, 250)]
+    [InlineData(1800, 320)]
+    public void Place_NearHorizontalEdges_PointsTheArrowAtTheCharacter(
+        double characterLeft,
+        double characterWidth)
+    {
+        var character = new ScreenRect(characterLeft, 400, characterWidth, characterWidth);
+        var bubble = new ScreenSize(276, 100);
+
+        var actual = BubblePlacementService.Place(
+            character,
+            bubble,
+            new ScreenRect(0, 0, 1920, 1040),
+            BubblePlacementSide.Above);
+
+        var characterCenter = character.Left + (character.Width / 2);
+        var expectedArrowCenter = Math.Clamp(
+            characterCenter - actual.Origin.X,
+            32,
+            bubble.Width - 32);
+        Assert.Equal(expectedArrowCenter, actual.ArrowCenterX, 6);
+        Assert.InRange(actual.ArrowCenterX, 32, bubble.Width - 32);
+    }
+
+    [Theory]
     [InlineData(1.0)]
     [InlineData(1.25)]
     [InlineData(1.5)]

@@ -968,6 +968,13 @@ public partial class MainWindow : Window
         BubbleArrowDown.Visibility = placement.Side == BubblePlacementSide.Above
             ? Visibility.Visible
             : Visibility.Collapsed;
+        var arrowMargin = new Thickness(
+            Math.Max(0, placement.ArrowCenterX - (BubbleArrowDown.Width / 2)),
+            0,
+            0,
+            0);
+        BubbleArrowUp.Margin = arrowMargin;
+        BubbleArrowDown.Margin = arrowMargin;
         BubblePopup.HorizontalOffset = placement.Origin.X - character.Left - BubbleShadowSafety;
         BubblePopup.VerticalOffset = placement.Origin.Y - character.Top - BubbleShadowSafety;
     }
