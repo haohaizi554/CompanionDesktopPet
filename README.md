@@ -115,13 +115,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
   -PublishExePath publish/CompanionDesktopPet.exe
 ```
 
-验证器要求 `publish/` 只包含 `CompanionDesktopPet.exe`，最终交付目录只包含 `佳怡桌宠.exe` 和明确允许的 `使用说明.txt`；额外 EXE、目录及 DLL/PDB/JSON/TXT 等 sidecar 都会使验证失败。它还会核对 publish 与交付 EXE 的 SHA-256，并扫描最终 EXE 原始字节中的 UTF-8/UTF-16 直接身份标记。地区、收入等通用词可能合法存在于自包含 .NET/ICU 词典中，因此由应用程序集测试和 v2 语料门禁检查，而不对整个运行时包做易误报的单词扫描。随后验证器把 EXE 单独复制到 `outputs/verify/`，以 `--smoke-test` 启动并只跟踪本次 PID；只有应用在时限内完成真实 WPF 资源与启动气泡初始化、正常关闭并自行以退出码 0 结束才算成功。超时后的强制终止仅用于清理且仍判失败，非零退出同样失败。
+验证器要求 `publish/` 只包含 `CompanionDesktopPet.exe`，最终交付目录只包含 `佳怡桌宠.exe` 和明确允许的 `使用说明.txt`；额外 EXE、目录及 DLL/PDB/JSON/TXT 等 sidecar 都会使验证失败。它还会核对 publish 与交付 EXE 的 SHA-256。身份彩蛋只有在精确列入 editorial manifest 后才可进入运行时语料；安全边界由应用启动时对 `PersonaCorpus` exact editorial manifest 的自校验、Python validator 和程序集测试共同承担，不再使用无法区分已批准内容与泄露的 EXE 原始字节 marker 扫描。随后验证器把 EXE 单独复制到 `outputs/verify/`，以 `--smoke-test` 启动并只跟踪本次 PID；只有应用在时限内完成真实 WPF 资源与启动气泡初始化、正常关闭并自行以退出码 0 结束才算成功。超时后的强制终止仅用于清理且仍判失败，非零退出同样失败。
 
 ## 数据、隐私与限制
 
 - `src/CompanionDesktopPet/Assets/persona-corpus.tsv` 与 `data/source/persona-corpus.original.tsv` 是不可变审计证据，不原地覆盖。
 - 禁用内容进入 archive；不确定内容与 PII 进入 review；改写内容保留来源引用和原因。
-- 具体 PII marker 不编入运行时程序集；安全性由语料构建/测试门禁及最终 EXE UTF-8/UTF-16 原始字节扫描共同保证。
+- 身份彩蛋只有精确列入 editorial manifest 后才可进入 `PersonaCorpus`；应用启动自校验该 exact manifest，Python validator 和程序集测试共同阻止未审批内容进入运行时。
 - IDE 前台、连续活跃、空闲返回和全屏等未来信号默认未知，不猜测用户状态。
 - 自动检查不能替代人物授权、虚构身份、关系边界和再分发权利的人工审批。
 

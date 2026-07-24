@@ -168,7 +168,7 @@ try {
         Set-Content -LiteralPath (Join-Path $runtimeDirectory 'dependency.dll') -Value 'contract test'
     } -ExpectedMessage 'forbidden subdirectories'
 
-    Assert-Rejected -Case 'UTF-8 reviewed PII marker bytes' -Arrange {
+    Assert-Accepted -Case 'UTF-8 exact-manifest-approved identity bytes' -Arrange {
         param($paths)
         $marker = -join ([char[]](0x96F7, 0x7433, 0x73A5))
         $bytes = [Text.Encoding]::UTF8.GetBytes($marker)
@@ -180,9 +180,9 @@ try {
             $stream = [IO.File]::Open($path, [IO.FileMode]::Append, [IO.FileAccess]::Write)
             try { $stream.Write($bytes, 0, $bytes.Length) } finally { $stream.Dispose() }
         }
-    } -ExpectedMessage 'forbidden direct-identity marker'
+    }
 
-    Assert-Rejected -Case 'UTF-16 reviewed PII marker bytes' -Arrange {
+    Assert-Accepted -Case 'UTF-16 exact-manifest-approved identity bytes' -Arrange {
         param($paths)
         $marker = -join ([char[]](0x5C0F, 0x73A5))
         $bytes = [Text.Encoding]::Unicode.GetBytes($marker)
@@ -194,7 +194,7 @@ try {
             $stream = [IO.File]::Open($path, [IO.FileMode]::Append, [IO.FileAccess]::Write)
             try { $stream.Write($bytes, 0, $bytes.Length) } finally { $stream.Dispose() }
         }
-    } -ExpectedMessage 'forbidden direct-identity marker'
+    }
 
     if (Test-Path -LiteralPath $helperDirectory) {
         Remove-Item -LiteralPath $helperDirectory -Recurse -Force
@@ -240,4 +240,4 @@ finally {
     }
 }
 
-Write-Output 'PASS: publish verifier rejects publish sidecars, delivery sidecars, extra EXEs, nested dependencies, reviewed PII bytes, forced smoke termination, and non-zero smoke exit.'
+Write-Output 'PASS: publish verifier accepts exact-manifest-approved identity bytes after a real smoke test, and rejects publish sidecars, delivery sidecars, extra EXEs, nested dependencies, forced smoke termination, and non-zero smoke exit.'

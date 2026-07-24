@@ -60,30 +60,6 @@ if ($publishDirectories.Count -ne 0 -or
     throw "Publish directory must contain only CompanionDesktopPet.exe: $($publishContents -join ', ')"
 }
 
-$forbiddenIdentityMarkers = @(
-    (-join ([char[]](0x96F7, 0x7433, 0x73A5)))
-    (-join ([char[]](0x5C0F, 0x73A5)))
-    (-join ([char[]](0x73A5, 0x73A5)))
-)
-$bytePreservingEncoding = [Text.Encoding]::GetEncoding(28591)
-$binaryBytes = [IO.File]::ReadAllBytes($resolved)
-$binaryText = $bytePreservingEncoding.GetString($binaryBytes)
-$markerEncodings = @(
-    [Text.Encoding]::UTF8
-    [Text.Encoding]::Unicode
-    [Text.Encoding]::BigEndianUnicode
-)
-foreach ($marker in $forbiddenIdentityMarkers) {
-    foreach ($encoding in $markerEncodings) {
-        $needle = $bytePreservingEncoding.GetString($encoding.GetBytes($marker))
-        if ($binaryText.IndexOf($needle, [StringComparison]::Ordinal) -ge 0) {
-            throw "Delivered EXE contains forbidden direct-identity marker bytes ($($encoding.WebName))."
-        }
-    }
-}
-$binaryBytes = $null
-$binaryText = $null
-
 $deliveredHash = (Get-FileHash -LiteralPath $resolved -Algorithm SHA256).Hash
 $publishHash = (Get-FileHash -LiteralPath $resolvedPublish -Algorithm SHA256).Hash
 if ($deliveredHash -ne $publishHash) {
@@ -152,4 +128,4 @@ if ($null -ne $smokeFailure) {
     throw $smokeFailure
 }
 
-Write-Output "PASS: one delivered EXE, no runtime sidecars or forbidden PII bytes, matching publish SHA-256, isolated --smoke-test exited 0: $resolved"
+Write-Output "PASS: one delivered EXE, no runtime sidecars, matching publish SHA-256, isolated --smoke-test exited 0: $resolved"
