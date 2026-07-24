@@ -15,10 +15,16 @@ from src.persona_corpus.context import PersonaContext
 from src.persona_corpus.loader import load_v2
 from src.persona_corpus.simulation import (
     SUBSEED_DERIVATION_VERSION,
+    CandidateIndex,
+    DistributionTolerance,
     SimulationAttempt,
     SimulationError,
     analyze_constraints,
+    build_scenario_coverage,
+    combine_hard_violations,
     derive_subseed,
+    derive_distribution_policy,
+    probe_inventory_coverage,
     render_simulation_report,
     run_adversarial_suite,
     simulate,
@@ -62,6 +68,12 @@ METRIC_ATTRIBUTES = (
     "question_count",
     "unmet_context_count",
     "per_seed_anomalies",
+    "subseed_derivation_version",
+    "distribution_policy",
+    "scenario_coverage",
+    "inventory_coverage",
+    "natural_hard_violations",
+    "adversarial_hard_violations",
 )
 
 EVENT_KEYS = {
@@ -98,6 +110,8 @@ class SimulationIntegrationTests(unittest.TestCase):
     def test_thirty_days_ten_seeds_have_no_hard_violations(self) -> None:
         report = self.report
         self.assertEqual([], report.hard_violations)
+        self.assertEqual([], report.natural_hard_violations)
+        self.assertEqual([], report.adversarial_hard_violations)
         self.assertGreaterEqual(report.group_ratio["technical"], 0.10)
         self.assertLessEqual(report.group_ratio["technical"], 0.20)
         self.assertGreaterEqual(
@@ -120,6 +134,27 @@ class SimulationIntegrationTests(unittest.TestCase):
         self.assertEqual(self.report.total_attempts, self.report.output_count + self.report.none_count)
         self.assertEqual(10, len(self.report.per_seed_anomalies))
         self.assertEqual(set(range(10)), set(self.report.per_seed_anomalies))
+        self.assertEqual(SUBSEED_DERIVATION_VERSION, self.report.subseed_derivation_version)
+        self.assertEqual(108, self.report.scenario_coverage.nullable_signal_combinations)
+        self.assertTrue(self.report.inventory_coverage.trigger_hits)
+
+    def test_combined_hard_status_requires_natural_and_adversarial_success(self) -> None:
+        self.assertEqual([], combine_hard_violations((), ()))
+        self.assertEqual(
+            ["natural_failure"],
+            combine_hard_violations(("natural_failure",), ()),
+        )
+        self.assertEqual(
+            ["adversarial_failure"],
+            combine_hard_violations((), ("adversarial_failure",)),
+        )
+        self.assertEqual(
+            ["adversarial_failure", "natural_failure"],
+            combine_hard_violations(
+                ("natural_failure",),
+                ("adversarial_failure",),
+            ),
+        )
 
     def test_combined_care_adjacency_counts_cross_group_pairs(self) -> None:
         care_groups = {"daily_care", "emotional_reflection"}
@@ -192,6 +227,11 @@ class SimulationIntegrationTests(unittest.TestCase):
         self.assertEqual(first_markdown, second_markdown)
         self.assertTrue(first_markdown.endswith("\n"))
         self.assertNotIn("\r", first_markdown)
+        self.assertIn("Subseed derivation", first_markdown)
+        self.assertIn("Natural hard violations", first_markdown)
+        self.assertIn("Adversarial hard violations", first_markdown)
+        self.assertIn("Selector decision", first_markdown)
+        self.assertIn("Inventory trigger misses", first_markdown)
         first_events = self.report.to_validation_json()
         second_events = self.report.to_validation_json()
         self.assertEqual(first_events, second_events)
@@ -451,6 +491,15 @@ class SimulationUnitTests(unittest.TestCase):
         self.assertIn("hourly_budget_violation", codes)
         self.assertIn("late_night_budget_violation", codes)
 
+        forged = tuple(
+            replace(attempt, context=replace(attempt.context, daypart="morning"))
+            for attempt in attempts
+        )
+        self.assertIn(
+            "late_night_budget_violation",
+            analyze_constraints(forged, scheduler).codes,
+        )
+
     def test_constraint_checker_detects_daily_and_recent_window_quotas(self) -> None:
         scheduler = SchedulerConfig.from_mapping(self.config)
         start = datetime(2026, 7, 1, 8, 0, tzinfo=timezone(timedelta(hours=8)))
@@ -527,12 +576,51 @@ class SimulationUnitTests(unittest.TestCase):
             analyze_constraints(easter, scheduler).codes,
         )
 
+    def test_constraint_checker_retains_context_question_and_cooldown_gates(self) -> None:
+        scheduler = SchedulerConfig.from_mapping(self.config)
+        start = datetime(2026, 7, 1, 8, 0, tzinfo=timezone(timedelta(hours=8)))
+        first = self._constraint_attempt(
+            when=start,
+            row_index=280,
+            elapsed_minutes=1440,
+        )
+        assert first.row is not None
+        invalid = self._constraint_attempt(
+            when=start + timedelta(minutes=8),
+            row_index=281,
+            elapsed_minutes=8,
+        )
+        assert invalid.row is not None
+        invalid = replace(
+            invalid,
+            row=replace(
+                invalid.row,
+                id=first.row.id,
+                trigger="afternoon",
+                required_context="ide_foreground",
+                cooldown_hours=24,
+                text="question fixture?",
+            ),
+        )
+
+        codes = analyze_constraints((first, invalid), scheduler).codes
+        self.assertIn("context_or_trigger_violation", codes)
+        self.assertIn("question_or_reply_violation", codes)
+        self.assertIn("id_cooldown_violation", codes)
+
     def test_adversarial_suite_proves_every_configured_constraint_boundary(self) -> None:
         scheduler = SchedulerConfig.from_mapping(self.config)
         result = run_adversarial_suite(scheduler)
         by_name = {case.name: case for case in result.cases}
 
         self.assertEqual((), result.hard_violations)
+        self.assertTrue(all(case.selector_checked for case in result.cases))
+        self.assertTrue(
+            all(
+                case.selector_selected is case.selector_expected_selected
+                for case in result.cases
+            )
+        )
         self.assertIn("minimum_interval:7m59s:reject", by_name)
         self.assertIn("minimum_interval:8m00s:allow", by_name)
         for cost, minutes in sorted(
@@ -550,6 +638,100 @@ class SimulationUnitTests(unittest.TestCase):
         self.assertIn("recent:easter_egg:reject", by_name)
         for group in scheduler.block_adjacent_category_groups:
             self.assertIn(f"adjacent_group:{group}:reject", by_name)
+
+    def test_scenario_matrix_covers_calendar_dayparts_and_nullable_signals(self) -> None:
+        coverage = build_scenario_coverage()
+
+        self.assertEqual(("spring", "summer", "autumn", "winter"), coverage.seasons)
+        self.assertEqual(
+            ("late_night", "morning", "noon", "afternoon", "evening"),
+            coverage.dayparts,
+        )
+        self.assertTrue(coverage.dawn)
+        self.assertEqual(("tick", "app_start", "day_changed"), coverage.events)
+        self.assertEqual((False, True), coverage.weekend_values)
+        self.assertTrue(coverage.holiday)
+        self.assertTrue(coverage.anniversary)
+        self.assertTrue(coverage.month_boundary)
+        self.assertEqual((None, False, True), coverage.ide_foreground_values)
+        self.assertEqual((None, 89, 90, 91), coverage.active_minutes_values)
+        self.assertEqual((None, False, True), coverage.idle_return_values)
+        self.assertEqual((None, False, True), coverage.fullscreen_values)
+        self.assertEqual(108, coverage.nullable_signal_combinations)
+
+    def test_candidate_index_builds_once_and_is_reused_by_queries(self) -> None:
+        class CountingRows:
+            def __init__(self, rows):
+                self.rows = rows
+                self.yield_count = 0
+
+            def __iter__(self):
+                for row in self.rows:
+                    self.yield_count += 1
+                    yield row
+
+        scheduler = SchedulerConfig.from_mapping(self.config)
+        source = CountingRows(self.corpus)
+        index = CandidateIndex.build(source)
+        self.assertEqual(len(self.corpus), source.yield_count)
+
+        now = datetime(2026, 7, 1, 8, 0, tzinfo=timezone(timedelta(hours=8)))
+        context = PersonaContext.from_datetime(
+            now,
+            minutes_since_last_output=1440,
+            ide_foreground=True,
+            active_minutes=91,
+            idle_return=True,
+            fullscreen=False,
+        )
+        first = index.candidates_for(context, now, scheduler)
+        second = index.candidates_for(context, now, scheduler)
+
+        self.assertTrue(first)
+        self.assertEqual(first, second)
+        self.assertEqual(len(self.corpus), source.yield_count)
+
+    def test_inventory_coverage_selects_every_stocked_trigger_and_context(self) -> None:
+        scheduler = SchedulerConfig.from_mapping(self.config)
+        reachable = tuple(
+            replace(row, trigger="late_night")
+            if row.required_context == "time:dawn"
+            else row
+            for row in self.corpus
+        )
+
+        coverage = probe_inventory_coverage(reachable, scheduler)
+
+        self.assertEqual((), coverage.trigger_misses)
+        self.assertEqual((), coverage.context_misses)
+        self.assertEqual(
+            {row.trigger for row in reachable if row.enabled},
+            set(coverage.trigger_hits),
+        )
+        self.assertEqual(
+            {row.required_context for row in reachable if row.enabled},
+            set(coverage.context_hits),
+        )
+
+    def test_distribution_bounds_follow_scheduler_weights_with_one_tolerance(self) -> None:
+        scheduler = SchedulerConfig.from_mapping(self.config)
+        tolerance = DistributionTolerance(absolute=0.05)
+        policy = derive_distribution_policy(scheduler, tolerance)
+
+        self.assertAlmostEqual(0.13, policy.technical.minimum)
+        self.assertAlmostEqual(0.23, policy.technical.maximum)
+        self.assertAlmostEqual(0.07, policy.easter_egg.maximum)
+        self.assertAlmostEqual(0.65, policy.self_ambient.minimum)
+        self.assertAlmostEqual(0.15, policy.user_direct.maximum)
+
+        shifted_weights = dict(scheduler.category_group_weights)
+        shifted_weights["easter_egg"] = 0.10
+        shifted_weights["character_life"] -= 0.08
+        shifted = replace(scheduler, category_group_weights=shifted_weights)
+        shifted_policy = derive_distribution_policy(shifted, tolerance)
+        self.assertAlmostEqual(0.05, shifted_policy.easter_egg.minimum)
+        self.assertAlmostEqual(0.15, shifted_policy.easter_egg.maximum)
+        self.assertNotEqual(policy.easter_egg, shifted_policy.easter_egg)
 
     def test_seed_order_is_canonical_but_corpus_order_changes_replay_anchor(self) -> None:
         forward = simulate(self.corpus, self.config, days=1, seeds=(9, 3))

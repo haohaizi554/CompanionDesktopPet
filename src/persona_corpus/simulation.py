@@ -17,8 +17,27 @@ from .models import CorpusLine, LegacyLine
 from .normalization import normalize_text
 from .schema import ARCHIVE_HEADER, PII_REVIEW_HEADER, REVIEW_HEADER
 from .selector import SchedulerConfig, SelectorConfigError, select_line
-from .simulation_core.constraints import analyze_constraints, run_adversarial_suite
-from .simulation_core.scenarios import SUBSEED_DERIVATION_VERSION, derive_subseed
+from .simulation_core.constraints import (
+    AdversarialSuiteResult,
+    analyze_constraints,
+    run_adversarial_suite,
+)
+from .simulation_core.metrics import DistributionTolerance, derive_distribution_policy
+from .simulation_core.report import (
+    SeedMetrics,
+    SimulationAttempt,
+    SimulationReport,
+    combine_hard_violations,
+)
+from .simulation_core.scenarios import (
+    SUBSEED_DERIVATION_VERSION,
+    CandidateIndex,
+    InventoryCoverage,
+    ScenarioCoverage,
+    build_scenario_coverage,
+    derive_subseed,
+    probe_inventory_coverage,
+)
 from .validation import (
     CATCHPHRASES,
     DIRECT_STATE_PATTERNS,
@@ -70,116 +89,6 @@ _TONE_MARKERS = (
 
 class SimulationError(ValueError):
     """Simulation input or a required deterministic report artifact is invalid."""
-
-
-@dataclass(frozen=True, slots=True)
-class SimulationAttempt:
-    seed: int
-    attempted_at: datetime
-    context: PersonaContext
-    row: CorpusLine | None
-
-    @property
-    def selected_id(self) -> str | None:
-        return self.row.id if self.row is not None else None
-
-    def context_payload(self) -> dict[str, object]:
-        return {
-            "event": self.context.event,
-            "daypart": self.context.daypart,
-            "weekday": self.context.weekday,
-            "is_weekend": self.context.is_weekend,
-            "holiday": self.context.holiday,
-            "anniversary_days": self.context.anniversary_days,
-            "minutes_since_last_output": float(self.context.minutes_since_last_output),
-            "ide_foreground": self.context.ide_foreground,
-            "active_minutes": self.context.active_minutes,
-            "idle_return": self.context.idle_return,
-            "fullscreen": self.context.fullscreen,
-        }
-
-    def validation_payload(self) -> dict[str, object]:
-        return {
-            "seed": self.seed,
-            "attempted_at": self.attempted_at.isoformat(timespec="seconds"),
-            "context": self.context_payload(),
-            "selected_id": self.selected_id,
-        }
-
-
-@dataclass(frozen=True, slots=True)
-class SeedMetrics:
-    seed: int
-    attempts: int
-    outputs: int
-    none_count: int
-    group_counts: Mapping[str, int]
-    group_ratio: Mapping[str, float]
-    mode_counts: Mapping[str, int]
-    mode_ratio: Mapping[str, float]
-    anomalies: tuple[str, ...]
-
-
-@dataclass(slots=True)
-class SimulationReport:
-    schema_version: int
-    corpus_sha256: str
-    scheduler_config_sha256: str
-    days: int
-    seeds: tuple[int, ...]
-    attempts: tuple[SimulationAttempt, ...]
-    total_attempts: int
-    output_count: int
-    none_count: int
-    average_outputs_per_day: float
-    max_outputs_per_hour: int
-    group_counts: dict[str, int]
-    group_ratio: dict[str, float]
-    mode_counts: dict[str, int]
-    mode_ratio: dict[str, float]
-    technical_ratio: float
-    easter_egg_ratio: float
-    user_direct_ratio: float
-    id_cooldown_repeats: int
-    semantic_cooldown_repeats: int
-    adjacent_same_category_group: int
-    adjacent_technical: int
-    adjacent_daily_care: int
-    adjacent_emotional_reflection: int
-    adjacent_care: int
-    average_text_length: float
-    length_distribution: dict[str, float]
-    common_openings: dict[int, list[tuple[str, int]]]
-    common_endings: dict[int, list[tuple[str, int]]]
-    catchphrase_ratio: float
-    catchphrase_counts: dict[str, int]
-    question_count: int
-    unmet_context_count: int
-    per_seed: dict[int, SeedMetrics]
-    per_seed_anomalies: dict[int, list[str]]
-    hard_violations: list[str]
-
-    def to_validation_payload(self) -> dict[str, object]:
-        return {
-            "schema_version": int(self.schema_version),
-            "corpus_sha256": self.corpus_sha256,
-            "scheduler_config_sha256": self.scheduler_config_sha256,
-            "days": self.days,
-            "seeds": list(self.seeds),
-            "attempts": [attempt.validation_payload() for attempt in self.attempts],
-        }
-
-    def to_validation_json(self) -> bytes:
-        return (
-            json.dumps(
-                self.to_validation_payload(),
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-                allow_nan=False,
-            )
-            + "\n"
-        ).encode("utf-8")
 
 
 @dataclass(frozen=True, slots=True)
@@ -350,9 +259,16 @@ def _analyse(
     days: int,
     seeds: tuple[int, ...],
     attempts: tuple[SimulationAttempt, ...],
+    distribution_tolerance: DistributionTolerance,
+    scenario_coverage: ScenarioCoverage,
+    inventory_coverage: InventoryCoverage,
+    adversarial_result: AdversarialSuiteResult,
 ) -> SimulationReport:
     hard: set[str] = set()
+    distribution_policy = derive_distribution_policy(config, distribution_tolerance)
     anomalies: dict[int, set[str]] = {seed: set() for seed in seeds}
+    for violation in analyze_constraints(attempts, config).violations:
+        _add_hard(hard, anomalies, violation.seed, violation.code)
     if days < 30:
         hard.add("duration_below_30_days")
     if len(seeds) < 10:
@@ -407,16 +323,6 @@ def _analyse(
                 elapsed_minutes = (now - previous.attempted_at).total_seconds() / 60
                 if abs(elapsed_minutes - float(attempt.context.minutes_since_last_output)) > _EPSILON:
                     unmet_context_count += 1
-                    _add_hard(hard, anomalies, seed, "elapsed_context_mismatch")
-                if elapsed_minutes + _EPSILON < config.minimum_interval_minutes:
-                    _add_hard(hard, anomalies, seed, "minimum_interval_violation")
-                required_interval = config.interrupt_cost_minimum_intervals_minutes[
-                    row.interrupt_cost
-                ]
-                if elapsed_minutes + _EPSILON < required_interval:
-                    _add_hard(hard, anomalies, seed, "interrupt_budget_violation")
-                if row.semantic_group == previous.row.semantic_group:
-                    _add_hard(hard, anomalies, seed, "adjacent_semantic_violation")
                 if (
                     row.category_group in {"daily_care", "emotional_reflection"}
                     and previous.row.category_group
@@ -427,41 +333,27 @@ def _analyse(
                     adjacent_same_group += 1
                     if row.category_group == "technical":
                         adjacent_technical += 1
-                        _add_hard(hard, anomalies, seed, "adjacent_technical")
                     elif row.category_group == "daily_care":
                         adjacent_daily += 1
-                        _add_hard(hard, anomalies, seed, "adjacent_daily_care")
                     elif row.category_group == "emotional_reflection":
                         adjacent_emotional += 1
-                        _add_hard(
-                            hard,
-                            anomalies,
-                            seed,
-                            "adjacent_emotional_reflection",
-                        )
 
             if not _trigger_satisfied(attempt, config) or not _required_context_satisfied(attempt):
                 unmet_context_count += 1
-                _add_hard(hard, anomalies, seed, "context_or_trigger_violation")
             if row.requires_reply or "?" in row.text or "？" in row.text:
                 question_count += 1
-                _add_hard(hard, anomalies, seed, "question_or_reply_violation")
 
             if row.id in last_id:
                 elapsed_hours = (now - last_id[row.id]).total_seconds() / 3600
                 if elapsed_hours + _EPSILON < row.cooldown_hours:
                     id_cooldown_repeats += 1
-                    _add_hard(hard, anomalies, seed, "id_cooldown_violation")
             if row.semantic_group in last_semantic:
                 elapsed_hours = (now - last_semantic[row.semantic_group]).total_seconds() / 3600
                 if elapsed_hours + _EPSILON < row.semantic_cooldown_hours:
                     semantic_cooldown_repeats += 1
-                    _add_hard(hard, anomalies, seed, "semantic_cooldown_violation")
 
             daily_key = (now.date(), row.id)
             daily_ids[daily_key] += 1
-            if daily_ids[daily_key] > row.max_per_day:
-                _add_hard(hard, anomalies, seed, "max_per_day_violation")
 
             rolling_hour = [
                 played_at
@@ -470,8 +362,6 @@ def _analyse(
             ]
             rolling_hour.append(now)
             max_outputs_per_hour = max(max_outputs_per_hour, len(rolling_hour))
-            if len(rolling_hour) > config.max_outputs_per_hour:
-                _add_hard(hard, anomalies, seed, "hourly_budget_violation")
 
             if attempt.context.daypart == "late_night":
                 rolling_late = [
@@ -480,35 +370,8 @@ def _analyse(
                     if now - played_at < timedelta(hours=1)
                 ]
                 rolling_late.append(now)
-                if len(rolling_late) > config.late_night_max_outputs_per_hour:
-                    _add_hard(hard, anomalies, seed, "late_night_budget_violation")
 
             recent_rows.append(row)
-            if (
-                sum(
-                    item.category_group == "technical"
-                    for item in recent_rows[-config.technical_recent_window :]
-                )
-                > config.technical_recent_max
-            ):
-                _add_hard(hard, anomalies, seed, "recent_technical_violation")
-            if (
-                sum(
-                    item.output_mode == "user_direct"
-                    for item in recent_rows[-config.user_direct_recent_window :]
-                )
-                > config.user_direct_recent_max
-            ):
-                _add_hard(hard, anomalies, seed, "recent_user_direct_violation")
-            if (
-                sum(
-                    item.category_group == "easter_egg"
-                    for item in recent_rows[-config.easter_egg_recent_window :]
-                )
-                > config.easter_egg_recent_max
-            ):
-                _add_hard(hard, anomalies, seed, "recent_easter_egg_violation")
-
             last_id[row.id] = now
             last_semantic[row.semantic_group] = now
             previous = attempt
@@ -517,13 +380,20 @@ def _analyse(
         seed_group_ratio = _ratio(seed_group_counts, CATEGORY_GROUPS, seed_output_count)
         seed_mode_ratio = _ratio(seed_mode_counts, OUTPUT_MODES, seed_output_count)
         if seed_output_count:
-            if not 0.10 <= seed_group_ratio["technical"] <= 0.20:
+            if not (
+                distribution_policy.technical.minimum
+                <= seed_group_ratio["technical"]
+                <= distribution_policy.technical.maximum
+            ):
                 _add_hard(hard, anomalies, seed, "technical_ratio_out_of_bounds")
-            if seed_group_ratio["easter_egg"] > 0.02:
+            if seed_group_ratio["easter_egg"] > distribution_policy.easter_egg.maximum:
                 _add_hard(hard, anomalies, seed, "easter_egg_ratio_above_limit")
-            if seed_mode_ratio["self_talk"] + seed_mode_ratio["ambient"] < 0.65:
+            if (
+                seed_mode_ratio["self_talk"] + seed_mode_ratio["ambient"]
+                < distribution_policy.self_ambient.minimum
+            ):
                 _add_hard(hard, anomalies, seed, "self_ambient_ratio_below_minimum")
-            if seed_mode_ratio["user_direct"] > 0.15:
+            if seed_mode_ratio["user_direct"] > distribution_policy.user_direct.maximum:
                 _add_hard(hard, anomalies, seed, "user_direct_ratio_above_limit")
             if seed_group_counts["easter_egg"] == 0:
                 anomalies[seed].add("easter_egg_not_observed")
@@ -550,13 +420,20 @@ def _analyse(
     if output_count == 0:
         hard.add("zero_outputs")
     else:
-        if not 0.10 <= group_ratio["technical"] <= 0.20:
+        if not (
+            distribution_policy.technical.minimum
+            <= group_ratio["technical"]
+            <= distribution_policy.technical.maximum
+        ):
             hard.add("technical_ratio_out_of_bounds")
-        if group_ratio["easter_egg"] > 0.02:
+        if group_ratio["easter_egg"] > distribution_policy.easter_egg.maximum:
             hard.add("easter_egg_ratio_above_limit")
-        if mode_ratio["self_talk"] + mode_ratio["ambient"] < 0.65:
+        if (
+            mode_ratio["self_talk"] + mode_ratio["ambient"]
+            < distribution_policy.self_ambient.minimum
+        ):
             hard.add("self_ambient_ratio_below_minimum")
-        if mode_ratio["user_direct"] > 0.15:
+        if mode_ratio["user_direct"] > distribution_policy.user_direct.maximum:
             hard.add("user_direct_ratio_above_limit")
 
     lengths = [len(text) for text in selected_texts]
@@ -589,6 +466,11 @@ def _analyse(
         schema_version=SIMULATION_SCHEMA_VERSION,
         corpus_sha256=corpus_sha256,
         scheduler_config_sha256=config_sha256,
+        subseed_derivation_version=SUBSEED_DERIVATION_VERSION,
+        distribution_policy=distribution_policy,
+        scenario_coverage=scenario_coverage,
+        inventory_coverage=inventory_coverage,
+        adversarial_result=adversarial_result,
         days=days,
         seeds=seeds,
         attempts=attempts,
@@ -621,7 +503,12 @@ def _analyse(
         unmet_context_count=unmet_context_count,
         per_seed=per_seed,
         per_seed_anomalies=per_seed_anomalies,
-        hard_violations=sorted(hard),
+        natural_hard_violations=sorted(hard),
+        adversarial_hard_violations=list(adversarial_result.hard_violations),
+        hard_violations=combine_hard_violations(
+            sorted(hard),
+            adversarial_result.hard_violations,
+        ),
     )
 
 
@@ -630,6 +517,8 @@ def simulate(
     config: SchedulerConfig | Mapping[str, object],
     days: int,
     seeds: Sequence[int],
+    *,
+    distribution_tolerance: DistributionTolerance = DistributionTolerance(),
 ) -> SimulationReport:
     """Run the real selector over a deterministic synthetic local-time event stream."""
 
@@ -646,6 +535,11 @@ def simulate(
         config_digest = scheduler_config_sha256(config_mapping)
     except (TypeError, ValueError) as error:
         raise SimulationError(f"inputs cannot be hashed deterministically: {error}") from error
+
+    candidate_index = CandidateIndex.build(rows)
+    scenario_coverage = build_scenario_coverage()
+    inventory_coverage = probe_inventory_coverage(rows, scheduler)
+    adversarial_result = run_adversarial_suite(scheduler)
 
     attempts: list[SimulationAttempt] = []
     for seed in canonical_seeds:
@@ -677,7 +571,7 @@ def simulate(
                     fullscreen=None,
                 )
                 selected = select_line(
-                    rows,
+                    candidate_index.candidates_for(context, now, scheduler),
                     context,
                     history,
                     now,
@@ -710,6 +604,10 @@ def simulate(
         days=days,
         seeds=canonical_seeds,
         attempts=tuple(attempts),
+        distribution_tolerance=distribution_tolerance,
+        scenario_coverage=scenario_coverage,
+        inventory_coverage=inventory_coverage,
+        adversarial_result=adversarial_result,
     )
 
 
@@ -753,6 +651,11 @@ def render_simulation_report(report: SimulationReport) -> str:
                 ("Seeds", ", ".join(map(str, report.seeds))),
                 ("Corpus SHA-256", f"`{report.corpus_sha256}`"),
                 ("Scheduler SHA-256", f"`{report.scheduler_config_sha256}`"),
+                ("Subseed derivation", report.subseed_derivation_version),
+                (
+                    "Distribution tolerance",
+                    _percent(report.distribution_policy.tolerance.absolute),
+                ),
             ),
         )
     )
@@ -784,9 +687,104 @@ def render_simulation_report(report: SimulationReport) -> str:
                 ("20. Question/reply outputs", report.question_count),
                 ("21. Unmet trigger/context outputs", report.unmet_context_count),
                 (
-                    "Hard violations",
+                    "Natural hard violations",
+                    ", ".join(report.natural_hard_violations)
+                    if report.natural_hard_violations
+                    else "none",
+                ),
+                (
+                    "Adversarial hard violations",
+                    ", ".join(report.adversarial_hard_violations)
+                    if report.adversarial_hard_violations
+                    else "none",
+                ),
+                (
+                    "Combined hard violations",
                     ", ".join(report.hard_violations) if report.hard_violations else "none",
                 ),
+            ),
+        )
+    )
+
+    policy = report.distribution_policy
+    lines.extend(["", "## Scheduler-derived distribution contract", ""])
+    lines.extend(
+        _markdown_table(
+            ("Metric", "Target", "Minimum", "Maximum"),
+            (
+                (
+                    "technical",
+                    _percent(policy.technical.target),
+                    _percent(policy.technical.minimum),
+                    _percent(policy.technical.maximum),
+                ),
+                (
+                    "easter_egg",
+                    _percent(policy.easter_egg.target),
+                    _percent(policy.easter_egg.minimum),
+                    _percent(policy.easter_egg.maximum),
+                ),
+                (
+                    "self_talk + ambient",
+                    _percent(policy.self_ambient.target),
+                    _percent(policy.self_ambient.minimum),
+                    _percent(policy.self_ambient.maximum),
+                ),
+                (
+                    "user_direct",
+                    _percent(policy.user_direct.target),
+                    _percent(policy.user_direct.minimum),
+                    _percent(policy.user_direct.maximum),
+                ),
+            ),
+        )
+    )
+
+    coverage = report.scenario_coverage
+    inventory = report.inventory_coverage
+    lines.extend(["", "## Scenario and inventory coverage", ""])
+    lines.extend(
+        _markdown_table(
+            ("Coverage", "Value"),
+            (
+                ("Seasons", ", ".join(coverage.seasons)),
+                ("Dayparts", ", ".join(coverage.dayparts)),
+                ("Dawn", coverage.dawn),
+                ("Events", ", ".join(coverage.events)),
+                ("Weekday + weekend", ", ".join(map(str, coverage.weekend_values))),
+                ("Holiday", coverage.holiday),
+                ("Anniversary", coverage.anniversary),
+                ("Month boundary", coverage.month_boundary),
+                ("Nullable signal combinations", coverage.nullable_signal_combinations),
+                (
+                    "Inventory trigger misses",
+                    ", ".join(inventory.trigger_misses) or "none",
+                ),
+                (
+                    "Inventory context misses",
+                    ", ".join(inventory.context_misses) or "none",
+                ),
+                (
+                    "Unreachable trigger/context pairs",
+                    ", ".join(inventory.unreachable_pairs) or "none",
+                ),
+            ),
+        )
+    )
+
+    lines.extend(["", "## Adversarial selector and analyzer evidence", ""])
+    lines.extend(
+        _markdown_table(
+            ("Case", "Selector decision", "Expected", "Analyzer codes", "Status"),
+            (
+                (
+                    case.name,
+                    "selected" if case.selector_selected else "rejected",
+                    "selected" if case.selector_expected_selected else "rejected",
+                    ", ".join(case.observed_codes) or "none",
+                    "pass" if case.passed else "FAIL",
+                )
+                for case in report.adversarial_result.cases
             ),
         )
     )

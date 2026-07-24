@@ -5,9 +5,10 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from typing import Protocol, Sequence
 
-from ..context import PersonaContext
+from ..context import ContextError, PersonaContext, daypart_for
+from ..history import HistoryRecord, SelectionHistory
 from ..models import CorpusLine
-from ..selector import SchedulerConfig
+from ..selector import SchedulerConfig, select_line
 
 
 _EPSILON = 1e-9
@@ -44,12 +45,18 @@ class AdversarialCaseResult:
     required_codes: tuple[str, ...]
     forbidden_codes: tuple[str, ...]
     observed_codes: tuple[str, ...]
+    selector_checked: bool
+    selector_expected_selected: bool
+    selector_selected: bool
 
     @property
     def passed(self) -> bool:
         observed = set(self.observed_codes)
-        return set(self.required_codes) <= observed and not (
-            set(self.forbidden_codes) & observed
+        return (
+            set(self.required_codes) <= observed
+            and not (set(self.forbidden_codes) & observed)
+            and self.selector_checked
+            and self.selector_selected is self.selector_expected_selected
         )
 
 
@@ -57,6 +64,55 @@ class AdversarialCaseResult:
 class AdversarialSuiteResult:
     cases: tuple[AdversarialCaseResult, ...]
     hard_violations: tuple[str, ...]
+
+
+def _trigger_satisfied(
+    attempt: AttemptLike,
+    row: CorpusLine,
+    elapsed_minutes: float,
+    config: SchedulerConfig,
+) -> bool:
+    trigger = row.trigger
+    context = attempt.context
+    actual_daypart = daypart_for(attempt.attempted_at)
+    if trigger == "any":
+        return True
+    if trigger == "app_start":
+        return context.event == "app_start"
+    if trigger == "day_changed":
+        return context.event == "day_changed"
+    if trigger in {"morning", "noon", "afternoon", "evening", "late_night"}:
+        return actual_daypart == trigger
+    if trigger == "weekday":
+        return attempt.attempted_at.isoweekday() < 6
+    if trigger == "weekend":
+        return attempt.attempted_at.isoweekday() >= 6
+    if trigger == "holiday":
+        return context.holiday is not None
+    if trigger == "anniversary":
+        return context.anniversary_days > 0
+    if trigger == "long_silence":
+        return elapsed_minutes + _EPSILON >= config.long_silence_minutes
+    if trigger == "ide_foreground":
+        return context.ide_foreground is True
+    if trigger == "long_active":
+        return context.active_minutes is not None and context.active_minutes >= 90
+    if trigger == "idle_return":
+        return context.idle_return is True
+    return False
+
+
+def _required_context_satisfied(attempt: AttemptLike, row: CorpusLine) -> bool:
+    required = tuple(row.required_context.split(","))
+    if not required or any(not token for token in required):
+        return False
+    if required == ("none",):
+        return True
+    try:
+        controlled = attempt.context.controlled_tokens(attempt.attempted_at)
+    except ContextError:
+        return False
+    return all(token in controlled for token in required)
 
 
 def analyze_constraints(
@@ -97,8 +153,10 @@ def analyze_constraints(
             assert attempt.row is not None
             row = attempt.row
             now = attempt.attempted_at
+            elapsed_for_trigger = float(attempt.context.minutes_since_last_output)
             if previous is not None and previous.row is not None:
                 elapsed_minutes = (now - previous.attempted_at).total_seconds() / 60.0
+                elapsed_for_trigger = elapsed_minutes
                 if (
                     abs(
                         elapsed_minutes
@@ -125,6 +183,16 @@ def analyze_constraints(
                 ):
                     add(f"adjacent_group_violation:{row.category_group}", attempt)
 
+            if not _trigger_satisfied(
+                attempt,
+                row,
+                elapsed_for_trigger,
+                config,
+            ) or not _required_context_satisfied(attempt, row):
+                add("context_or_trigger_violation", attempt)
+            if row.requires_reply or "?" in row.text or "？" in row.text:
+                add("question_or_reply_violation", attempt)
+
             if row.id in last_id:
                 elapsed_hours = (now - last_id[row.id]).total_seconds() / 3600.0
                 if elapsed_hours + _EPSILON < float(row.cooldown_hours):
@@ -150,7 +218,7 @@ def analyze_constraints(
             if len(rolling_hour) > config.max_outputs_per_hour:
                 add("hourly_budget_violation", attempt)
 
-            if attempt.context.daypart == "late_night":
+            if daypart_for(now) == "late_night":
                 rolling_late_night = [
                     played_at
                     for played_at in rolling_late_night
@@ -294,6 +362,41 @@ def _pair(
     )
 
 
+def _selector_accepts_last(
+    attempts: Sequence[_FixtureAttempt],
+    config: SchedulerConfig,
+) -> bool:
+    if not attempts or attempts[-1].row is None:
+        return False
+    history_records: list[HistoryRecord] = []
+    for attempt in attempts[:-1]:
+        if attempt.row is None:
+            continue
+        row = attempt.row
+        history_records.append(
+            HistoryRecord(
+                selected_id=row.id,
+                played_at=attempt.attempted_at,
+                category=row.category,
+                category_group=row.category_group,
+                semantic_group=row.semantic_group,
+                output_mode=row.output_mode,
+                trigger=row.trigger,
+                interrupt_cost=row.interrupt_cost,
+            )
+        )
+    candidate = attempts[-1]
+    selected = select_line(
+        (candidate.row,),
+        candidate.context,
+        SelectionHistory(history_records),
+        candidate.attempted_at,
+        seed=0,
+        scheduler_config=config,
+    )
+    return selected is not None
+
+
 def run_adversarial_suite(config: SchedulerConfig) -> AdversarialSuiteResult:
     """Exercise both sides of every scheduler boundary with synthetic traces."""
 
@@ -305,14 +408,19 @@ def run_adversarial_suite(config: SchedulerConfig) -> AdversarialSuiteResult:
         *,
         required: Sequence[str] = (),
         forbidden: Sequence[str] = (),
+        selector_expected_selected: bool,
     ) -> None:
         observed = analyze_constraints(attempts, config).codes
+        selector_selected = _selector_accepts_last(attempts, config)
         cases.append(
             AdversarialCaseResult(
                 name=name,
                 required_codes=tuple(required),
                 forbidden_codes=tuple(forbidden),
                 observed_codes=observed,
+                selector_checked=True,
+                selector_expected_selected=selector_expected_selected,
+                selector_selected=selector_selected,
             )
         )
 
@@ -328,6 +436,7 @@ def run_adversarial_suite(config: SchedulerConfig) -> AdversarialSuiteResult:
             index=10,
         ),
         required=("minimum_interval_violation",),
+        selector_expected_selected=False,
     )
     evaluate(
         "minimum_interval:8m00s:allow"
@@ -340,6 +449,7 @@ def run_adversarial_suite(config: SchedulerConfig) -> AdversarialSuiteResult:
             index=20,
         ),
         forbidden=("minimum_interval_violation",),
+        selector_expected_selected=True,
     )
 
     for cost, minutes in sorted(
@@ -356,6 +466,7 @@ def run_adversarial_suite(config: SchedulerConfig) -> AdversarialSuiteResult:
                 index=100 + cost * 10,
             ),
             required=("interrupt_budget_violation",),
+            selector_expected_selected=False,
         )
         evaluate(
             f"interrupt_cost:{cost}:{minutes}m:allow_exact",
@@ -366,6 +477,7 @@ def run_adversarial_suite(config: SchedulerConfig) -> AdversarialSuiteResult:
                 index=200 + cost * 10,
             ),
             forbidden=("interrupt_budget_violation",),
+            selector_expected_selected=True,
         )
 
     groups = _safe_groups(config)
@@ -383,6 +495,7 @@ def run_adversarial_suite(config: SchedulerConfig) -> AdversarialSuiteResult:
         "rolling_hour:max:reject",
         hourly,
         required=("hourly_budget_violation",),
+        selector_expected_selected=False,
     )
 
     late_start = _FIXTURE_START.replace(hour=1)
@@ -399,6 +512,7 @@ def run_adversarial_suite(config: SchedulerConfig) -> AdversarialSuiteResult:
         "late_night:max:reject",
         late,
         required=("late_night_budget_violation",),
+        selector_expected_selected=False,
     )
 
     for index, group in enumerate(sorted(config.block_adjacent_category_groups)):
@@ -420,6 +534,7 @@ def run_adversarial_suite(config: SchedulerConfig) -> AdversarialSuiteResult:
             f"adjacent_group:{group}:reject",
             adjacent,
             required=(f"adjacent_group_violation:{group}",),
+            selector_expected_selected=False,
         )
 
     daily_first, daily_second = _pair(
@@ -438,6 +553,7 @@ def run_adversarial_suite(config: SchedulerConfig) -> AdversarialSuiteResult:
         "max_per_day:reject",
         daily,
         required=("max_per_day_violation",),
+        selector_expected_selected=False,
     )
 
     def recent_trace(
@@ -449,9 +565,10 @@ def run_adversarial_suite(config: SchedulerConfig) -> AdversarialSuiteResult:
         index_base: int,
     ) -> tuple[_FixtureAttempt, ...]:
         count = max(maximum + 1, 1)
+        total = max(window, count)
         trace: list[_FixtureAttempt] = []
-        for index in range(max(window, count)):
-            is_match = index < count
+        for index in range(total):
+            is_match = index < maximum or index == total - 1
             group = match_group if is_match and match_group is not None else groups[0]
             mode = match_mode if is_match and match_mode is not None else "self_talk"
             trace.append(
@@ -474,6 +591,7 @@ def run_adversarial_suite(config: SchedulerConfig) -> AdversarialSuiteResult:
             index_base=700,
         ),
         required=("recent_technical_violation",),
+        selector_expected_selected=False,
     )
     evaluate(
         "recent:user_direct:reject",
@@ -484,6 +602,7 @@ def run_adversarial_suite(config: SchedulerConfig) -> AdversarialSuiteResult:
             index_base=800,
         ),
         required=("recent_user_direct_violation",),
+        selector_expected_selected=False,
     )
     evaluate(
         "recent:easter_egg:reject",
@@ -494,6 +613,7 @@ def run_adversarial_suite(config: SchedulerConfig) -> AdversarialSuiteResult:
             index_base=900,
         ),
         required=("recent_easter_egg_violation",),
+        selector_expected_selected=False,
     )
 
     hard = tuple(
@@ -502,4 +622,3 @@ def run_adversarial_suite(config: SchedulerConfig) -> AdversarialSuiteResult:
         if not case.passed
     )
     return AdversarialSuiteResult(tuple(cases), hard)
-
