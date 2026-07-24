@@ -1,5 +1,7 @@
 # Persona Corpus v2 Implementation Plan
 
+> **Historical plan; numerical targets superseded.** This file records the 2026-07-22 implementation path. Its roughly 800–1,200-row target, Easter egg `<=2%` limit, recent-50 quota, and curated-only runtime assumptions are not current release acceptance. The 2026-07-24 persona contract and expanded-runtime work require 806 curated-core rows + 51,326 approved safe legacy surfaces = 52,132 runtime rows grouped into exactly 533 semantic scenes, scene-first selection, and playback acceptance of Easter egg 8%–12%, seasoning 3%–6%, and dry-sharp 2%–4%. Counts and final hashes remain release gates on the integrated commit; see `README-persona-corpus.md` and `docs/release/2026-07-25-expanded-runtime-release-checklist.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the 75,375-line Cartesian-product runtime corpus with an immutable, traceable, offline v2 corpus of roughly 800–1,200 independently written lines, plus auditing, extraction, scheduling, validation, simulation, reports, and WPF integration.

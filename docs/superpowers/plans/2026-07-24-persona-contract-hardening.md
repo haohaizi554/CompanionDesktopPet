@@ -1,5 +1,7 @@
 # Persona Contract Hardening Implementation Plan
 
+> **Scope note:** “current 800-row corpus” below is the pre-expansion wording used when this plan was drafted. The completed curated core is 806 rows. The later expanded-runtime release contract is 806 core + 51,326 approved safe legacy surfaces = 52,132 runtime rows and exactly 533 semantic scenes, with scene-first selection and playback acceptance of Easter egg 8%–12%, seasoning 3%–6%, and dry-sharp 2%–4%. This plan establishes the contract/manifest foundation; it does not by itself prove the expanded artifact or its final hashes.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace duplicated corpus taxonomy assumptions with one machine-readable contract and make the builder, validator, selector, editorial catalog, and C# runtime reject drift.

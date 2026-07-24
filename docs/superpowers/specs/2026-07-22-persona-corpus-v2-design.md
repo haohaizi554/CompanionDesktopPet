@@ -3,6 +3,8 @@
 日期：2026-07-22  
 状态：已由用户提供的重构规范批准
 
+> **历史基线 / 已被后续契约取代：** 本文保留 2026-07-22 的迁移决策与审计背景，但其中“约 800～1,200 条”、Easter egg `<=2%`、最近 50 次最多 1 条，以及仅把 curated v2 当作最终运行时的表述，不再是发布口径。2026-07-24 `config/persona-contract.json` 与 expanded-runtime 设计把最终验收更新为 806 条 curated core + 51,326 条安全 legacy surfaces = 52,132 条运行时文案、533 个语义场景；选择必须 scene-first，播放门禁为 Easter egg 8%–12%、seasoning 3%–6%、dry-sharp 2%–4%。扩展文件和最终哈希须在集成提交上验证，详见根目录 `README-persona-corpus.md` 与 `docs/release/2026-07-25-expanded-runtime-release-checklist.md`。
+
 ## 目标
 
 把当前桌宠使用的 75,375 行组合展开语料迁移为一个完全离线、不可读心、不要求用户回应、可追溯且可验证的单向角色播报系统。目标不是保留原行数，而是产出约 800～1,200 条可独立播放的高质量 v2 语料，并提供纯 Python 标准库的审计、构建、选择、模拟和验证工具。
