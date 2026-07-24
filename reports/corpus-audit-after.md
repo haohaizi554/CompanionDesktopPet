@@ -6,27 +6,27 @@ The inventory share and the simulated playback share are deliberately separate. 
 
 | Metric | Legacy source | Curated v2 |
 | --- | --- | --- |
-| Total corpus rows | 75375 | 800 |
-| Enabled rows | n/a | 800 |
+| Total corpus rows | 75375 | 52132 |
+| Enabled rows | n/a | 52132 |
 | Archive rows | 0 | 75375 |
 | Review rows | 0 | 3265 |
 | Exact duplicate texts | 0 | 0 |
 | Normalized duplicate texts | 0 | 0 |
-| Average text length | 31.817 | 20.802 |
+| Average text length | 31.817 | 31.810 |
 | Length <8 | 0.00% | 0.00% |
-| Length 8-16 | 0.03% | 27.00% |
-| Length 17-24 | 1.91% | 44.00% |
-| Length 25-36 | 88.08% | 29.00% |
-| Length >36 | 9.99% | 0.00% |
+| Length 8-16 | 0.03% | 0.46% |
+| Length 17-24 | 1.91% | 1.33% |
+| Length 25-36 | 88.08% | 88.57% |
+| Length >36 | 9.99% | 9.65% |
 | Question texts | 8580 | 0 |
-| Fake-context heuristic hits | 3445 | 0 |
-| self_talk inventory ratio | n/a | 73.12% |
-| ambient inventory ratio | n/a | 9.38% |
+| Fake-context heuristic hits | 5265 | 0 |
+| self_talk inventory ratio | n/a | 98.24% |
+| ambient inventory ratio | n/a | 1.49% |
 | user_direct inventory ratio | n/a | 0.00% |
-| system_observe inventory ratio | n/a | 17.50% |
-| Technical enabled-inventory ratio | n/a | 41.25% |
-| Technical simulated-playback ratio | n/a | 15.73% |
-| Catchphrase line ratio | 23.84% | 0.00% |
+| system_observe inventory ratio | n/a | 0.27% |
+| Technical enabled-inventory ratio | n/a | 70.97% |
+| Technical simulated-playback ratio | n/a | 18.67% |
+| Catchphrase line ratio | 28.58% | 25.92% |
 | PII review rows | 0 | 1248 |
 
 ## Frequent openings
@@ -38,11 +38,11 @@ The inventory share and the simulated playback share are deliberately separate. 
 | Legacy | 啊推 | 3315 |
 | Legacy | 我丢 | 3315 |
 | Legacy | 先别 | 2925 |
-| v2 enabled | 日历 | 15 |
-| v2 enabled | 季节 | 12 |
-| v2 enabled | 今天 | 11 |
-| v2 enabled | 接口 | 9 |
-| v2 enabled | 时间 | 8 |
+| v2 enabled | 啊推 | 2833 |
+| v2 enabled | 我丢 | 2833 |
+| v2 enabled | 先别 | 2662 |
+| v2 enabled | 我看 | 2662 |
+| v2 enabled | 真的 | 2655 |
 
 ## Frequent endings
 
@@ -53,8 +53,8 @@ The inventory share and the simulated playback share are deliberately separate. 
 | Legacy | 么吓人。 | 3600 |
 | Legacy | 别又忘。 | 3600 |
 | Legacy | 动代码。 | 3600 |
-| v2 enabled | 更重要。 | 5 |
-| v2 enabled | 很合理。 | 3 |
-| v2 enabled | 一会儿。 | 2 |
-| v2 enabled | 一起看。 | 2 |
-| v2 enabled | 了什么。 | 2 |
+| v2 enabled | 就重写。 | 2851 |
+| v2 enabled | 它钉住。 | 2842 |
+| v2 enabled | 补靠谱。 | 2842 |
+| v2 enabled | 通再说。 | 2842 |
+| v2 enabled | 动代码。 | 2831 |

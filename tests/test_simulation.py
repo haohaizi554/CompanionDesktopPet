@@ -150,17 +150,28 @@ class SimulationIntegrationTests(unittest.TestCase):
 
     def test_thirty_days_ten_seeds_have_no_hard_violations(self) -> None:
         report = self.report
+        acceptance = PERSONA_CONTRACT.scheduler["acceptance"]
+        technical_minimum, technical_maximum = acceptance[
+            "technical_playback_ratio"
+        ]
+        easter_minimum, easter_maximum = acceptance[
+            "easter_egg_playback_ratio"
+        ]
         self.assertEqual([], report.hard_violations)
         self.assertEqual([], report.natural_hard_violations)
         self.assertEqual([], report.adversarial_hard_violations)
-        self.assertGreaterEqual(report.group_ratio["technical"], 0.10)
-        self.assertLessEqual(report.group_ratio["technical"], 0.20)
+        self.assertGreaterEqual(report.group_ratio["technical"], technical_minimum)
+        self.assertLessEqual(report.group_ratio["technical"], technical_maximum)
         self.assertGreaterEqual(
             report.mode_ratio["self_talk"] + report.mode_ratio["ambient"],
-            0.65,
+            acceptance["self_talk_ambient_minimum"],
         )
-        self.assertLessEqual(report.mode_ratio["user_direct"], 0.15)
-        self.assertLessEqual(report.group_ratio["easter_egg"], 0.02)
+        self.assertLessEqual(
+            report.mode_ratio["user_direct"],
+            acceptance["user_direct_maximum"],
+        )
+        self.assertGreaterEqual(report.group_ratio["easter_egg"], easter_minimum)
+        self.assertLessEqual(report.group_ratio["easter_egg"], easter_maximum)
         self.assertEqual(0, report.id_cooldown_repeats)
         self.assertEqual(0, report.semantic_cooldown_repeats)
         self.assertEqual(0, report.unmet_context_count)

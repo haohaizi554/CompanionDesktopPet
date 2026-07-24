@@ -6,39 +6,47 @@ Every example below is joined to generated data. Exact examples use `source_refe
 
 | Category | Enabled retained | Rewritten topics | Archived | Review |
 | --- | --- | --- | --- | --- |
-| Algorithms | 30 | 30 | 3900 | 0 |
-| Architecture | 30 | 30 | 3900 | 0 |
-| Backend | 29 | 29 | 3900 | 0 |
-| Career | 25 | 25 | 3900 | 195 |
+| Algorithms | 3343 | 30 | 3900 | 0 |
+| Architecture | 3123 | 30 | 3900 | 0 |
+| Backend | 3123 | 29 | 3900 | 0 |
+| Career | 2665 | 25 | 3900 | 195 |
 | CharacterLife | 39 | 0 | 0 | 0 |
-| Cpp | 29 | 29 | 3900 | 0 |
-| DailyCare | 75 | 36 | 3900 | 455 |
-| Database | 29 | 29 | 3900 | 0 |
-| Debugging | 27 | 27 | 3900 | 0 |
-| DressesHobbies | 75 | 75 | 2925 | 0 |
-| EasterEgg | 30 | 0 | 300 | 80 |
-| EmotionalSupport | 36 | 21 | 3900 | 975 |
-| EnglishPractice | 25 | 25 | 3900 | 195 |
-| Frontend | 28 | 28 | 3900 | 0 |
-| GitDevOps | 29 | 29 | 3900 | 0 |
-| Java | 26 | 26 | 3900 | 0 |
-| Networks | 24 | 24 | 3900 | 0 |
+| Cpp | 3336 | 29 | 3900 | 0 |
+| DailyCare | 779 | 36 | 3900 | 455 |
+| Database | 2892 | 29 | 3900 | 0 |
+| Debugging | 2444 | 27 | 3900 | 0 |
+| DressesHobbies | 2550 | 75 | 2925 | 0 |
+| EasterEgg | 224 | 0 | 300 | 80 |
+| EmotionalSupport | 1972 | 21 | 3900 | 975 |
+| EnglishPractice | 2586 | 25 | 3900 | 195 |
+| Frontend | 3111 | 28 | 3900 | 0 |
+| GitDevOps | 3111 | 29 | 3900 | 0 |
+| Java | 2592 | 26 | 3900 | 0 |
+| Networks | 3332 | 24 | 3900 | 0 |
 | ProactiveChat | 0 | 0 | 2925 | 0 |
-| Python | 25 | 25 | 3900 | 0 |
-| Study | 25 | 25 | 3900 | 195 |
+| Python | 3278 | 25 | 3900 | 0 |
+| Study | 2665 | 25 | 3900 | 195 |
 | SystemAmbient | 140 | 0 | 0 | 0 |
-| Systems | 24 | 24 | 3900 | 0 |
-| WanderingLife | 0 | 0 | 2925 | 1170 |
+| Systems | 3312 | 24 | 3900 | 0 |
+| WanderingLife | 1515 | 0 | 2925 | 1170 |
 
 ## Main enabled rewrite reasons
 
 | Rewrite reason | Enabled rows |
 | --- | --- |
+| restored audited legacy surface variant under a semantic scene | 51134 |
 | rewritten as a complete technical observation without reply pressure | 342 |
 | authored as an explicit standalone context-safe sentence | 204 |
+| preserved safe independent legacy EasterEgg after runtime safety audit | 192 |
 | expanded into distinct standalone character-life situations | 75 |
 | rewritten as cautious general care without claiming user state | 57 |
 | retained as a safe standalone easter egg | 30 |
+| explicit editorial adjudication: one rare full-name easter egg | 1 |
+| explicit editorial adjudication: one rare nickname easter egg | 1 |
+| human-authored dry-sharp sample about an ordinary habit without targeting the user | 1 |
+| human-authored dry-sharp sample about architecture without personal attack | 1 |
+| human-authored dry-sharp sample about code naming without personal attack | 1 |
+| human-authored dry-sharp sample aimed at debugging habits, not the user | 1 |
 | human-authored-angle:从旧物改造与归位结果发现节省乐趣 | 1 |
 | human-authored-angle:从饭后气味与开窗细节切入温和通风 | 1 |
 | human-authored-angle:以分装主食与添菜步骤支持快速成餐 | 1 |
@@ -245,23 +253,23 @@ Mapping kind: **topic-level rewritten outcome**. Each source row is authoritativ
 
 | source_line | topic_id | Archived fake-context original | Enabled topic outcome |
 | --- | --- | --- | --- |
-| 48556 | topic_study_39598576d0ea | 你又不是学不会，数据结构别光背定义要自己画一遍，每天推进一点就够了。 | 数据结构别光背定义要自己画一遍。 |
-| 48569 | topic_study_6461a6cd06b3 | 你又不是学不会，操作系统这章先抓住进程内存和文件，每天推进一点就够了。 | 操作系统这章先抓住进程内存和文件。 |
-| 48582 | topic_study_fa505e199d7e | 你又不是学不会，计算机网络从一次请求怎么走开始串，每天推进一点就够了。 | 计算机网络从一次请求怎么走开始串。 |
-| 48595 | topic_study_35cac5f24b8a | 你又不是学不会，数据库范式懂思想就别死抠术语，每天推进一点就够了。 | 数据库范式懂思想就别死抠术语。 |
-| 48608 | topic_study_f9326eb2ead8 | 你又不是学不会，离散数学看不顺先拿小例子代进去，每天推进一点就够了。 | 离散数学看不顺先拿小例子代进去。 |
-| 48621 | topic_study_735477b7b948 | 你又不是学不会，编译原理再抽象也能拆成几个阶段，每天推进一点就够了。 | 编译原理再抽象也能拆成几个阶段。 |
-| 48634 | topic_study_42ea48ed5e6f | 你又不是学不会，概率题先写清随机变量是什么，每天推进一点就够了。 | 概率题先写清随机变量是什么。 |
-| 48647 | topic_study_39b9b3d67fe1 | 你又不是学不会，线性代数别只会按按钮算矩阵，每天推进一点就够了。 | 线性代数别只会按按钮算矩阵。 |
-| 48660 | topic_study_7d0133a94912 | 你又不是学不会，英语文档每天啃一小段就会快起来，每天推进一点就够了。 | 英语文档每天啃一小段就会快起来。 |
-| 48673 | topic_study_0898e214b0c8 | 你又不是学不会，课堂代码最好关掉答案自己重写一次，每天推进一点就够了。 | 课堂代码最好关掉答案自己重写一次。 |
-| 48686 | topic_study_2053f4ca8a90 | 你又不是学不会，错题不复盘下次还会在同一个坑里摔，每天推进一点就够了。 | 错题不复盘下次还会在同一个坑里摔。 |
-| 48699 | topic_study_6cc1ae41def2 | 你又不是学不会，知识点能用自己的话解释才算真会，每天推进一点就够了。 | 知识点能用自己的话解释才算真会。 |
-| 48712 | topic_study_6022bc4459fd | 你又不是学不会，学习计划别排满给意外留点空位，每天推进一点就够了。 | 学习计划别排满给意外留点空位。 |
-| 48725 | topic_study_a6d6a3df77a2 | 你又不是学不会，注意力散了就把任务切成二十分钟，每天推进一点就够了。 | 注意力散了就把任务切成二十分钟。 |
-| 52456 | topic_career_3c52223c0e3d | 你又不是学不会，简历项目别只写用了什么技术，每天推进一点就够了。 | 简历项目别只写用了什么技术。 |
-| 52469 | topic_career_f7c03e019598 | 你又不是学不会，面试讲项目要把难点取舍和结果说清，每天推进一点就够了。 | 面试讲项目要把难点取舍和结果说清。 |
-| 52482 | topic_career_da7dbba721be | 你又不是学不会，算法题卡住时先把暴力思路讲出来，每天推进一点就够了。 | 算法题卡住时先把暴力思路讲出来。 |
-| 52495 | topic_career_5f6958f7a71a | 你又不是学不会，自我介绍别背得像客服录音，每天推进一点就够了。 | 自我介绍别背得像客服录音。 |
-| 52508 | topic_career_c455f43e7afe | 你又不是学不会，实习选择要看能不能真正做事，每天推进一点就够了。 | 实习选择要看能不能真正做事。 |
-| 52521 | topic_career_c2b2cbd1f3fc | 你又不是学不会，岗位要求写得吓人也可以先投，每天推进一点就够了。 | 岗位要求写得吓人也可以先投。 |
+| 48556 | topic_study_39598576d0ea | 你又不是学不会，数据结构别光背定义要自己画一遍，每天推进一点就够了。 | 你先听我说，数据结构别光背定义要自己画一遍，每天推进一点就够了。 |
+| 48569 | topic_study_6461a6cd06b3 | 你又不是学不会，操作系统这章先抓住进程内存和文件，每天推进一点就够了。 | 你先听我说，操作系统这章先抓住进程内存和文件，每天推进一点就够了。 |
+| 48582 | topic_study_fa505e199d7e | 你又不是学不会，计算机网络从一次请求怎么走开始串，每天推进一点就够了。 | 你先听我说，计算机网络从一次请求怎么走开始串，每天推进一点就够了。 |
+| 48595 | topic_study_35cac5f24b8a | 你又不是学不会，数据库范式懂思想就别死抠术语，每天推进一点就够了。 | 你先听我说，数据库范式懂思想就别死抠术语，每天推进一点就够了。 |
+| 48608 | topic_study_f9326eb2ead8 | 你又不是学不会，离散数学看不顺先拿小例子代进去，每天推进一点就够了。 | 你先听我说，离散数学看不顺先拿小例子代进去，每天推进一点就够了。 |
+| 48621 | topic_study_735477b7b948 | 你又不是学不会，编译原理再抽象也能拆成几个阶段，每天推进一点就够了。 | 你先听我说，编译原理再抽象也能拆成几个阶段，每天推进一点就够了。 |
+| 48634 | topic_study_42ea48ed5e6f | 你又不是学不会，概率题先写清随机变量是什么，每天推进一点就够了。 | 你先听我说，概率题先写清随机变量是什么，每天推进一点就够了。 |
+| 48647 | topic_study_39b9b3d67fe1 | 你又不是学不会，线性代数别只会按按钮算矩阵，每天推进一点就够了。 | 你先听我说，线性代数别只会按按钮算矩阵，每天推进一点就够了。 |
+| 48660 | topic_study_7d0133a94912 | 你又不是学不会，英语文档每天啃一小段就会快起来，每天推进一点就够了。 | 你先听我说，英语文档每天啃一小段就会快起来，每天推进一点就够了。 |
+| 48673 | topic_study_0898e214b0c8 | 你又不是学不会，课堂代码最好关掉答案自己重写一次，每天推进一点就够了。 | 你先听我说，课堂代码最好关掉答案自己重写一次，每天推进一点就够了。 |
+| 48686 | topic_study_2053f4ca8a90 | 你又不是学不会，错题不复盘下次还会在同一个坑里摔，每天推进一点就够了。 | 你先听我说，错题不复盘下次还会在同一个坑里摔，每天推进一点就够了。 |
+| 48699 | topic_study_6cc1ae41def2 | 你又不是学不会，知识点能用自己的话解释才算真会，每天推进一点就够了。 | 你先听我说，知识点能用自己的话解释才算真会，每天推进一点就够了。 |
+| 48712 | topic_study_6022bc4459fd | 你又不是学不会，学习计划别排满给意外留点空位，每天推进一点就够了。 | 你先听我说，学习计划别排满给意外留点空位，每天推进一点就够了。 |
+| 48725 | topic_study_a6d6a3df77a2 | 你又不是学不会，注意力散了就把任务切成二十分钟，每天推进一点就够了。 | 你先听我说，注意力散了就把任务切成二十分钟，每天推进一点就够了。 |
+| 48738 | topic_study_7ab27e5d1ce3 | 你又不是学不会，今天这章没吃透也不等于你笨，每天推进一点就够了。 | 你先听我说，今天这章没吃透也不等于你笨，每天推进一点就够了。 |
+| 52456 | topic_career_3c52223c0e3d | 你又不是学不会，简历项目别只写用了什么技术，每天推进一点就够了。 | 你先听我说，简历项目别只写用了什么技术，每天推进一点就够了。 |
+| 52469 | topic_career_f7c03e019598 | 你又不是学不会，面试讲项目要把难点取舍和结果说清，每天推进一点就够了。 | 你先听我说，面试讲项目要把难点取舍和结果说清，每天推进一点就够了。 |
+| 52482 | topic_career_da7dbba721be | 你又不是学不会，算法题卡住时先把暴力思路讲出来，每天推进一点就够了。 | 你先听我说，算法题卡住时先把暴力思路讲出来，每天推进一点就够了。 |
+| 52495 | topic_career_5f6958f7a71a | 你又不是学不会，自我介绍别背得像客服录音，每天推进一点就够了。 | 你先听我说，自我介绍别背得像客服录音，每天推进一点就够了。 |
+| 52508 | topic_career_c455f43e7afe | 你又不是学不会，实习选择要看能不能真正做事，每天推进一点就够了。 | 你先听我说，实习选择要看能不能真正做事，每天推进一点就够了。 |
