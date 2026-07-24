@@ -6,6 +6,7 @@ using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Effects;
 using System.Windows.Threading;
@@ -939,14 +940,45 @@ public sealed class WindowShellTests
                 var surface = Assert.IsType<LinearGradientBrush>(
                     window.FindResource("MenuSurfaceBrush"));
                 Assert.Equal(2, surface.GradientStops.Count);
+                Assert.Equal(Color.FromArgb(0xFA, 0xFF, 0xFD, 0xF7), surface.GradientStops[0].Color);
+                Assert.Equal(0, surface.GradientStops[0].Offset);
+                Assert.Equal(Color.FromArgb(0xE8, 0xFF, 0xE0, 0xEA), surface.GradientStops[1].Color);
+                Assert.Equal(1, surface.GradientStops[1].Offset);
+
+                var separatorBrush = Assert.IsType<LinearGradientBrush>(
+                    window.FindResource("MenuSeparatorBrush"));
+                Assert.Equal(3, separatorBrush.GradientStops.Count);
+                Assert.Equal(
+                    Color.FromArgb(0x00, 0xE9, 0x8F, 0xA4),
+                    separatorBrush.GradientStops[0].Color);
+                Assert.Equal(0, separatorBrush.GradientStops[0].Offset);
+                Assert.Equal(
+                    Color.FromArgb(0x99, 0xE9, 0x8F, 0xA4),
+                    separatorBrush.GradientStops[1].Color);
+                Assert.Equal(0.5, separatorBrush.GradientStops[1].Offset);
+                Assert.Equal(
+                    Color.FromArgb(0x00, 0xE9, 0x8F, 0xA4),
+                    separatorBrush.GradientStops[2].Color);
+                Assert.Equal(1, separatorBrush.GradientStops[2].Offset);
 
                 menu.IsOpen = true;
                 menu.ApplyTemplate();
                 window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                Assert.Equal(270, menu.MinWidth);
                 var shell = Assert.IsType<Border>(menu.Template.FindName("MenuShell", menu));
                 Assert.Equal(new CornerRadius(24), shell.CornerRadius);
                 Assert.Equal(new Thickness(2), shell.BorderThickness);
                 Assert.IsType<DropShadowEffect>(shell.Effect);
+                var presenter = Assert.IsType<ItemsPresenter>(shell.Child);
+                Assert.Equal(
+                    KeyboardNavigationMode.Cycle,
+                    KeyboardNavigation.GetDirectionalNavigation(presenter));
+
+                var separator = Assert.IsType<Separator>(menu.Items[3]);
+                separator.ApplyTemplate();
+                var separatorChrome = Assert.IsType<Border>(
+                    VisualTreeHelper.GetChild(separator, 0));
+                Assert.Same(separatorBrush, separatorChrome.Background);
 
                 var say = Assert.IsType<MenuItem>(window.FindName("SayMenuItem"));
                 say.ApplyTemplate();
@@ -954,16 +986,91 @@ public sealed class WindowShellTests
                     say.Template.FindName("MenuItemChrome", say));
                 Assert.Equal(new CornerRadius(14), chrome.CornerRadius);
                 Assert.Equal(35, say.MinHeight);
+                Assert.Equal("✦", say.Tag);
+                Assert.Equal("♡", Assert.IsType<MenuItem>(window.FindName("GreetingMenuItem")).Tag);
+                Assert.Equal("☾", Assert.IsType<MenuItem>(window.FindName("PauseMenuItem")).Tag);
+                Assert.Equal("⌁", Assert.IsType<MenuItem>(window.FindName("TopmostMenuItem")).Tag);
+                Assert.Equal("⌂", Assert.IsType<MenuItem>(window.FindName("RestorePositionMenuItem")).Tag);
+                Assert.Equal("☁", Assert.IsType<MenuItem>(window.FindName("ExitMenuItem")).Tag);
+
+                var hoverBrush = Assert.IsType<SolidColorBrush>(
+                    window.FindResource("MenuItemHoverBrush"));
+                var innerHighlightBrush = Assert.IsType<SolidColorBrush>(
+                    window.FindResource("MenuInnerHighlightBrush"));
+                var hoverTrigger = say.Template.Triggers
+                    .OfType<Trigger>()
+                    .Single(trigger =>
+                        trigger.Property == MenuItem.IsHighlightedProperty
+                        && Equals(trigger.Value, true));
+                var hoverSetters = hoverTrigger.Setters.OfType<Setter>().ToArray();
+                Assert.Same(
+                    hoverBrush,
+                    hoverSetters.Single(setter =>
+                        setter.TargetName == "MenuItemChrome"
+                        && setter.Property == Border.BackgroundProperty).Value);
+                Assert.Same(
+                    innerHighlightBrush,
+                    hoverSetters.Single(setter =>
+                        setter.TargetName == "MenuItemChrome"
+                        && setter.Property == Border.BorderBrushProperty).Value);
+
+                var disabledTrigger = say.Template.Triggers
+                    .OfType<Trigger>()
+                    .Single(trigger =>
+                        trigger.Property == UIElement.IsEnabledProperty
+                        && Equals(trigger.Value, false));
+                var disabledSetter = Assert.Single(disabledTrigger.Setters.OfType<Setter>());
+                Assert.Equal("MenuItemChrome", disabledSetter.TargetName);
+                Assert.Equal(UIElement.OpacityProperty, disabledSetter.Property);
+                Assert.Equal(0.46, Assert.IsType<double>(disabledSetter.Value));
 
                 size = menu.Items
                     .OfType<MenuItem>()
                     .Single(item => Equals(item.Header, "大小"));
+                Assert.Equal("◌", size.Tag);
                 size.ApplyTemplate();
-                size.IsSubmenuOpen = true;
+                Assert.Equal(MenuItemRole.SubmenuHeader, size.Role);
+                var submenuArrow = Assert.IsType<TextBlock>(
+                    size.Template.FindName("SubmenuArrow", size));
+                Assert.Equal("›", submenuArrow.Text);
+                Assert.Equal(Visibility.Visible, submenuArrow.Visibility);
+
+                Assert.True(size.Focus());
+                var presentationSource = PresentationSource.FromVisual(size);
+                Assert.NotNull(presentationSource);
+                size.RaiseEvent(new KeyEventArgs(
+                    Keyboard.PrimaryDevice,
+                    presentationSource!,
+                    Environment.TickCount,
+                    Key.Right)
+                {
+                    RoutedEvent = Keyboard.KeyDownEvent
+                });
                 window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
                 var popup = Assert.IsType<Popup>(
                     size.Template.FindName("PART_Popup", size));
+                Assert.True(size.IsSubmenuOpen);
                 Assert.True(popup.IsOpen);
+
+                var popupGrid = Assert.IsType<Grid>(popup.Child);
+                var submenuShell = Assert.IsType<Border>(popupGrid.Children[0]);
+                var submenuItemsHost = Assert.IsType<StackPanel>(submenuShell.Child);
+                Assert.True(submenuItemsHost.IsItemsHost);
+                Assert.Equal(
+                    KeyboardNavigationMode.Cycle,
+                    KeyboardNavigation.GetDirectionalNavigation(submenuItemsHost));
+
+                var normal = Assert.IsType<MenuItem>(window.FindName("NormalSizeMenuItem"));
+                normal.ApplyTemplate();
+                var checkedGlyph = Assert.IsType<TextBlock>(
+                    normal.Template.FindName("IconGlyph", normal));
+                Assert.Equal("✓", checkedGlyph.Text);
+
+                var small = Assert.IsType<MenuItem>(window.FindName("SmallSizeMenuItem"));
+                small.ApplyTemplate();
+                var uncheckedGlyph = Assert.IsType<TextBlock>(
+                    small.Template.FindName("IconGlyph", small));
+                Assert.Equal(string.Empty, uncheckedGlyph.Text);
             }
             finally
             {
