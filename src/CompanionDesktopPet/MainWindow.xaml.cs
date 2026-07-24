@@ -41,6 +41,7 @@ public partial class MainWindow : Window
     private bool _runningSmokeProbe;
     private bool _isClosed;
     private bool _lastKnownAutoStart;
+    private bool _trayAvailable;
     private bool _exitCommandRunning;
     private PetAmbientAction _pendingAmbientAction;
     private long _ambientScheduleGeneration;
@@ -205,6 +206,7 @@ public partial class MainWindow : Window
         RestorePositionMenuItem.Click += RestorePosition_Click;
         HideToTrayMenuItem.Click += HideToTray_Click;
         ExitMenuItem.Click += Exit_Click;
+        UpdateTrayAvailabilityControls();
         _bubbleTimer.Tick += BubbleTimer_Tick;
         _automaticTimer.Tick += AutomaticTimer_Tick;
         _memoryTimer.Tick += MemoryTimer_Tick;
@@ -1006,10 +1008,39 @@ public partial class MainWindow : Window
 
     internal void HideToTray()
     {
-        if (!InteractionFrozen)
+        if (!InteractionFrozen && _trayAvailable)
         {
             Hide();
         }
+    }
+
+    internal void SetTrayAvailability(bool available)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.Invoke(() => SetTrayAvailability(available));
+            return;
+        }
+
+        if (InteractionFrozen && available)
+        {
+            return;
+        }
+
+        _trayAvailable = available;
+        UpdateTrayAvailabilityControls();
+        if (!available && !_isClosed && !_exitCommandRunning)
+        {
+            RestoreVisibleWindow();
+        }
+    }
+
+    private void UpdateTrayAvailabilityControls()
+    {
+        HideToTrayMenuItem.IsEnabled = _trayAvailable;
+        HideToTrayMenuItem.ToolTip = _trayAvailable
+            ? null
+            : "托盘暂时不可用，桌宠会保持显示。";
     }
 
     internal void ToggleVisibilityFromTray()
@@ -1019,15 +1050,38 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (!_trayAvailable)
+        {
+            RestoreVisibleWindow();
+            return;
+        }
+
         if (IsVisible)
         {
             HideToTray();
             return;
         }
 
+        RestoreVisibleWindow();
+    }
+
+    private void RestoreVisibleWindow()
+    {
         Show();
         WindowState = WindowState.Normal;
         Activate();
+    }
+
+    internal TrayMenuState GetTrayMenuState()
+    {
+        if (_autoStartService.TryGetEnabled(out var enabled))
+        {
+            SetKnownAutoStartState(enabled);
+            return new TrayMenuState(IsVisible, _paused, enabled, true);
+        }
+
+        MarkAutoStartUnavailable();
+        return new TrayMenuState(IsVisible, _paused, _lastKnownAutoStart, false);
     }
 
     internal bool TryReadAutoStart(out bool enabled) =>

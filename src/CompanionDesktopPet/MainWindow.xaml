@@ -92,7 +92,10 @@
                     ToolTipService.ShowOnDisabled="True" />
           <MenuItem x:Name="RestorePositionMenuItem" Header="回到右下角" Tag="⌂" />
           <Separator />
-          <MenuItem x:Name="HideToTrayMenuItem" Header="藏到托盘里 ♡" Tag="☾" />
+          <MenuItem x:Name="HideToTrayMenuItem"
+                    Header="藏到托盘里 ♡"
+                    Tag="☾"
+                    ToolTipService.ShowOnDisabled="True" />
           <MenuItem x:Name="ExitMenuItem" Header="先休息啦（退出）" Tag="☁" />
         </ContextMenu>
       </Grid.ContextMenu>

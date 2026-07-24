@@ -16,6 +16,7 @@ using CompanionDesktopPet.UI;
 
 namespace CompanionDesktopPet.Tests;
 
+[Collection(WpfApplicationCollection.Name)]
 public sealed class WindowShellTests
 {
     private static readonly Lazy<StaTestHost> StaHost = new(() => new StaTestHost());
@@ -823,6 +824,78 @@ public sealed class WindowShellTests
     }
 
     [Fact]
+    public void MainWindow_SystemCommands_HideIsGuardedUntilTrayIsAvailable()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var window = CreateWindowWithAutoStart(
+                settingsDirectory,
+                new FakeAutoStartService());
+            try
+            {
+                var hideItem = Assert.IsType<MenuItem>(window.FindName("HideToTrayMenuItem"));
+                Assert.False(hideItem.IsEnabled);
+                Assert.NotNull(hideItem.ToolTip);
+                Assert.True(ToolTipService.GetShowOnDisabled(hideItem));
+
+                window.Show();
+                window.HideToTray();
+
+                Assert.True(window.IsVisible);
+
+                window.SetTrayAvailability(true);
+                Assert.True(hideItem.IsEnabled);
+                Assert.Null(hideItem.ToolTip);
+                window.HideToTray();
+                Assert.False(window.IsVisible);
+
+                window.WindowState = WindowState.Minimized;
+                window.SetTrayAvailability(false);
+                Assert.True(window.IsVisible);
+                Assert.Equal(WindowState.Normal, window.WindowState);
+                Assert.True(window.IsActive);
+                Assert.False(hideItem.IsEnabled);
+                Assert.NotNull(hideItem.ToolTip);
+            }
+            finally
+            {
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
+    public void MainWindow_SystemCommands_TrayStatePreservesLastCheckWhenReadIsUnavailable()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var autoStart = new FakeAutoStartService { Enabled = true };
+            var window = CreateWindowWithAutoStart(settingsDirectory, autoStart);
+            try
+            {
+                var available = window.GetTrayMenuState();
+                Assert.True(available.IsAutoStartAvailable);
+                Assert.True(available.IsAutoStartEnabled);
+
+                autoStart.ReadSucceeds = false;
+                autoStart.Enabled = false;
+                var unavailable = window.GetTrayMenuState();
+
+                Assert.False(unavailable.IsAutoStartAvailable);
+                Assert.True(unavailable.IsAutoStartEnabled);
+            }
+            finally
+            {
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
     public void MainWindow_SystemCommands_HideAndShowPreserveWindowLifetime()
     {
         RunOnStaThread(() =>
@@ -839,6 +912,7 @@ public sealed class WindowShellTests
             try
             {
                 window.Show();
+                window.SetTrayAvailability(true);
                 window.HideToTray();
 
                 Assert.False(window.IsVisible);
@@ -1800,6 +1874,13 @@ public sealed class WindowShellTests
 
         public StaTestHost()
         {
+            if (Application.Current is { } existingApplication)
+            {
+                _application = existingApplication;
+                _dispatcher = existingApplication.Dispatcher;
+                return;
+            }
+
             Application? application = null;
             Dispatcher? dispatcher = null;
             Exception? initializationException = null;

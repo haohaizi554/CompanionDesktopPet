@@ -1,3 +1,4 @@
+using System.Drawing;
 using System.IO;
 using System.Windows;
 using System.Windows.Threading;
@@ -8,6 +9,8 @@ namespace CompanionDesktopPet;
 public partial class App : System.Windows.Application
 {
     private SingleInstanceGuard? _instanceGuard;
+    private IAutoStartService? _autoStartService;
+    private TrayIconService? _trayIconService;
     private bool _smokeTest;
     private string? _smokeDirectory;
 
@@ -41,7 +44,14 @@ public partial class App : System.Windows.Application
             var settings = await settingsService.LoadAsync();
             var agentMemoryService = new AgentMemoryService(_smokeDirectory);
             var agentMemory = await agentMemoryService.LoadAsync();
-            var window = new MainWindow(settings, settingsService, agentMemoryService, agentMemory);
+            var factories = AppSystemIntegrationFactories.Default;
+            _autoStartService = CreateAutoStartService(_smokeTest, factories);
+            var window = new MainWindow(
+                settings,
+                settingsService,
+                agentMemoryService,
+                agentMemory,
+                _autoStartService);
             if (_smokeTest)
             {
                 window.ContentRendered += HandleSmokeContentRendered;
@@ -49,6 +59,7 @@ public partial class App : System.Windows.Application
 
             MainWindow = window;
             window.Show();
+            _trayIconService = TryCreateTrayService(_smokeTest, window, factories);
         }
         catch when (_smokeTest)
         {
@@ -59,7 +70,99 @@ public partial class App : System.Windows.Application
     protected override void OnExit(ExitEventArgs e)
     {
         DispatcherUnhandledException -= HandleDispatcherException;
-        _instanceGuard?.Dispose();
+        var trayIconService = _trayIconService;
+        _trayIconService = null;
+        var instanceGuard = _instanceGuard;
+        _instanceGuard = null;
+        try
+        {
+            DisposeOwnedIntegrations(
+                trayIconService,
+                instanceGuard,
+                DeleteSmokeDirectory);
+        }
+        finally
+        {
+            base.OnExit(e);
+        }
+    }
+
+    internal static IAutoStartService CreateAutoStartService(
+        bool smokeTest,
+        AppSystemIntegrationFactories factories)
+    {
+        ArgumentNullException.ThrowIfNull(factories);
+        return smokeTest
+            ? DisabledAutoStartService.Instance
+            : factories.CreateWindowsAutoStartService();
+    }
+
+    internal static TrayIconService? TryCreateTrayService(
+        bool smokeTest,
+        MainWindow? window,
+        AppSystemIntegrationFactories factories)
+    {
+        ArgumentNullException.ThrowIfNull(factories);
+        if (smokeTest)
+        {
+            return null;
+        }
+
+        ArgumentNullException.ThrowIfNull(window);
+        TrayIconService? trayIconService = null;
+        try
+        {
+            using var stream = factories.LoadTrayIconStream()
+                ?? throw new FileNotFoundException("The tray icon resource is unavailable.");
+            using var sourceIcon = new Icon(stream);
+            trayIconService = factories.CreateTrayIconService(
+                window.Dispatcher,
+                sourceIcon,
+                window);
+            window.SetTrayAvailability(true);
+            return trayIconService;
+        }
+        catch
+        {
+            trayIconService?.Dispose();
+            window.SetTrayAvailability(false);
+            return null;
+        }
+    }
+
+    internal static Stream? LoadTrayIconStream()
+    {
+        var resource = GetResourceStream(new Uri(
+            "/CompanionDesktopPet;component/Assets/pet.ico",
+            UriKind.Relative));
+        return resource?.Stream;
+    }
+
+    internal static void DisposeOwnedIntegrations(
+        IDisposable? trayIconService,
+        IDisposable? instanceGuard,
+        Action finalCleanup)
+    {
+        ArgumentNullException.ThrowIfNull(finalCleanup);
+        try
+        {
+            trayIconService?.Dispose();
+        }
+        finally
+        {
+            try
+            {
+                instanceGuard?.Dispose();
+            }
+            finally
+            {
+                finalCleanup();
+            }
+        }
+    }
+
+    private void DeleteSmokeDirectory()
+    {
         if (_smokeDirectory is not null)
         {
             try
@@ -70,8 +173,6 @@ public partial class App : System.Windows.Application
             {
             }
         }
-
-        base.OnExit(e);
     }
 
     private async void HandleSmokeContentRendered(object? sender, EventArgs e)
@@ -122,4 +223,37 @@ public partial class App : System.Windows.Application
         e.Handled = true;
         Shutdown(1);
     }
+}
+
+internal sealed class AppSystemIntegrationFactories
+{
+    internal static AppSystemIntegrationFactories Default { get; } = new(
+        () => new WindowsAutoStartService(),
+        App.LoadTrayIconStream,
+        static (dispatcher, icon, window) => new TrayIconService(
+            dispatcher,
+            icon,
+            window.GetTrayMenuState,
+            window.ToggleVisibilityFromTray,
+            window.SaySomething,
+            window.ToggleAnimationAsync,
+            window.ToggleAutoStartFromTray,
+            window.RequestExitAsync));
+
+    internal AppSystemIntegrationFactories(
+        Func<IAutoStartService> createWindowsAutoStartService,
+        Func<Stream?> loadTrayIconStream,
+        Func<Dispatcher, Icon, MainWindow, TrayIconService> createTrayIconService)
+    {
+        CreateWindowsAutoStartService = createWindowsAutoStartService
+            ?? throw new ArgumentNullException(nameof(createWindowsAutoStartService));
+        LoadTrayIconStream = loadTrayIconStream
+            ?? throw new ArgumentNullException(nameof(loadTrayIconStream));
+        CreateTrayIconService = createTrayIconService
+            ?? throw new ArgumentNullException(nameof(createTrayIconService));
+    }
+
+    internal Func<IAutoStartService> CreateWindowsAutoStartService { get; }
+    internal Func<Stream?> LoadTrayIconStream { get; }
+    internal Func<Dispatcher, Icon, MainWindow, TrayIconService> CreateTrayIconService { get; }
 }
