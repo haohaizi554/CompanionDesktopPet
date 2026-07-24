@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+from .contract import PERSONA_CONTRACT
 from .loader import CorpusFormatError, load_v2
 from .models import CorpusLine
 from .normalization import normalize_text
@@ -701,12 +702,22 @@ def _looks_like_pii(text: str) -> bool:
 def _trigger_context_conflict(trigger: object, tokens: tuple[str, ...] | None) -> bool:
     if not isinstance(trigger, str) or tokens is None:
         return False
+    trigger_by_time_token = PERSONA_CONTRACT.temporal["context_token_trigger"]
+    if not isinstance(trigger_by_time_token, Mapping):
+        raise RuntimeError("persona temporal contract is malformed")
+    allowed_time_values = frozenset(
+        token.split(":", 1)[1]
+        for token, mapped_trigger in trigger_by_time_token.items()
+        if isinstance(token, str)
+        and token.startswith("time:")
+        and mapped_trigger == trigger
+    )
     expected = {
-        "morning": ("time", frozenset({"dawn", "morning"})),
-        "noon": ("time", frozenset({"noon"})),
-        "afternoon": ("time", frozenset({"afternoon"})),
-        "evening": ("time", frozenset({"evening"})),
-        "late_night": ("time", frozenset({"late_night"})),
+        "morning": ("time", allowed_time_values),
+        "noon": ("time", allowed_time_values),
+        "afternoon": ("time", allowed_time_values),
+        "evening": ("time", allowed_time_values),
+        "late_night": ("time", allowed_time_values),
         "weekday": ("day", frozenset({"weekday"})),
         "weekend": ("day", frozenset({"weekend"})),
     }.get(trigger)

@@ -138,6 +138,30 @@ def fixture_result(seed: int = 20260722) -> BuildResult:
 
 
 class BuildContractTests(unittest.TestCase):
+    def test_catalog_declares_career_and_growth_groups_without_builder_overrides(self) -> None:
+        from src.persona_corpus.content_catalog import CONTENT_CATALOG
+
+        expected = {
+            "Career": "career",
+            "Study": "growth",
+            "EnglishPractice": "growth",
+        }
+        affected = [entry for entry in CONTENT_CATALOG if entry.category in expected]
+
+        self.assertTrue(affected)
+        self.assertTrue(
+            all(entry.category_group == expected[entry.category] for entry in affected)
+        )
+
+    def test_dawn_context_catalog_rows_map_to_reachable_late_night_trigger(self) -> None:
+        from src.persona_corpus.builder import _runtime_trigger
+        from src.persona_corpus.content_catalog import CONTENT_CATALOG
+
+        dawn = [entry for entry in CONTENT_CATALOG if entry.required_context == "time:dawn"]
+
+        self.assertTrue(dawn)
+        self.assertTrue(all(_runtime_trigger(entry) == "late_night" for entry in dawn))
+
     def test_content_catalog_is_materialized_complete_sentences_not_a_product(self) -> None:
         from src.persona_corpus.content_catalog import CONTENT_CATALOG
 

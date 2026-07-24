@@ -10,6 +10,7 @@ from types import MappingProxyType
 from typing import Iterable, Mapping, Sequence, TypeVar
 
 from .content_catalog import CONTENT_CATALOG, CatalogEntry
+from .contract import PERSONA_CONTRACT, category_group_for
 from .extraction import SourceMapping
 from .models import CorpusLine, LegacyLine
 from .normalization import normalize_text
@@ -79,11 +80,6 @@ TONE_ALIASES = {
     "soft_playful": "playful",
     "playful_rare": "playful",
 }
-CATEGORY_GROUP_OVERRIDES = {
-    "Career": "career",
-    "Study": "growth",
-    "EnglishPractice": "growth",
-}
 SOURCE_KIND_ALIASES = {
     "topic_rewrite": "rewritten_topic",
     "curated_authored": "curated_standalone",
@@ -97,8 +93,18 @@ def _runtime_trigger(entry: CatalogEntry) -> str:
     if entry.trigger == "idle":
         return "any"
     if entry.trigger == "time_event":
-        daypart = entry.variant_id.split(".", 2)[1]
-        return "morning" if daypart == "dawn" else daypart
+        trigger_by_token = PERSONA_CONTRACT.temporal["context_token_trigger"]
+        if not isinstance(trigger_by_token, Mapping):
+            raise ValueError("persona temporal contract is malformed")
+        try:
+            trigger = trigger_by_token[entry.required_context]
+        except KeyError as error:
+            raise ValueError(
+                f"time_event variant {entry.variant_id!r} has no reachable context mapping"
+            ) from error
+        if not isinstance(trigger, str):
+            raise ValueError("persona temporal trigger mapping must contain strings")
+        return trigger
     if entry.trigger == "date_event":
         return "weekend" if ".weekend." in entry.variant_id else "day_changed"
     if entry.trigger == "season_event":
@@ -262,6 +268,12 @@ def _catalog_reference(
 def _catalog_to_corpus(
     entry: CatalogEntry, topic_id: str, source_reference: str
 ) -> CorpusLine:
+    canonical_group = category_group_for(entry.category)
+    if entry.category_group != canonical_group:
+        raise ValueError(
+            f"catalog category {entry.category!r} must declare category_group "
+            f"{canonical_group!r}, found {entry.category_group!r}"
+        )
     if any(mark in entry.text for mark in QUESTION_MARKS):
         raise ValueError(f"enabled catalog entry contains a question mark: {entry.text!r}")
     if _looks_like_pii(entry.text):
@@ -271,7 +283,7 @@ def _catalog_to_corpus(
     return CorpusLine(
         id=catalog_line_id(entry),
         category=entry.category,
-        category_group=CATEGORY_GROUP_OVERRIDES.get(entry.category, entry.category_group),
+        category_group=entry.category_group,
         topic_id=topic_id,
         semantic_group=entry.semantic_group,
         output_mode=(

@@ -62,7 +62,7 @@ Technical, growth, and career now each contain a meaningful mixture of one- and 
 
 | File | Data rows | SHA-256 |
 | --- | ---: | --- |
-| `persona-corpus-v2.tsv` | 800 | `5f6f1aa3b0f88a1491d3cce54f355c9829513565822463ea4219a54ed536d39d` |
+| `persona-corpus-v2.tsv` | 800 | `dec995ab2ed26e96592479d00406e213002bda75b939dc0a028b0ce876a57776` |
 | `persona-corpus-archive.tsv` | 75,375 | `1c9c5afc86feae7e3642aee33f0f6fd1427bd02b28cebaabb51aa9fdaba82eb8` |
 | `persona-corpus-review.tsv` | 3,265 | `a251b1e01003a078d7912f71099e57c5c6830a75195558ea61428105990b866a` |
 | `pii-review.tsv` | 1,248 | `702037759f730759be83fb1c643a8f61382fa1c3f8f2a25e2c0351a177eec6e7` |

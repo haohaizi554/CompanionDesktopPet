@@ -298,6 +298,21 @@ def clean_simulation() -> tuple[list[CorpusLine], dict[str, object], dict[str, o
 
 
 class ValidationContractTests(unittest.TestCase):
+    def test_dawn_context_is_compatible_with_the_late_night_daypart_trigger(self) -> None:
+        report = validate_corpus(
+            [
+                valid_line(
+                    trigger="late_night",
+                    required_context="time:dawn",
+                    text="天快亮时，窗沿先收住一小片浅色。",
+                )
+            ],
+            valid_config(),
+            {"exceptions": []},
+        )
+
+        self.assertNotIn("trigger_context_conflict", issue_codes(report))
+
     def test_all_twenty_seven_authoritative_groups_are_named_once(self) -> None:
         self.assertEqual(27, len(VALIDATION_GROUPS))
         self.assertEqual(tuple(range(1, 28)), tuple(number for number, _ in VALIDATION_GROUPS))

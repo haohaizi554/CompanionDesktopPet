@@ -1,0 +1,243 @@
+{
+  "schema_version": 1,
+  "category_groups": [
+    "technical",
+    "growth",
+    "career",
+    "daily_care",
+    "emotional_reflection",
+    "character_life",
+    "easter_egg",
+    "system_ambient"
+  ],
+  "categories": {
+    "Debugging": "technical",
+    "Python": "technical",
+    "Java": "technical",
+    "Cpp": "technical",
+    "Frontend": "technical",
+    "Backend": "technical",
+    "Database": "technical",
+    "Algorithms": "technical",
+    "Systems": "technical",
+    "Networks": "technical",
+    "GitDevOps": "technical",
+    "Architecture": "technical",
+    "Study": "growth",
+    "EnglishPractice": "growth",
+    "Career": "career",
+    "DailyCare": "daily_care",
+    "EmotionalSupport": "emotional_reflection",
+    "ProactiveChat": "character_life",
+    "WanderingLife": "character_life",
+    "DressesHobbies": "character_life",
+    "CharacterLife": "character_life",
+    "EasterEgg": "easter_egg",
+    "SystemAmbient": "system_ambient"
+  },
+  "controlled_values": {
+    "output_modes": [
+      "self_talk",
+      "ambient",
+      "user_direct",
+      "system_observe"
+    ],
+    "tones": [
+      "calm",
+      "gentle",
+      "playful",
+      "dry",
+      "dry_sharp",
+      "serious",
+      "sleepy",
+      "nostalgic",
+      "curious",
+      "intimate",
+      "encouraging"
+    ],
+    "source_kinds": [
+      "rewritten_topic",
+      "curated_standalone",
+      "preserved_easter_egg",
+      "new_ambient",
+      "archived_question",
+      "manual_review"
+    ],
+    "context_tokens": [
+      "none",
+      "app_started",
+      "holiday",
+      "anniversary",
+      "ide_foreground",
+      "active_90m",
+      "idle_return",
+      "not_fullscreen",
+      "day:weekday",
+      "day:weekend",
+      "time:dawn",
+      "time:morning",
+      "time:noon",
+      "time:afternoon",
+      "time:evening",
+      "time:late_night",
+      "season:spring",
+      "season:summer",
+      "season:autumn",
+      "season:winter",
+      "date:holiday",
+      "date:month_boundary"
+    ],
+    "mvp_triggers": [
+      "any",
+      "app_start",
+      "morning",
+      "noon",
+      "afternoon",
+      "evening",
+      "late_night",
+      "day_changed",
+      "weekday",
+      "weekend",
+      "holiday",
+      "anniversary",
+      "long_silence"
+    ],
+    "future_triggers": [
+      "ide_foreground",
+      "long_active",
+      "idle_return",
+      "story_timer"
+    ]
+  },
+  "scheduler": {
+    "category_group_weights": {
+      "technical": 0.18,
+      "growth": 0.10,
+      "career": 0.07,
+      "daily_care": 0.10,
+      "emotional_reflection": 0.10,
+      "character_life": 0.27,
+      "easter_egg": 0.10,
+      "system_ambient": 0.08
+    },
+    "output_mode_targets": {
+      "self_talk": 0.45,
+      "ambient": 0.25,
+      "user_direct": 0.10,
+      "system_observe": 0.20
+    },
+    "runtime_limits": {
+      "minimum_interval_minutes": 8,
+      "max_outputs_per_hour": 2,
+      "late_night_max_outputs_per_hour": 1,
+      "semantic_group_no_repeat": true,
+      "block_adjacent_category_groups": [
+        "technical",
+        "daily_care",
+        "emotional_reflection",
+        "easter_egg"
+      ],
+      "technical_recent_window": 5,
+      "technical_recent_max": 2,
+      "user_direct_recent_window": 10,
+      "user_direct_recent_max": 2,
+      "easter_egg_recent_window": 10,
+      "easter_egg_recent_max": 1,
+      "long_silence_minutes": 180,
+      "interrupt_cost_minimum_intervals_minutes": {
+        "0": 8,
+        "1": 12,
+        "2": 16,
+        "3": 24,
+        "4": 40,
+        "5": 60
+      }
+    },
+    "acceptance": {
+      "technical_playback_ratio": [
+        0.10,
+        0.20
+      ],
+      "easter_egg_playback_ratio": [
+        0.08,
+        0.12
+      ],
+      "self_talk_ambient_minimum": 0.65,
+      "user_direct_maximum": 0.15
+    }
+  },
+  "dry_sharp": {
+    "inventory_target": 0.05,
+    "inventory_acceptance": [
+      0.04,
+      0.06
+    ],
+    "inventory_enforcement_minimum_rows": 5000,
+    "bootstrap_minimum_rows": 4,
+    "playback_target": 0.03,
+    "playback_acceptance": [
+      0.02,
+      0.04
+    ],
+    "recent_window": 20,
+    "recent_max": 1,
+    "forbidden_category_groups": [
+      "daily_care",
+      "emotional_reflection",
+      "easter_egg"
+    ],
+    "forbidden_triggers": [
+      "late_night",
+      "holiday",
+      "anniversary"
+    ],
+    "forbidden_context_tokens": [
+      "holiday",
+      "anniversary",
+      "time:late_night",
+      "date:holiday"
+    ]
+  },
+  "temporal": {
+    "daypart_hours": {
+      "morning": [
+        [6, 11]
+      ],
+      "noon": [
+        [11, 14]
+      ],
+      "afternoon": [
+        [14, 18]
+      ],
+      "evening": [
+        [18, 23]
+      ],
+      "late_night": [
+        [0, 6],
+        [23, 24]
+      ]
+    },
+    "context_token_hours": {
+      "time:dawn": [4, 6],
+      "time:morning": [6, 11],
+      "time:noon": [11, 14],
+      "time:afternoon": [14, 18],
+      "time:evening": [18, 23],
+      "time:late_night": [0, 6]
+    },
+    "context_token_trigger": {
+      "time:dawn": "late_night",
+      "time:morning": "morning",
+      "time:noon": "noon",
+      "time:afternoon": "afternoon",
+      "time:evening": "evening",
+      "time:late_night": "late_night"
+    }
+  },
+  "lineage": {
+    "legacy_source_min_line": 1,
+    "legacy_source_max_line": 75375,
+    "legacy_reference_pattern": "^legacy:(\\d+);topic:([A-Za-z0-9._-]+);variant:([A-Za-z0-9._-]+)$",
+    "catalog_reference_pattern": "^catalog:([A-Za-z0-9._:-]+);variant:([A-Za-z0-9._-]+)$"
+  }
+}
