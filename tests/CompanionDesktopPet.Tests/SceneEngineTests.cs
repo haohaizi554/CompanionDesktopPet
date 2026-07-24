@@ -103,6 +103,41 @@ public sealed class SceneEngineTests
     }
 
     [Fact]
+    public void History_EasterEggQuotaImplementsTenPercentAndBlocksAdjacency()
+    {
+        Assert.Equal(10, SceneHistory.EasterEggRecentWindow);
+        Assert.Equal(1, SceneHistory.EasterEggRecentMaximum);
+        Assert.Contains(DialogueCategoryGroup.EasterEgg, DialogueForest.BlockAdjacentCategoryGroups);
+    }
+
+    [Fact]
+    public void SceneWeight_IsSemanticWeightAndDoesNotGrowWithVariantCount()
+    {
+        var line = PersonaCorpus.All.First(item => item.CategoryGroup == DialogueCategoryGroup.Technical);
+        var one = SceneCatalog.CreateScene("one", [line]);
+        var second = line with { Id = line.Id + ".second", Text = line.Text + " 第二种说法。" };
+        var two = SceneCatalog.CreateScene("two", [line, second]);
+
+        Assert.Equal(one.Weight, two.Weight);
+        Assert.Equal(line.Weight, two.Weight);
+    }
+
+    [Fact]
+    public void SceneWeight_RejectsInconsistentSemanticVariants()
+    {
+        var line = PersonaCorpus.All.First(item => item.CategoryGroup == DialogueCategoryGroup.Technical);
+        var inconsistent = line with
+        {
+            Id = line.Id + ".bad-weight",
+            Text = line.Text + " 权重不一致。",
+            Weight = line.Weight / 2
+        };
+
+        Assert.Throws<InvalidOperationException>(() =>
+            SceneCatalog.CreateScene("bad", [line, inconsistent]));
+    }
+
+    [Fact]
     public void StoryArcs_UseOnlyEnabledV2Lines()
     {
         var enabledIds = PersonaCorpus.All.Select(line => line.Id).ToHashSet(StringComparer.Ordinal);
@@ -167,7 +202,7 @@ public sealed class SceneEngineTests
             CharacterState.Create(now));
         var tokens = ContextTokens(context);
 
-        Assert.Equal(DialogueTrigger.Morning, DayPart(now));
+        Assert.Equal(DialogueTrigger.LateNight, DayPart(now));
         Assert.Contains("time:dawn", tokens);
         Assert.DoesNotContain("time:morning", tokens);
         Assert.DoesNotContain("time:late_night", tokens);

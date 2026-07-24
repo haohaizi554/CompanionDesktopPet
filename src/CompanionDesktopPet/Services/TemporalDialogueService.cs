@@ -53,7 +53,8 @@ public static class TemporalDialogueService
 
     internal static DialogueTrigger GetDialogueTrigger(DateTime dateTime) => GetTimePeriod(dateTime) switch
     {
-        TimePeriod.Dawn or TimePeriod.Morning => DialogueTrigger.Morning,
+        TimePeriod.Dawn => DialogueTrigger.LateNight,
+        TimePeriod.Morning => DialogueTrigger.Morning,
         TimePeriod.Noon => DialogueTrigger.Noon,
         TimePeriod.Afternoon => DialogueTrigger.Afternoon,
         TimePeriod.Evening => DialogueTrigger.Evening,

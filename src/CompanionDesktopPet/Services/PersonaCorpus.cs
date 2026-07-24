@@ -113,26 +113,9 @@ public static class PersonaCorpus
     ];
 
     private static readonly Lazy<CorpusSnapshot> Snapshot = new(Build);
-    private static readonly HashSet<string> ControlledTones = new(StringComparer.Ordinal)
-    {
-        "calm", "gentle", "playful", "dry", "serious", "sleepy", "nostalgic", "curious", "intimate",
-        "encouraging"
-    };
-    private static readonly HashSet<string> ControlledSourceKinds = new(StringComparer.Ordinal)
-    {
-        "rewritten_topic", "curated_standalone", "preserved_easter_egg", "new_ambient", "archived_question",
-        "manual_review"
-    };
     private static readonly HashSet<string> DisabledOnlySourceKinds = new(StringComparer.Ordinal)
     {
         "archived_question", "manual_review"
-    };
-    private static readonly HashSet<string> ControlledContextTokens = new(StringComparer.Ordinal)
-    {
-        "none", "app_started", "holiday", "anniversary", "ide_foreground", "active_90m", "idle_return",
-        "not_fullscreen", "day:weekday", "day:weekend", "time:dawn", "time:morning", "time:noon",
-        "time:afternoon", "time:evening", "time:late_night", "season:spring", "season:summer",
-        "season:autumn", "season:winter", "date:holiday", "date:month_boundary"
     };
     public static IReadOnlyList<DialogueLine> All => Snapshot.Value.All;
 
@@ -210,13 +193,21 @@ public static class PersonaCorpus
             var category = ParseEnum<DialogueCategory>(Value("category"), "category", lineNumber);
             var categoryGroup = ParseSnakeEnum<DialogueCategoryGroup>(
                 Value("category_group"), "category_group", lineNumber);
+            if (!PersonaContractGenerated.CategoryGroupByCategory.TryGetValue(category, out var expectedGroup)
+                || categoryGroup != expectedGroup)
+            {
+                throw Error(
+                    lineNumber,
+                    $"category {category} must use category_group "
+                    + $"{expectedGroup}");
+            }
             var topicId = Required(Value("topic_id"), "topic_id", lineNumber);
             var semanticGroup = Required(Value("semantic_group"), "semantic_group", lineNumber);
             var outputMode = ParseSnakeEnum<DialogueOutputMode>(Value("output_mode"), "output_mode", lineNumber);
             var trigger = ParseSnakeEnum<DialogueTrigger>(Value("trigger"), "trigger", lineNumber);
             var requiredContext = ParseContext(Value("required_context"), lineNumber);
             var tone = ParseControlled(
-                Value("tone"), "tone", ControlledTones, lineNumber);
+                Value("tone"), "tone", PersonaContractGenerated.ControlledTones, lineNumber);
             var interruptionCost = ParseInteger(Value("interrupt_cost"), "interrupt_cost", lineNumber);
             var cooldown = ParseMinimumDouble(Value("cooldown_hours"), "cooldown_hours", 1, lineNumber);
             var semanticCooldown = ParseMinimumDouble(
@@ -226,7 +217,7 @@ public static class PersonaCorpus
             var requiresReply = ParseBoolean(Value("requires_reply"), "requires_reply", lineNumber);
             var text = Required(Value("text"), "text", lineNumber);
             var sourceKind = ParseControlled(
-                Value("source_kind"), "source_kind", ControlledSourceKinds, lineNumber);
+                Value("source_kind"), "source_kind", PersonaContractGenerated.ControlledSourceKinds, lineNumber);
             var sourceReference = Required(Value("source_reference"), "source_reference", lineNumber);
             var rewriteReason = Required(Value("rewrite_reason"), "rewrite_reason", lineNumber);
 
@@ -289,7 +280,7 @@ public static class PersonaCorpus
         if (tokens.Length == 0
             || tokens.Any(string.IsNullOrWhiteSpace)
             || tokens.Any(token => token != token.Trim())
-            || tokens.Any(token => !ControlledContextTokens.Contains(token))
+            || tokens.Any(token => !PersonaContractGenerated.ControlledContextTokens.Contains(token))
             || tokens.Distinct(StringComparer.Ordinal).Count() != tokens.Length
             || (tokens.Contains("none", StringComparer.Ordinal) && tokens.Length != 1))
         {

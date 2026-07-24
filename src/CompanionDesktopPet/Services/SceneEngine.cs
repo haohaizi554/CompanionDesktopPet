@@ -64,8 +64,8 @@ public sealed class SceneHistory
     public const int TechnicalRecentMaximum = 2;
     public const int UserDirectRecentWindow = 10;
     public const int UserDirectRecentMaximum = 2;
-    public const int EasterEggRecentWindow = 50;
-    public const int EasterEggRecentMaximum = 1;
+    public const int EasterEggRecentWindow = PersonaContractGenerated.EasterEggRecentWindow;
+    public const int EasterEggRecentMaximum = PersonaContractGenerated.EasterEggRecentMaximum;
 
     private readonly List<SceneHistoryEntry> _entries = [];
 

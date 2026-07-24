@@ -185,6 +185,7 @@ public sealed class PersonaCorpusTests
     [InlineData("calm", "curated_standalone", "not_fullscreen")]
     [InlineData("sleepy", "preserved_easter_egg", "time:dawn")]
     [InlineData("encouraging", "new_ambient", "date:month_boundary")]
+    [InlineData("dry_sharp", "legacy_surface_variant", "none")]
     public void Load_AcceptsEveryControlledFieldFamily(string tone, string sourceKind, string context)
     {
         using var stream = CorpusStream(
@@ -198,6 +199,17 @@ public sealed class PersonaCorpusTests
         Assert.Equal(tone, line.Tone);
         Assert.Equal(sourceKind, line.SourceKind);
         Assert.Equal(context, Assert.Single(line.RequiredContext));
+    }
+
+    [Fact]
+    public void Load_RejectsCategoryGroupMismatchFromTheSharedContract()
+    {
+        using var stream = CorpusStream(
+            new UTF8Encoding(false, true),
+            ("category", "Career"),
+            ("category_group", "technical"));
+
+        Assert.Throws<InvalidDataException>(() => PersonaCorpus.Load(stream));
     }
 
     [Theory]

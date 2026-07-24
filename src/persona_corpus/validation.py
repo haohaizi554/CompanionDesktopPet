@@ -11,7 +11,17 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
-from .contract import PERSONA_CONTRACT
+from .contract import (
+    ALLOWED_CONTEXT_TOKENS,
+    CATEGORY_GROUPS,
+    FUTURE_TRIGGERS,
+    MVP_TRIGGERS,
+    OUTPUT_MODES,
+    PERSONA_CONTRACT,
+    SOURCE_KINDS,
+    TONES,
+    TRIGGERS,
+)
 from .loader import CorpusFormatError, load_v2
 from .models import CorpusLine
 from .normalization import normalize_text
@@ -47,90 +57,6 @@ VALIDATION_GROUPS = (
     (27, "simulation"),
 )
 
-CATEGORY_GROUPS = frozenset(
-    {
-        "technical",
-        "growth",
-        "career",
-        "daily_care",
-        "emotional_reflection",
-        "character_life",
-        "easter_egg",
-        "system_ambient",
-    }
-)
-OUTPUT_MODES = frozenset({"self_talk", "ambient", "user_direct", "system_observe"})
-MVP_TRIGGERS = frozenset(
-    {
-        "any",
-        "app_start",
-        "morning",
-        "noon",
-        "afternoon",
-        "evening",
-        "late_night",
-        "day_changed",
-        "weekday",
-        "weekend",
-        "holiday",
-        "anniversary",
-        "long_silence",
-    }
-)
-FUTURE_TRIGGERS = frozenset(
-    {"ide_foreground", "long_active", "idle_return", "story_timer"}
-)
-TRIGGERS = MVP_TRIGGERS | FUTURE_TRIGGERS
-TONES = frozenset(
-    {
-        "calm",
-        "gentle",
-        "playful",
-        "dry",
-        "serious",
-        "sleepy",
-        "nostalgic",
-        "curious",
-        "intimate",
-        "encouraging",
-    }
-)
-SOURCE_KINDS = frozenset(
-    {
-        "rewritten_topic",
-        "curated_standalone",
-        "preserved_easter_egg",
-        "new_ambient",
-        "archived_question",
-        "manual_review",
-    }
-)
-ALLOWED_CONTEXT_TOKENS = frozenset(
-    {
-        "none",
-        "app_started",
-        "holiday",
-        "anniversary",
-        "ide_foreground",
-        "active_90m",
-        "idle_return",
-        "not_fullscreen",
-        "day:weekday",
-        "day:weekend",
-        "time:dawn",
-        "time:morning",
-        "time:noon",
-        "time:afternoon",
-        "time:evening",
-        "time:late_night",
-        "season:spring",
-        "season:summer",
-        "season:autumn",
-        "season:winter",
-        "date:holiday",
-        "date:month_boundary",
-    }
-)
 CONTEXT_TOKEN_PATTERN = re.compile(r"^[a-z][a-z0-9_]*(?::[a-z][a-z0-9_]*)?$")
 ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
@@ -486,6 +412,10 @@ def load_json_object(path: Path) -> dict[str, Any]:
 
 
 def _validate_weight_map(config: Mapping[str, object], issues: _Issues) -> None:
+    expected_raw = PERSONA_CONTRACT.scheduler["category_group_weights"]
+    if not isinstance(expected_raw, Mapping):
+        raise RuntimeError("persona scheduler weight contract is malformed")
+    expected = {str(name): float(value) for name, value in expected_raw.items()}
     raw = config.get("category_group_weights")
     if not isinstance(raw, Mapping):
         issues.error("group_weights", "category_group_weights must be an object")
@@ -508,12 +438,33 @@ def _validate_weight_map(config: Mapping[str, object], issues: _Issues) -> None:
     if not valid or abs(sum(values.values()) - 1.0) > 1e-9:
         issues.error("group_weight_sum", "the eight category_group weights must sum to 1.0")
 
+    if valid and any(
+        abs(values.get(name, math.inf) - target) > 1e-9
+        for name, target in expected.items()
+    ):
+        issues.error(
+            "group_weights",
+            "category_group_weights must match the shared persona contract",
+        )
+
     technical = values.get("technical")
-    if technical is None or not 0.10 <= technical <= 0.20:
+    acceptance = PERSONA_CONTRACT.scheduler["acceptance"]
+    if not isinstance(acceptance, Mapping):
+        raise RuntimeError("persona scheduler acceptance contract is malformed")
+    technical_range = acceptance["technical_playback_ratio"]
+    if not isinstance(technical_range, tuple) or len(technical_range) != 2:
+        raise RuntimeError("technical playback acceptance must contain two values")
+    if technical is None or not float(technical_range[0]) <= technical <= float(technical_range[1]):
         issues.error("technical_weight", "technical playback weight must be in [0.10, 0.20]")
     easter = values.get("easter_egg")
-    if easter is None or easter > 0.02:
-        issues.error("easter_egg_config_weight", "easter_egg playback weight must not exceed 0.02")
+    easter_range = acceptance["easter_egg_playback_ratio"]
+    if not isinstance(easter_range, tuple) or len(easter_range) != 2:
+        raise RuntimeError("EasterEgg playback acceptance must contain two values")
+    if easter is None or not float(easter_range[0]) <= easter <= float(easter_range[1]):
+        issues.error(
+            "easter_egg_config_weight",
+            "easter_egg playback weight must stay inside the shared 10% acceptance band",
+        )
     character = values.get("character_life")
     other_values = [value for name, value in values.items() if name != "character_life"]
     if (
@@ -529,6 +480,10 @@ def _validate_weight_map(config: Mapping[str, object], issues: _Issues) -> None:
 
 
 def _validate_output_targets(config: Mapping[str, object], issues: _Issues) -> None:
+    expected_raw = PERSONA_CONTRACT.scheduler["output_mode_targets"]
+    if not isinstance(expected_raw, Mapping):
+        raise RuntimeError("persona output-mode target contract is malformed")
+    expected = {str(name): float(value) for name, value in expected_raw.items()}
     raw = config.get("output_mode_targets")
     if not isinstance(raw, Mapping) or set(raw) != OUTPUT_MODES:
         issues.error(
@@ -545,8 +500,11 @@ def _validate_output_targets(config: Mapping[str, object], issues: _Issues) -> N
     targets = {str(name): float(value) for name, value in raw.items()}
     if (
         abs(sum(targets.values()) - 1.0) > 1e-9
-        or targets["self_talk"] + targets["ambient"] < 0.65
-        or targets["user_direct"] > 0.15
+        or targets["self_talk"] + targets["ambient"]
+        < float(PERSONA_CONTRACT.scheduler["acceptance"]["self_talk_ambient_minimum"])
+        or targets["user_direct"]
+        > float(PERSONA_CONTRACT.scheduler["acceptance"]["user_direct_maximum"])
+        or any(abs(targets[name] - value) > 1e-9 for name, value in expected.items())
     ):
         issues.error(
             "output_mode_targets",
@@ -559,17 +517,21 @@ def _valid_int_limit(value: object, *, minimum: int, maximum: int | None = None)
 
 
 def _validate_runtime_limits(config: Mapping[str, object], issues: _Issues) -> None:
+    expected = PERSONA_CONTRACT.scheduler["runtime_limits"]
+    if not isinstance(expected, Mapping):
+        raise RuntimeError("persona runtime-limit contract is malformed")
     raw = config.get("runtime_limits")
     if not isinstance(raw, Mapping) or set(raw) != RUNTIME_LIMIT_KEYS:
         issues.error("runtime_limits", "runtime_limits must use the exact Task 5 key set")
         return
     valid = True
-    valid &= _valid_int_limit(raw.get("minimum_interval_minutes"), minimum=8)
-    valid &= _valid_int_limit(raw.get("max_outputs_per_hour"), minimum=1, maximum=2)
-    valid &= _valid_int_limit(
-        raw.get("late_night_max_outputs_per_hour"), minimum=1, maximum=1
+    valid &= raw.get("minimum_interval_minutes") == expected["minimum_interval_minutes"]
+    valid &= raw.get("max_outputs_per_hour") == expected["max_outputs_per_hour"]
+    valid &= (
+        raw.get("late_night_max_outputs_per_hour")
+        == expected["late_night_max_outputs_per_hour"]
     )
-    valid &= raw.get("semantic_group_no_repeat") is True
+    valid &= raw.get("semantic_group_no_repeat") is expected["semantic_group_no_repeat"]
 
     adjacent = raw.get("block_adjacent_category_groups")
     adjacent_is_string_list = isinstance(adjacent, list) and all(
@@ -585,24 +547,31 @@ def _validate_runtime_limits(config: Mapping[str, object], issues: _Issues) -> N
         valid &= (
             len(adjacent) == len(set(adjacent))
             and set(adjacent)
-            == {"technical", "daily_care", "emotional_reflection"}
+            == set(expected["block_adjacent_category_groups"])
         )
-    expected_pairs = {
-        "technical_recent_window": 5,
-        "technical_recent_max": 2,
-        "user_direct_recent_window": 10,
-        "user_direct_recent_max": 2,
-        "easter_egg_recent_window": 50,
-        "easter_egg_recent_max": 1,
-        "long_silence_minutes": 180,
-    }
-    valid &= all(raw.get(name) == value and _is_integer(raw.get(name)) for name, value in expected_pairs.items())
+    exact_names = (
+        "technical_recent_window",
+        "technical_recent_max",
+        "user_direct_recent_window",
+        "user_direct_recent_max",
+        "easter_egg_recent_window",
+        "easter_egg_recent_max",
+        "long_silence_minutes",
+    )
+    valid &= all(
+        raw.get(name) == expected[name] and _is_integer(raw.get(name))
+        for name in exact_names
+    )
 
     intervals = raw.get("interrupt_cost_minimum_intervals_minutes")
     if not isinstance(intervals, Mapping) or set(intervals) != {str(value) for value in range(6)}:
         valid = False
     else:
         ordered = [intervals[str(value)] for value in range(6)]
+        expected_intervals = expected["interrupt_cost_minimum_intervals_minutes"]
+        valid &= isinstance(expected_intervals, Mapping) and all(
+            intervals[str(value)] == expected_intervals[str(value)] for value in range(6)
+        )
         valid &= all(_valid_int_limit(value, minimum=8) for value in ordered)
         valid &= all(left < right for left, right in zip(ordered, ordered[1:]))
         minimum = raw.get("minimum_interval_minutes")
@@ -1618,11 +1587,23 @@ def _simulation_issues(
         mode_counts["self_talk"] + mode_counts["ambient"]
     ) / output_count
     user_direct_ratio = mode_counts["user_direct"] / output_count
+    acceptance = PERSONA_CONTRACT.scheduler["acceptance"]
+    if not isinstance(acceptance, Mapping):
+        raise RuntimeError("persona scheduler acceptance contract is malformed")
+    technical_range = acceptance["technical_playback_ratio"]
+    easter_range = acceptance["easter_egg_playback_ratio"]
     if (
-        not 0.10 <= technical_ratio <= 0.20
-        or easter_ratio > 0.02
-        or self_ambient_ratio < 0.65
-        or user_direct_ratio > 0.15
+        not isinstance(technical_range, tuple)
+        or len(technical_range) != 2
+        or not isinstance(easter_range, tuple)
+        or len(easter_range) != 2
+    ):
+        raise RuntimeError("persona playback acceptance ranges are malformed")
+    if (
+        not float(technical_range[0]) <= technical_ratio <= float(technical_range[1])
+        or not float(easter_range[0]) <= easter_ratio <= float(easter_range[1])
+        or self_ambient_ratio < float(acceptance["self_talk_ambient_minimum"])
+        or user_direct_ratio > float(acceptance["user_direct_maximum"])
     ):
         issues.error(
             "simulation_metric",

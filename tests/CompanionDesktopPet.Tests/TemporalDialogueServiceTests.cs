@@ -136,7 +136,7 @@ public sealed class TemporalDialogueServiceTests
     {
         var lines = TemporalDialogueService.GetContextualLines(new DateTime(2026, 7, 22, hour, 30, 0));
         var dawnText = PersonaCorpus.All
-            .Where(line => line.Trigger == DialogueTrigger.Morning
+            .Where(line => line.Trigger == DialogueTrigger.LateNight
                            && line.RequiredContext.Contains("time:dawn"))
             .Select(line => line.Text)
             .ToHashSet(StringComparer.Ordinal);

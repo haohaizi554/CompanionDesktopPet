@@ -741,8 +741,8 @@ class SelectorFilterTests(unittest.TestCase):
             return result
 
         candidate = corpus_line(category_group="easter_egg", semantic_group="egg.new", weight=0.1)
-        blocked = SelectionHistory(records(49, 10))
-        oldest_falls_out = SelectionHistory(records(50, 0))
+        blocked = SelectionHistory(records(9, 0))
+        oldest_falls_out = SelectionHistory(records(10, 0))
 
         self.assertIsNone(self.select(candidate, blocked, minutes=70))
         self.assertIsNotNone(self.select(candidate, oldest_falls_out, minutes=70))

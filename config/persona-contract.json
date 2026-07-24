@@ -57,6 +57,7 @@
     ],
     "source_kinds": [
       "rewritten_topic",
+      "legacy_surface_variant",
       "curated_standalone",
       "preserved_easter_egg",
       "new_ambient",

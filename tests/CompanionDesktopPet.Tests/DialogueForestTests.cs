@@ -13,10 +13,10 @@ public sealed class DialogueForestTests
             [DialogueCategoryGroup.Growth] = 0.10,
             [DialogueCategoryGroup.Career] = 0.07,
             [DialogueCategoryGroup.DailyCare] = 0.10,
-            [DialogueCategoryGroup.EmotionalReflection] = 0.08,
-            [DialogueCategoryGroup.CharacterLife] = 0.35,
-            [DialogueCategoryGroup.EasterEgg] = 0.02,
-            [DialogueCategoryGroup.SystemAmbient] = 0.10
+            [DialogueCategoryGroup.EmotionalReflection] = 0.10,
+            [DialogueCategoryGroup.CharacterLife] = 0.27,
+            [DialogueCategoryGroup.EasterEgg] = 0.10,
+            [DialogueCategoryGroup.SystemAmbient] = 0.08
         };
         var expectedModes = new Dictionary<DialogueOutputMode, double>
         {
@@ -30,6 +30,7 @@ public sealed class DialogueForestTests
         Assert.Equal(expectedModes, DialogueForest.OutputModeTargets);
         Assert.Equal(1.0, DialogueForest.CategoryGroupWeights.Values.Sum(), 8);
         Assert.Equal(1.0, DialogueForest.OutputModeTargets.Values.Sum(), 8);
+        Assert.Contains(DialogueCategoryGroup.EasterEgg, DialogueForest.BlockAdjacentCategoryGroups);
     }
 
     [Fact]
@@ -37,8 +38,8 @@ public sealed class DialogueForestTests
     {
         Assert.Equal(0.18, DialogueForest.TreeWeights[DialogueTreeKind.Technical], 8);
         Assert.Equal(0.17, DialogueForest.TreeWeights[DialogueTreeKind.Growth], 8);
-        Assert.Equal(0.30, DialogueForest.TreeWeights[DialogueTreeKind.Companion], 8);
-        Assert.Equal(0.35, DialogueForest.TreeWeights[DialogueTreeKind.Life], 8);
+        Assert.Equal(0.38, DialogueForest.TreeWeights[DialogueTreeKind.Companion], 8);
+        Assert.Equal(0.27, DialogueForest.TreeWeights[DialogueTreeKind.Life], 8);
         Assert.True(DialogueForest.TreeWeights[DialogueTreeKind.Technical] <
                     DialogueForest.TreeWeights[DialogueTreeKind.Life]);
     }

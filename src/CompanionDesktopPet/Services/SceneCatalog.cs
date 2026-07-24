@@ -37,7 +37,8 @@ public static class SceneCatalog
                               || line.Cooldown != first.Cooldown
                               || line.SemanticCooldown != first.SemanticCooldown
                               || line.MaxPerDay != first.MaxPerDay
-                              || line.InterruptionCost != first.InterruptionCost))
+                              || line.InterruptionCost != first.InterruptionCost
+                              || line.Weight != first.Weight))
         {
             throw new InvalidOperationException($"Semantic group '{first.SemanticGroup}' has inconsistent runtime metadata.");
         }
@@ -68,7 +69,7 @@ public static class SceneCatalog
             RequiredContext: first.RequiredContext,
             SemanticCooldown: first.SemanticCooldown,
             MaxPerDay: first.MaxPerDay,
-            Weight: lines.Sum(line => line.Weight),
+            Weight: first.Weight,
             EnergyDelta: -0.012,
             SociabilityDelta: expression == SceneExpression.Direct ? -0.025 : 0.005,
             BoredomDelta: -0.04,

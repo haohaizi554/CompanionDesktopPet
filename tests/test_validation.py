@@ -38,10 +38,10 @@ GROUP_WEIGHTS = {
     "growth": 0.10,
     "career": 0.07,
     "daily_care": 0.10,
-    "emotional_reflection": 0.08,
-    "character_life": 0.35,
-    "easter_egg": 0.02,
-    "system_ambient": 0.10,
+    "emotional_reflection": 0.10,
+    "character_life": 0.27,
+    "easter_egg": 0.10,
+    "system_ambient": 0.08,
 }
 
 OUTPUT_MODE_TARGETS = {
@@ -93,12 +93,13 @@ def valid_config(**weight_overrides: float) -> dict[str, object]:
                 "technical",
                 "daily_care",
                 "emotional_reflection",
+                "easter_egg",
             ],
             "technical_recent_window": 5,
             "technical_recent_max": 2,
             "user_direct_recent_window": 10,
             "user_direct_recent_max": 2,
-            "easter_egg_recent_window": 50,
+            "easter_egg_recent_window": 10,
             "easter_egg_recent_max": 1,
             "long_silence_minutes": 180,
             "interrupt_cost_minimum_intervals_minutes": {
@@ -273,7 +274,7 @@ def clean_simulation() -> tuple[list[CorpusLine], dict[str, object], dict[str, o
             if day in technical_days:
                 selected_id = "sim_tech_a" if technical_index % 2 == 0 else "sim_tech_b"
                 technical_index += 1
-            elif seed < 3 and day == 3:
+            elif day in {3, 13, 23}:
                 selected_id = "sim_egg"
             else:
                 selected_id = base_ids[day % len(base_ids)]

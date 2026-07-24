@@ -35,43 +35,22 @@ public sealed record DialogueTree(
 public static class DialogueForest
 {
     public static IReadOnlyDictionary<DialogueCategoryGroup, double> CategoryGroupWeights { get; } =
-        new Dictionary<DialogueCategoryGroup, double>
-        {
-            [DialogueCategoryGroup.Technical] = 0.18,
-            [DialogueCategoryGroup.Growth] = 0.10,
-            [DialogueCategoryGroup.Career] = 0.07,
-            [DialogueCategoryGroup.DailyCare] = 0.10,
-            [DialogueCategoryGroup.EmotionalReflection] = 0.08,
-            [DialogueCategoryGroup.CharacterLife] = 0.35,
-            [DialogueCategoryGroup.EasterEgg] = 0.02,
-            [DialogueCategoryGroup.SystemAmbient] = 0.10
-        };
+        PersonaContractGenerated.CategoryGroupWeights;
 
     public static IReadOnlyDictionary<DialogueOutputMode, double> OutputModeTargets { get; } =
-        new Dictionary<DialogueOutputMode, double>
-        {
-            [DialogueOutputMode.SelfTalk] = 0.45,
-            [DialogueOutputMode.Ambient] = 0.25,
-            [DialogueOutputMode.UserDirect] = 0.10,
-            [DialogueOutputMode.SystemObserve] = 0.20
-        };
+        PersonaContractGenerated.OutputModeTargets;
 
     public static IReadOnlyDictionary<DialogueTreeKind, double> TreeWeights { get; } =
         new Dictionary<DialogueTreeKind, double>
         {
             [DialogueTreeKind.Technical] = 0.18,
             [DialogueTreeKind.Growth] = 0.17,
-            [DialogueTreeKind.Companion] = 0.30,
-            [DialogueTreeKind.Life] = 0.35
+            [DialogueTreeKind.Companion] = 0.38,
+            [DialogueTreeKind.Life] = 0.27
         };
 
     public static IReadOnlySet<DialogueCategoryGroup> BlockAdjacentCategoryGroups { get; } =
-        new HashSet<DialogueCategoryGroup>
-        {
-            DialogueCategoryGroup.Technical,
-            DialogueCategoryGroup.DailyCare,
-            DialogueCategoryGroup.EmotionalReflection
-        };
+        PersonaContractGenerated.BlockAdjacentCategoryGroups;
 
     public static IReadOnlyList<DialogueTree> Trees { get; } =
     [
