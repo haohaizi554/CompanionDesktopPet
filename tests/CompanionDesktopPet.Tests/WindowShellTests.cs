@@ -878,6 +878,43 @@ public sealed class WindowShellTests
     }
 
     [Fact]
+    public void MainWindow_BubbleLayout_LongestEnabledLineIsNotClippedAtLargeScale()
+    {
+        var longestLine = PersonaCorpus.All
+            .Where(line => line.Enabled)
+            .OrderByDescending(line => line.Text.Length)
+            .ThenBy(line => line.Id, StringComparer.Ordinal)
+            .First();
+        var settingsDirectory = CreateSettingsDirectory();
+        RunOnStaThread(() =>
+        {
+            var window = CreateWindow(settingsDirectory);
+            window.Show();
+            InvokePrivate(window, "ApplyScale", PetScale.Large);
+            InvokePrivate(window, "ShowBubble", longestLine.Text);
+            var stage = Assert.IsType<Grid>(window.FindName("CharacterStage"));
+            var bubble = Assert.IsAssignableFrom<FrameworkElement>(window.FindName("SpeechBubble"));
+            stage.RenderTransform = Transform.Identity;
+            window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+            window.UpdateLayout();
+
+            var bubbleTop = bubble.TranslatePoint(new System.Windows.Point(0, 0), window).Y;
+            var bubbleBottom = bubble.TranslatePoint(
+                new System.Windows.Point(0, bubble.ActualHeight), window).Y;
+            var characterTop = stage.TranslatePoint(new System.Windows.Point(0, 0), window).Y;
+            var gap = characterTop - bubbleBottom;
+
+            Assert.True(
+                bubbleTop >= 0,
+                $"Bubble top {bubbleTop:F3} clips line {longestLine.Id} ({longestLine.Text.Length} chars); "
+                + $"bubble height={bubble.ActualHeight:F3}, gap={gap:F3}.");
+            Assert.InRange(gap, 29.5, 30.5);
+            window.Close();
+        });
+        DeleteSettingsDirectory(settingsDirectory);
+    }
+
+    [Fact]
     public void MainWindow_UsesTransparentDesktopPetChrome()
     {
         var settingsDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
