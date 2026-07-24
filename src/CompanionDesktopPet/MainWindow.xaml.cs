@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -16,6 +17,7 @@ public partial class MainWindow : Window
     private readonly DialogueScheduler _scheduler;
     private readonly SettingsService _settingsService;
     private readonly Func<AgentMemorySnapshot, Task>? _saveAgentMemoryAsync;
+    private readonly Func<PetSettings, Task> _saveSettingsAsync;
     private readonly AnimationController _animation;
     private readonly DispatcherTimer _automaticTimer = new();
     private readonly DispatcherTimer _bubbleTimer = new() { Interval = TimeSpan.FromSeconds(5) };
@@ -155,11 +157,40 @@ public partial class MainWindow : Window
         AmbientActionScheduler ambientScheduler,
         IAutoStartService autoStartService,
         Func<AgentMemorySnapshot, Task>? saveAgentMemoryAsync)
+        : this(
+            settings,
+            settingsService,
+            agentMemoryService,
+            agentMemory,
+            idleTimeProvider,
+            suppressApplicationShutdownOnClose,
+            shutdownApplication,
+            ambientScheduler,
+            autoStartService,
+            saveAgentMemoryAsync,
+            saveSettingsAsync: null)
+    {
+    }
+
+    internal MainWindow(
+        PetSettings settings,
+        SettingsService settingsService,
+        AgentMemoryService? agentMemoryService,
+        AgentMemorySnapshot? agentMemory,
+        IIdleTimeProvider? idleTimeProvider,
+        bool suppressApplicationShutdownOnClose,
+        Action? shutdownApplication,
+        AmbientActionScheduler ambientScheduler,
+        IAutoStartService autoStartService,
+        Func<AgentMemorySnapshot, Task>? saveAgentMemoryAsync,
+        Func<PetSettings, Task>? saveSettingsAsync)
     {
         InitializeComponent();
         _settings = settings;
-        _settingsService = settingsService;
+        _settingsService = settingsService
+            ?? throw new ArgumentNullException(nameof(settingsService));
         _saveAgentMemoryAsync = saveAgentMemoryAsync;
+        _saveSettingsAsync = saveSettingsAsync ?? _settingsService.SaveAsync;
         _idleTimeProvider = idleTimeProvider ?? new WindowsIdleTimeProvider();
         _ambientScheduler = ambientScheduler
             ?? throw new ArgumentNullException(nameof(ambientScheduler));
@@ -1065,6 +1096,20 @@ public partial class MainWindow : Window
         RestoreVisibleWindow();
     }
 
+    internal void RestoreFromSecondInstance()
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.Invoke(RestoreFromSecondInstance);
+            return;
+        }
+
+        if (!InteractionFrozen)
+        {
+            RestoreVisibleWindow();
+        }
+    }
+
     private void RestoreVisibleWindow()
     {
         Show();
@@ -1167,7 +1212,14 @@ public partial class MainWindow : Window
 
     private async void Exit_Click(object sender, RoutedEventArgs e)
     {
-        await RequestExitAsync();
+        try
+        {
+            await RequestExitAsync();
+        }
+        catch (Exception exception)
+        {
+            Trace.TraceError("Window exit failed after close: {0}", exception);
+        }
     }
 
     internal async Task RequestExitAsync()
@@ -1179,13 +1231,38 @@ public partial class MainWindow : Window
 
         _exitCommandRunning = true;
         FreezeInteractionForExit();
-        await SaveSettingsAsync();
-        await SaveAgentMemoryAsync();
-        if (!_isClosed)
+        try
         {
-            Close();
+            await SaveForExitBestEffortAsync(() => SaveSettingsAsync(), "settings");
+            await SaveForExitBestEffortAsync(() => SaveAgentMemoryAsync(), "agent memory");
+        }
+        finally
+        {
+            if (!_isClosed)
+            {
+                Close();
+            }
         }
     }
+
+    private static async Task SaveForExitBestEffortAsync(
+        Func<Task> save,
+        string description)
+    {
+        try
+        {
+            await save();
+        }
+        catch (Exception exception) when (!IsFatalException(exception))
+        {
+            Trace.TraceError("Could not save {0} during exit: {1}", description, exception);
+        }
+    }
+
+    private static bool IsFatalException(Exception exception) =>
+        exception is OutOfMemoryException
+            or StackOverflowException
+            or AccessViolationException;
 
     private void FreezeInteractionForExit()
     {
@@ -1236,7 +1313,7 @@ public partial class MainWindow : Window
             }
 
             _settings = new PetSettings(Left, Top, _scale, _paused, Topmost);
-            await _settingsService.SaveAsync(_settings);
+            await _saveSettingsAsync(_settings);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {

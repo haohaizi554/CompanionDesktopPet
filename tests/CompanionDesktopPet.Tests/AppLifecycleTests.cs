@@ -49,6 +49,72 @@ public sealed class AppLifecycleTests
         Assert.Equal(0, trayFactoryCalls);
     }
 
+    [Fact]
+    public void DuplicateInstanceContract_SignalsPrimaryThenStopsStartup()
+    {
+        var name = "Local\\CompanionDesktopPet-App-Test-" + Guid.NewGuid().ToString("N");
+        using var primary = new SingleInstanceGuard(name);
+        using var duplicate = new SingleInstanceGuard(name);
+        using var activated = new ManualResetEventSlim();
+        primary.RegisterActivationCallback(activated.Set);
+
+        Assert.True(App.ShouldContinuePrimaryStartup(primary));
+        Assert.False(App.ShouldContinuePrimaryStartup(duplicate));
+        Assert.True(activated.Wait(TimeSpan.FromSeconds(5)));
+    }
+
+    [Fact]
+    public void PrimaryActivationRoute_RestoresHiddenWindowAndIgnoresExitState()
+    {
+        RunOnStaThread(() =>
+        {
+            var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+            var name = "Local\\CompanionDesktopPet-App-Test-" + Guid.NewGuid().ToString("N");
+            using var primary = new SingleInstanceGuard(name);
+            using var duplicate = new SingleInstanceGuard(name);
+            var exiting = false;
+            var window = new MainWindow(
+                PetSettings.Default,
+                new SettingsService(directory),
+                null,
+                null,
+                idleTimeProvider: null,
+                suppressApplicationShutdownOnClose: true,
+                shutdownApplication: null,
+                new AmbientActionScheduler(() => 0.5),
+                DisabledAutoStartService.Instance);
+            try
+            {
+                window.Show();
+                window.SetTrayAvailability(true);
+                window.HideToTray();
+                App.RegisterPrimaryActivation(
+                    primary,
+                    window.Dispatcher,
+                    () => exiting,
+                    window.RestoreFromSecondInstance);
+
+                Assert.True(duplicate.SignalPrimaryInstance());
+                WaitForCondition(() => window.IsVisible, TimeSpan.FromSeconds(5));
+                Assert.Equal(WindowState.Normal, window.WindowState);
+
+                window.HideToTray();
+                exiting = true;
+                Assert.True(duplicate.SignalPrimaryInstance());
+                PumpDispatcherFor(TimeSpan.FromMilliseconds(150));
+                Assert.False(window.IsVisible);
+            }
+            finally
+            {
+                window.Close();
+                if (Directory.Exists(directory))
+                {
+                    Directory.Delete(directory, true);
+                }
+            }
+        });
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -157,6 +223,47 @@ public sealed class AppLifecycleTests
     }
 
     [Fact]
+    public void FatalTrayInitializationFailure_IsNotSwallowed()
+    {
+        RunOnStaThread(() =>
+        {
+            var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+            var window = new MainWindow(
+                PetSettings.Default,
+                new SettingsService(directory),
+                null,
+                null,
+                idleTimeProvider: null,
+                suppressApplicationShutdownOnClose: true,
+                shutdownApplication: null,
+                new AmbientActionScheduler(() => 0.5),
+                DisabledAutoStartService.Instance);
+            try
+            {
+                window.Show();
+                var factories = new AppSystemIntegrationFactories(
+                    () => DisabledAutoStartService.Instance,
+                    () => throw new OutOfMemoryException("fatal icon load"),
+                    (_, _, _) => throw new InvalidOperationException());
+
+                Assert.Throws<OutOfMemoryException>(() =>
+                    App.TryCreateTrayService(false, window, factories));
+                Assert.True(window.IsVisible);
+                window.HideToTray();
+                Assert.True(window.IsVisible);
+            }
+            finally
+            {
+                window.Close();
+                if (Directory.Exists(directory))
+                {
+                    Directory.Delete(directory, true);
+                }
+            }
+        });
+    }
+
+    [Fact]
     public void Cleanup_AlwaysReleasesGuardAndSmokeDirectoryAfterTrayFailure()
     {
         var tray = new CountingDisposable(throwOnDispose: true);
@@ -189,6 +296,55 @@ public sealed class AppLifecycleTests
         Path.Combine(AppContext.BaseDirectory, "Assets", "pet.ico");
 
     private static void RunOnStaThread(Action action) => StaHost.Value.Invoke(action);
+
+    private static void WaitForCondition(Func<bool> condition, TimeSpan timeout)
+    {
+        if (condition())
+        {
+            return;
+        }
+
+        var frame = new DispatcherFrame();
+        var timer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(10)
+        };
+        var deadline = DateTime.UtcNow + timeout;
+        timer.Tick += (_, _) =>
+        {
+            if (condition() || DateTime.UtcNow >= deadline)
+            {
+                frame.Continue = false;
+            }
+        };
+        timer.Start();
+        try
+        {
+            Dispatcher.PushFrame(frame);
+        }
+        finally
+        {
+            timer.Stop();
+        }
+
+        Assert.True(condition());
+    }
+
+    private static void PumpDispatcherFor(TimeSpan duration)
+    {
+        var frame = new DispatcherFrame();
+        var timer = new DispatcherTimer { Interval = duration };
+        timer.Tick += (_, _) => frame.Continue = false;
+        timer.Start();
+        try
+        {
+            Dispatcher.PushFrame(frame);
+        }
+        finally
+        {
+            timer.Stop();
+        }
+    }
 
     private sealed class CountingDisposable(bool throwOnDispose) : IDisposable
     {

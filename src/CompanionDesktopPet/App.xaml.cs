@@ -13,6 +13,7 @@ public partial class App : System.Windows.Application
     private TrayIconService? _trayIconService;
     private bool _smokeTest;
     private string? _smokeDirectory;
+    private int _exitStarted;
 
     protected override async void OnStartup(StartupEventArgs e)
     {
@@ -22,7 +23,7 @@ public partial class App : System.Windows.Application
             ? $"Local\\CompanionDesktopPet-Smoke-{Environment.ProcessId}-{Guid.NewGuid():N}"
             : "Local\\CompanionDesktopPet-7E5D78F4";
         _instanceGuard = new SingleInstanceGuard(instanceName);
-        if (!_instanceGuard.IsPrimaryInstance)
+        if (!ShouldContinuePrimaryStartup(_instanceGuard))
         {
             Shutdown();
             return;
@@ -59,6 +60,12 @@ public partial class App : System.Windows.Application
 
             MainWindow = window;
             window.Show();
+            RegisterPrimaryActivation(
+                _instanceGuard,
+                Dispatcher,
+                () => Volatile.Read(ref _exitStarted) != 0
+                    || !ReferenceEquals(MainWindow, window),
+                window.RestoreFromSecondInstance);
             _trayIconService = TryCreateTrayService(_smokeTest, window, factories);
         }
         catch when (_smokeTest)
@@ -69,6 +76,7 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        Interlocked.Exchange(ref _exitStarted, 1);
         DispatcherUnhandledException -= HandleDispatcherException;
         var trayIconService = _trayIconService;
         _trayIconService = null;
@@ -84,6 +92,73 @@ public partial class App : System.Windows.Application
         finally
         {
             base.OnExit(e);
+        }
+    }
+
+    internal static bool ShouldContinuePrimaryStartup(SingleInstanceGuard instanceGuard)
+    {
+        ArgumentNullException.ThrowIfNull(instanceGuard);
+        if (instanceGuard.IsPrimaryInstance)
+        {
+            return true;
+        }
+
+        instanceGuard.SignalPrimaryInstance();
+        return false;
+    }
+
+    internal static void RegisterPrimaryActivation(
+        SingleInstanceGuard instanceGuard,
+        Dispatcher dispatcher,
+        Func<bool> isExiting,
+        Action restoreWindow)
+    {
+        ArgumentNullException.ThrowIfNull(instanceGuard);
+        ArgumentNullException.ThrowIfNull(dispatcher);
+        ArgumentNullException.ThrowIfNull(isExiting);
+        ArgumentNullException.ThrowIfNull(restoreWindow);
+        instanceGuard.RegisterActivationCallback(
+            () => QueuePrimaryActivation(dispatcher, isExiting, restoreWindow));
+    }
+
+    private static void QueuePrimaryActivation(
+        Dispatcher dispatcher,
+        Func<bool> isExiting,
+        Action restoreWindow)
+    {
+        if (isExiting()
+            || dispatcher.HasShutdownStarted
+            || dispatcher.HasShutdownFinished)
+        {
+            return;
+        }
+
+        try
+        {
+            dispatcher.BeginInvoke(() =>
+            {
+                try
+                {
+                    if (!isExiting()
+                        && !dispatcher.HasShutdownStarted
+                        && !dispatcher.HasShutdownFinished)
+                    {
+                        restoreWindow();
+                    }
+                }
+                catch (Exception exception) when (!IsFatalIntegrationException(exception))
+                {
+                    System.Diagnostics.Trace.TraceError(
+                        "Could not restore the primary window: {0}",
+                        exception);
+                }
+            });
+        }
+        catch (Exception exception) when (!IsFatalIntegrationException(exception))
+        {
+            System.Diagnostics.Trace.TraceError(
+                "Could not queue primary activation: {0}",
+                exception);
         }
     }
 
@@ -122,13 +197,18 @@ public partial class App : System.Windows.Application
             window.SetTrayAvailability(true);
             return trayIconService;
         }
-        catch
+        catch (Exception exception) when (!IsFatalIntegrationException(exception))
         {
             trayIconService?.Dispose();
             window.SetTrayAvailability(false);
             return null;
         }
     }
+
+    private static bool IsFatalIntegrationException(Exception exception) =>
+        exception is OutOfMemoryException
+            or StackOverflowException
+            or AccessViolationException;
 
     internal static Stream? LoadTrayIconStream()
     {

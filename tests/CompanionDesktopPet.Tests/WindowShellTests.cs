@@ -13,6 +13,7 @@ using System.Windows.Threading;
 using CompanionDesktopPet.Models;
 using CompanionDesktopPet.Services;
 using CompanionDesktopPet.UI;
+using DrawingIcon = System.Drawing.Icon;
 
 namespace CompanionDesktopPet.Tests;
 
@@ -1139,6 +1140,170 @@ public sealed class WindowShellTests
     }
 
     [Fact]
+    public async Task MainWindow_TrayExit_ClosesHiddenWindowWhenSettingsSaveThrows()
+    {
+        await RunOnStaThreadAsync(async () =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var shutdownRequests = 0;
+            var closedCount = 0;
+            var memorySaveCalls = 0;
+            var window = CreateWindowWithPersistenceWriters(
+                settingsDirectory,
+                _ => Task.FromException(new InvalidOperationException("settings failed")),
+                _ =>
+                {
+                    memorySaveCalls++;
+                    return Task.CompletedTask;
+                },
+                () => shutdownRequests++);
+            window.Closed += (_, _) => closedCount++;
+            using var sourceIcon = new DrawingIcon(
+                Path.Combine(AppContext.BaseDirectory, "Assets", "pet.ico"));
+            var tray = new TrayIconService(
+                window.Dispatcher,
+                sourceIcon,
+                window.GetTrayMenuState,
+                window.ToggleVisibilityFromTray,
+                window.SaySomething,
+                window.ToggleAnimationAsync,
+                window.ToggleAutoStartFromTray,
+                window.RequestExitAsync,
+                publishIcon: false);
+            try
+            {
+                window.Show();
+                window.SetTrayAvailability(true);
+                window.HideToTray();
+                Assert.False(window.IsVisible);
+
+                tray.ExitMenuItem.PerformClick();
+                WaitForCondition(
+                    () => closedCount == 1,
+                    TimeSpan.FromSeconds(5),
+                    () => "Tray exit did not close after the settings save failed.");
+                await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+
+                Assert.Equal(1, closedCount);
+                Assert.Equal(1, shutdownRequests);
+                Assert.Equal(1, memorySaveCalls);
+            }
+            finally
+            {
+                tray.Dispose();
+                tray.Dispose();
+                if (closedCount == 0)
+                {
+                    window.Close();
+                }
+
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
+    public void MainWindow_WpfExit_HandlesUnexpectedMemorySaveFailureAndClosesOnce()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var shutdownRequests = 0;
+            var closedCount = 0;
+            Exception? dispatcherException = null;
+            var window = CreateWindowWithPersistenceWriters(
+                settingsDirectory,
+                _ => Task.CompletedTask,
+                _ => Task.FromException(new InvalidOperationException("memory failed")),
+                () => shutdownRequests++);
+            window.Closed += (_, _) => closedCount++;
+            DispatcherUnhandledExceptionEventHandler handler = (_, e) =>
+            {
+                dispatcherException = e.Exception;
+                e.Handled = true;
+            };
+            Application.Current.DispatcherUnhandledException += handler;
+            try
+            {
+                window.Show();
+                Assert.IsType<MenuItem>(window.FindName("ExitMenuItem"))
+                    .RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+                WaitForCondition(
+                    () => closedCount == 1 || dispatcherException is not null,
+                    TimeSpan.FromSeconds(5),
+                    () => "WPF exit neither closed nor reported its save failure.");
+
+                Assert.Null(dispatcherException);
+                Assert.Equal(1, closedCount);
+                Assert.Equal(1, shutdownRequests);
+            }
+            finally
+            {
+                Application.Current.DispatcherUnhandledException -= handler;
+                if (closedCount == 0)
+                {
+                    window.Close();
+                }
+
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
+    public async Task MainWindow_FatalExitSaveFailure_StillClosesInFinally()
+    {
+        await RunOnStaThreadAsync(async () =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var closedCount = 0;
+            var window = CreateWindowWithPersistenceWriters(
+                settingsDirectory,
+                _ => Task.FromException(new OutOfMemoryException("fatal save")),
+                _ => Task.CompletedTask,
+                shutdownApplication: () => { });
+            window.Closed += (_, _) => closedCount++;
+            window.Show();
+
+            await Assert.ThrowsAsync<OutOfMemoryException>(window.RequestExitAsync);
+
+            Assert.Equal(1, closedCount);
+            DeleteSettingsDirectory(settingsDirectory);
+        });
+    }
+
+    [Fact]
+    public void MainWindow_SecondInstanceActivation_AlwaysRestoresAndNeverTogglesAway()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var window = CreateWindow(settingsDirectory);
+            try
+            {
+                window.Show();
+                window.SetTrayAvailability(true);
+                window.HideToTray();
+                Assert.False(window.IsVisible);
+
+                window.RestoreFromSecondInstance();
+
+                Assert.True(window.IsVisible);
+                Assert.Equal(WindowState.Normal, window.WindowState);
+                Assert.True(window.IsActive);
+
+                window.RestoreFromSecondInstance();
+                Assert.True(window.IsVisible);
+            }
+            finally
+            {
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
     public void MainWindow_EventTimerRunsOnlyWhileTheWindowIsLoaded()
     {
         RunOnStaThread(() =>
@@ -1737,6 +1902,24 @@ public sealed class WindowShellTests
             new AmbientActionScheduler(() => 0.5),
             DisabledAutoStartService.Instance,
             saveAgentMemoryAsync);
+
+    private static MainWindow CreateWindowWithPersistenceWriters(
+        string settingsDirectory,
+        Func<PetSettings, Task> saveSettingsAsync,
+        Func<AgentMemorySnapshot, Task> saveAgentMemoryAsync,
+        Action shutdownApplication) =>
+        new(
+            PetSettings.Default,
+            new SettingsService(settingsDirectory),
+            null,
+            null,
+            null,
+            suppressApplicationShutdownOnClose: false,
+            shutdownApplication,
+            new AmbientActionScheduler(() => 0.5),
+            DisabledAutoStartService.Instance,
+            saveAgentMemoryAsync,
+            saveSettingsAsync);
 
     private static object GetPrivateFieldValue(MainWindow window, string fieldName)
     {
