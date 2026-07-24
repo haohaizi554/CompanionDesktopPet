@@ -731,6 +731,97 @@ public sealed class WindowShellTests
     }
 
     [Fact]
+    public void MainWindow_SystemCommands_TrayAutoStartUsesTheSuccessfulReadAsRollbackState()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var autoStart = new FakeAutoStartService
+            {
+                Enabled = true,
+                SetSucceeds = false
+            };
+            var window = CreateWindowWithAutoStart(settingsDirectory, autoStart);
+            try
+            {
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                var autoStartItem = Assert.IsType<MenuItem>(window.FindName("AutoStartMenuItem"));
+                var replyBeforeFailure = GetLastReply(window);
+
+                window.ToggleAutoStartFromTray();
+
+                Assert.Equal(1, autoStart.ReadCount);
+                Assert.Equal([false], autoStart.WriteRequests);
+                Assert.True(autoStartItem.IsChecked);
+                Assert.Same(replyBeforeFailure, GetLastReply(window));
+            }
+            finally
+            {
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
+    public void MainWindow_SystemCommands_TrayAutoStartReadFailureDoesNotGuessOrWrite()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var autoStart = new FakeAutoStartService { ReadSucceeds = false };
+            var window = CreateWindowWithAutoStart(settingsDirectory, autoStart);
+            try
+            {
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                var speech = Assert.IsType<TextBlock>(window.FindName("SpeechText"));
+                var replyBeforeFailure = GetLastReply(window);
+
+                window.ToggleAutoStartFromTray();
+
+                Assert.Equal(1, autoStart.ReadCount);
+                Assert.Empty(autoStart.WriteRequests);
+                Assert.Same(replyBeforeFailure, GetLastReply(window));
+                Assert.Equal("Windows 暂时不允许读取开机启动设置。", speech.Text);
+            }
+            finally
+            {
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
+    public void MainWindow_SystemCommands_DisabledAutoStartStillShowsItsTooltip()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var autoStart = new FakeAutoStartService { ReadSucceeds = false };
+            var window = CreateWindowWithAutoStart(settingsDirectory, autoStart);
+            try
+            {
+                var menu = Assert.IsType<ContextMenu>(window.FindName("ControlMenu"));
+                var autoStartItem = Assert.IsType<MenuItem>(window.FindName("AutoStartMenuItem"));
+
+                menu.RaiseEvent(new RoutedEventArgs(ContextMenu.OpenedEvent));
+
+                Assert.False(autoStartItem.IsEnabled);
+                Assert.NotNull(autoStartItem.ToolTip);
+                Assert.True(ToolTipService.GetShowOnDisabled(autoStartItem));
+            }
+            finally
+            {
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
     public void MainWindow_SystemCommands_HideAndShowPreserveWindowLifetime()
     {
         RunOnStaThread(() =>
@@ -832,6 +923,108 @@ public sealed class WindowShellTests
             Assert.Equal(1, wpfShutdownRequests);
             DeleteSettingsDirectory(directSettingsDirectory);
             DeleteSettingsDirectory(wpfSettingsDirectory);
+        });
+    }
+
+    [Fact]
+    public async Task MainWindow_SystemCommands_ExitSerializesMemoryAndLeavesNoTrailingSave()
+    {
+        await RunOnStaThreadAsync(async () =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var memoryWriter = new ControlledMemoryWriter();
+            var closedCount = 0;
+            var window = CreateWindowWithMemoryWriter(settingsDirectory, memoryWriter.SaveAsync);
+            window.Closed += (_, _) => closedCount++;
+            Task? exit = null;
+            Task? duplicateExit = null;
+            Task? postExitToggle = null;
+            try
+            {
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                var memoryTimer = GetPrivateField<DispatcherTimer>(window, "_memoryTimer");
+                var automaticTimer = GetPrivateField<DispatcherTimer>(window, "_automaticTimer");
+                var eventTimer = GetPrivateField<DispatcherTimer>(window, "_eventTimer");
+                var ambientTimer = GetPrivateField<DispatcherTimer>(window, "_ambientTimer");
+                var dialogue = GetPrivateField<DialogueService>(window, "_dialogue");
+                Assert.True(memoryTimer.IsEnabled);
+
+                InvokePrivate(window, "MemoryTimer_Tick", null, EventArgs.Empty);
+                await memoryWriter.FirstSaveStarted;
+                Assert.False(memoryTimer.IsEnabled);
+                Assert.Equal(1, memoryWriter.CallCount);
+
+                window.SaySomething();
+                Assert.True(memoryTimer.IsEnabled);
+                var frozenReply = GetLastReply(window);
+                var frozenSnapshot = dialogue.CreateSnapshot();
+                var frozenPaused = GetPrivateField<bool>(window, "_paused");
+
+                exit = window.RequestExitAsync();
+                duplicateExit = window.RequestExitAsync();
+
+                Assert.False(memoryTimer.IsEnabled);
+                Assert.False(automaticTimer.IsEnabled);
+                Assert.False(eventTimer.IsEnabled);
+                Assert.False(ambientTimer.IsEnabled);
+                Assert.False(exit.IsCompleted);
+                Assert.True(duplicateExit.IsCompletedSuccessfully);
+
+                window.SaySomething();
+                postExitToggle = window.ToggleAnimationAsync();
+                InvokePrivate(window, "AutomaticTimer_Tick", null, EventArgs.Empty);
+                InvokePrivate(window, "EventTimer_Tick", null, EventArgs.Empty);
+                InvokePrivate(window, "AmbientTimer_Tick", null, EventArgs.Empty);
+
+                Assert.False(memoryTimer.IsEnabled);
+                Assert.False(automaticTimer.IsEnabled);
+                Assert.False(eventTimer.IsEnabled);
+                Assert.False(ambientTimer.IsEnabled);
+                Assert.Equal(frozenPaused, GetPrivateField<bool>(window, "_paused"));
+                Assert.Same(frozenReply, GetLastReply(window));
+                Assert.Equal(frozenSnapshot.TurnCount, dialogue.CreateSnapshot().TurnCount);
+
+                InvokePrivate(window, "MemoryTimer_Tick", null, EventArgs.Empty);
+                Assert.Equal(1, memoryWriter.CallCount);
+
+                memoryWriter.ReleaseFirstSave();
+                await Task.WhenAll(exit, duplicateExit);
+
+                Assert.Equal(1, closedCount);
+                Assert.Equal(2, memoryWriter.CallCount);
+                Assert.Equal(2, memoryWriter.CompletedCount);
+                Assert.Equal(1, memoryWriter.MaximumConcurrentWrites);
+                Assert.Equal(0, memoryWriter.ActiveWrites);
+                Assert.True(
+                    memoryWriter.Snapshots[1].TurnCount
+                    > memoryWriter.Snapshots[0].TurnCount);
+                Assert.Equal(frozenSnapshot.TurnCount, memoryWriter.Snapshots[1].TurnCount);
+
+                InvokePrivate(window, "MemoryTimer_Tick", null, EventArgs.Empty);
+                Assert.Equal(2, memoryWriter.CallCount);
+                Assert.Equal(0, memoryWriter.ActiveWrites);
+            }
+            finally
+            {
+                memoryWriter.ReleaseFirstSave();
+                if (exit is not null && duplicateExit is not null)
+                {
+                    await Task.WhenAll(exit, duplicateExit);
+                }
+
+                if (postExitToggle is not null)
+                {
+                    await postExitToggle;
+                }
+
+                if (closedCount == 0)
+                {
+                    window.Close();
+                }
+
+                DeleteSettingsDirectory(settingsDirectory);
+            }
         });
     }
 
@@ -1420,6 +1613,21 @@ public sealed class WindowShellTests
             new AmbientActionScheduler(() => 0.5),
             autoStartService);
 
+    private static MainWindow CreateWindowWithMemoryWriter(
+        string settingsDirectory,
+        Func<AgentMemorySnapshot, Task> saveAgentMemoryAsync) =>
+        new(
+            PetSettings.Default,
+            new SettingsService(settingsDirectory),
+            null,
+            null,
+            null,
+            suppressApplicationShutdownOnClose: true,
+            shutdownApplication: null,
+            new AmbientActionScheduler(() => 0.5),
+            DisabledAutoStartService.Instance,
+            saveAgentMemoryAsync);
+
     private static object GetPrivateFieldValue(MainWindow window, string fieldName)
     {
         var field = typeof(MainWindow).GetField(
@@ -1664,6 +1872,47 @@ public sealed class WindowShellTests
 
             return SetSucceeds;
         }
+    }
+
+    private sealed class ControlledMemoryWriter
+    {
+        private readonly TaskCompletionSource _firstSaveStarted = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _releaseFirstSave = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly List<AgentMemorySnapshot> _snapshots = [];
+        private int _activeWrites;
+
+        public Task FirstSaveStarted => _firstSaveStarted.Task;
+        public int CallCount { get; private set; }
+        public int CompletedCount { get; private set; }
+        public int MaximumConcurrentWrites { get; private set; }
+        public int ActiveWrites => _activeWrites;
+        public IReadOnlyList<AgentMemorySnapshot> Snapshots => _snapshots;
+
+        public async Task SaveAsync(AgentMemorySnapshot snapshot)
+        {
+            CallCount++;
+            _snapshots.Add(snapshot);
+            _activeWrites++;
+            MaximumConcurrentWrites = Math.Max(MaximumConcurrentWrites, _activeWrites);
+            try
+            {
+                if (CallCount == 1)
+                {
+                    _firstSaveStarted.TrySetResult();
+                    await _releaseFirstSave.Task;
+                }
+
+                CompletedCount++;
+            }
+            finally
+            {
+                _activeWrites--;
+            }
+        }
+
+        public void ReleaseFirstSave() => _releaseFirstSave.TrySetResult();
     }
 
     private static AgentReply GetLastReply(MainWindow window)

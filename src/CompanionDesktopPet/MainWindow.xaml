@@ -88,7 +88,8 @@
           <MenuItem x:Name="AutoStartMenuItem"
                     Header="开机自启动"
                     Tag="⌁"
-                    IsCheckable="True" />
+                    IsCheckable="True"
+                    ToolTipService.ShowOnDisabled="True" />
           <MenuItem x:Name="RestorePositionMenuItem" Header="回到右下角" Tag="⌂" />
           <Separator />
           <MenuItem x:Name="HideToTrayMenuItem" Header="藏到托盘里 ♡" Tag="☾" />

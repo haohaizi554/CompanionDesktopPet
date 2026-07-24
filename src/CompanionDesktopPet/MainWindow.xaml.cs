@@ -15,7 +15,7 @@ public partial class MainWindow : Window
     private readonly Random _random = new();
     private readonly DialogueScheduler _scheduler;
     private readonly SettingsService _settingsService;
-    private readonly AgentMemoryService? _agentMemoryService;
+    private readonly Func<AgentMemorySnapshot, Task>? _saveAgentMemoryAsync;
     private readonly AnimationController _animation;
     private readonly DispatcherTimer _automaticTimer = new();
     private readonly DispatcherTimer _bubbleTimer = new() { Interval = TimeSpan.FromSeconds(5) };
@@ -24,6 +24,8 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _ambientTimer = new();
     private readonly BubbleCountdownController _bubbleCountdown = new();
     private readonly PetActionCoordinator _actionCoordinator = new();
+    private readonly SemaphoreSlim _memorySaveGate = new(1, 1);
+    private readonly SemaphoreSlim _settingsSaveGate = new(1, 1);
     private readonly AmbientActionScheduler _ambientScheduler;
     private readonly IIdleTimeProvider _idleTimeProvider;
     private readonly IAutoStartService _autoStartService;
@@ -48,6 +50,8 @@ public partial class MainWindow : Window
     private double _lastDragLeft;
 
     internal AgentReply? LastReply { get; private set; }
+
+    private bool InteractionFrozen => _exitCommandRunning || _isClosed;
 
     public MainWindow(
         PetSettings settings,
@@ -125,11 +129,36 @@ public partial class MainWindow : Window
         Action? shutdownApplication,
         AmbientActionScheduler ambientScheduler,
         IAutoStartService autoStartService)
+        : this(
+            settings,
+            settingsService,
+            agentMemoryService,
+            agentMemory,
+            idleTimeProvider,
+            suppressApplicationShutdownOnClose,
+            shutdownApplication,
+            ambientScheduler,
+            autoStartService,
+            agentMemoryService is null ? null : agentMemoryService.SaveAsync)
+    {
+    }
+
+    internal MainWindow(
+        PetSettings settings,
+        SettingsService settingsService,
+        AgentMemoryService? agentMemoryService,
+        AgentMemorySnapshot? agentMemory,
+        IIdleTimeProvider? idleTimeProvider,
+        bool suppressApplicationShutdownOnClose,
+        Action? shutdownApplication,
+        AmbientActionScheduler ambientScheduler,
+        IAutoStartService autoStartService,
+        Func<AgentMemorySnapshot, Task>? saveAgentMemoryAsync)
     {
         InitializeComponent();
         _settings = settings;
         _settingsService = settingsService;
-        _agentMemoryService = agentMemoryService;
+        _saveAgentMemoryAsync = saveAgentMemoryAsync;
         _idleTimeProvider = idleTimeProvider ?? new WindowsIdleTimeProvider();
         _ambientScheduler = ambientScheduler
             ?? throw new ArgumentNullException(nameof(ambientScheduler));
@@ -185,6 +214,11 @@ public partial class MainWindow : Window
 
     private void Window_Loaded(object sender, RoutedEventArgs e)
     {
+        if (InteractionFrozen)
+        {
+            return;
+        }
+
         _scale = _settings.Scale;
         _paused = _settings.AnimationPaused;
         Topmost = _settings.AlwaysOnTop;
@@ -207,12 +241,17 @@ public partial class MainWindow : Window
 
     private void Window_ContentRendered(object? sender, EventArgs e)
     {
+        if (InteractionFrozen)
+        {
+            return;
+        }
+
         ScheduleNextAmbientAction();
     }
 
     private void AmbientTimer_Tick(object? sender, EventArgs e)
     {
-        if (_isClosed)
+        if (InteractionFrozen)
         {
             _ambientTimer.Stop();
             return;
@@ -310,7 +349,7 @@ public partial class MainWindow : Window
 
     private void ScheduleNextAmbientAction()
     {
-        if (_isClosed
+        if (InteractionFrozen
             || _runningSmokeProbe
             || _paused
             || _actionCoordinator.State != PetActionState.Idle)
@@ -336,7 +375,7 @@ public partial class MainWindow : Window
     private void ScheduleAmbientAction(PetAmbientAction action, TimeSpan delay)
     {
         InvalidateAmbientSchedule();
-        if (_isClosed
+        if (InteractionFrozen
             || _runningSmokeProbe
             || _paused
             || _actionCoordinator.State != PetActionState.Idle)
@@ -369,6 +408,11 @@ public partial class MainWindow : Window
 
     public async Task<bool> RunSmokeActionProbeAsync()
     {
+        if (InteractionFrozen)
+        {
+            return false;
+        }
+
         PreserveScheduledStartupGreeting();
         InvalidateAmbientSchedule();
         _runningSmokeProbe = true;
@@ -539,6 +583,12 @@ public partial class MainWindow : Window
 
     private void PetImage_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
+        if (InteractionFrozen)
+        {
+            e.Handled = true;
+            return;
+        }
+
         _mouseDown = e.GetPosition(this);
         _dragged = false;
         PetImage.CaptureMouse();
@@ -547,7 +597,7 @@ public partial class MainWindow : Window
 
     private async void PetImage_MouseMove(object sender, System.Windows.Input.MouseEventArgs e)
     {
-        if (e.LeftButton != MouseButtonState.Pressed || _dragged)
+        if (InteractionFrozen || e.LeftButton != MouseButtonState.Pressed || _dragged)
         {
             return;
         }
@@ -573,7 +623,7 @@ public partial class MainWindow : Window
             BeginLandingAction();
         }
 
-        if (_isClosed)
+        if (InteractionFrozen)
         {
             return;
         }
@@ -583,19 +633,19 @@ public partial class MainWindow : Window
 
     private async Task CompleteDragAfterMoveAsync()
     {
-        if (_isClosed)
+        if (InteractionFrozen)
         {
             return;
         }
 
         ShowEventBubble(CompanionEvent.DragReleased);
         ScheduleNextPhrase();
-        if (_isClosed)
+        if (InteractionFrozen)
         {
             return;
         }
 
-        await SaveSettingsAsync();
+        await SaveSettingsAsync(skipWhenExiting: true);
     }
 
     private void Window_LocationChanged(object? sender, EventArgs e)
@@ -608,7 +658,7 @@ public partial class MainWindow : Window
     private void PetImage_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
         PetImage.ReleaseMouseCapture();
-        if (!_dragged)
+        if (!InteractionFrozen && !_dragged)
         {
             ReactAndSpeak();
         }
@@ -619,6 +669,11 @@ public partial class MainWindow : Window
 
     private void ReactAndSpeak()
     {
+        if (InteractionFrozen)
+        {
+            return;
+        }
+
         _animation.PlayClickReaction();
         ShowEventBubble(CompanionEvent.Click);
         ScheduleNextPhrase();
@@ -626,6 +681,11 @@ public partial class MainWindow : Window
 
     private void BeginDragAction()
     {
+        if (InteractionFrozen)
+        {
+            return;
+        }
+
         PreserveScheduledStartupGreeting();
         InvalidateAmbientSchedule();
         CancelActiveAmbientAction();
@@ -634,7 +694,7 @@ public partial class MainWindow : Window
 
     private void BeginLandingAction()
     {
-        if (_isClosed)
+        if (InteractionFrozen)
         {
             return;
         }
@@ -643,7 +703,7 @@ public partial class MainWindow : Window
         _animation.PlayLanding(() =>
         {
             _actionCoordinator.Complete(PetActionState.Landing);
-            if (!_isClosed && _actionCoordinator.State == PetActionState.Idle)
+            if (!InteractionFrozen && _actionCoordinator.State == PetActionState.Idle)
             {
                 ScheduleNextAmbientAction();
             }
@@ -652,6 +712,11 @@ public partial class MainWindow : Window
 
     private void ShowBubble(string text)
     {
+        if (InteractionFrozen)
+        {
+            return;
+        }
+
         SpeechText.Text = text;
         SpeechBubble.Visibility = Visibility.Visible;
         _bubbleCountdown.Show();
@@ -716,18 +781,35 @@ public partial class MainWindow : Window
     private void ScheduleNextPhrase()
     {
         _automaticTimer.Stop();
+        if (InteractionFrozen)
+        {
+            return;
+        }
+
         _automaticTimer.Interval = _scheduler.NextDelay(DateTime.Now);
         _automaticTimer.Start();
     }
 
     private void AutomaticTimer_Tick(object? sender, EventArgs e)
     {
+        if (InteractionFrozen)
+        {
+            _automaticTimer.Stop();
+            return;
+        }
+
         ShowEventBubble(CompanionEvent.Automatic);
         ScheduleNextPhrase();
     }
 
     private void EventTimer_Tick(object? sender, EventArgs e)
     {
+        if (InteractionFrozen)
+        {
+            _eventTimer.Stop();
+            return;
+        }
+
         var now = DateTime.Now;
         _eventPump ??= new CompanionEventPump(now, _idleTimeProvider.GetIdleTime());
         var companionEvent = _eventPump.Poll(
@@ -742,11 +824,16 @@ public partial class MainWindow : Window
 
     private void ShowEventBubble(CompanionEvent trigger)
     {
+        if (InteractionFrozen)
+        {
+            return;
+        }
+
         var reply = _dialogue.GetReply(trigger, DateTime.Now, _random);
         LastReply = reply;
         PresentReply(reply);
 
-        if (_agentMemoryService is not null)
+        if (_saveAgentMemoryAsync is not null)
         {
             _memoryTimer.Stop();
             _memoryTimer.Start();
@@ -768,7 +855,12 @@ public partial class MainWindow : Window
     private async void MemoryTimer_Tick(object? sender, EventArgs e)
     {
         _memoryTimer.Stop();
-        await SaveAgentMemoryAsync();
+        if (InteractionFrozen)
+        {
+            return;
+        }
+
+        await SaveAgentMemoryAsync(skipWhenExiting: true);
     }
 
     internal void SaySomething() => ReactAndSpeak();
@@ -777,6 +869,11 @@ public partial class MainWindow : Window
 
     private void Greeting_Click(object sender, RoutedEventArgs e)
     {
+        if (InteractionFrozen)
+        {
+            return;
+        }
+
         PreserveScheduledStartupGreeting();
         InvalidateAmbientSchedule();
         if (_actionCoordinator.TryBeginAmbient(PetAmbientAction.Greeting))
@@ -793,6 +890,11 @@ public partial class MainWindow : Window
 
     internal async Task ToggleAnimationAsync()
     {
+        if (InteractionFrozen)
+        {
+            return;
+        }
+
         _paused = !_paused;
         if (_paused)
         {
@@ -811,7 +913,7 @@ public partial class MainWindow : Window
 
         UpdatePauseLabel();
         ShowEventBubble(_paused ? CompanionEvent.AnimationPaused : CompanionEvent.AnimationResumed);
-        await SaveSettingsAsync();
+        await SaveSettingsAsync(skipWhenExiting: true);
     }
 
     private void UpdatePauseLabel() =>
@@ -819,7 +921,8 @@ public partial class MainWindow : Window
 
     private async void SetSize_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not MenuItem { Tag: string tag }
+        if (InteractionFrozen
+            || sender is not MenuItem { Tag: string tag }
             || !Enum.TryParse(tag, out PetScale scale))
         {
             return;
@@ -829,7 +932,7 @@ public partial class MainWindow : Window
         ApplyScale(scale);
         PlaceOnScreen();
         ShowEventBubble(CompanionEvent.SizeChanged);
-        await SaveSettingsAsync();
+        await SaveSettingsAsync(skipWhenExiting: true);
     }
 
     private void ApplyScale(PetScale scale)
@@ -849,12 +952,22 @@ public partial class MainWindow : Window
 
     private async void ToggleTopmost_Click(object sender, RoutedEventArgs e)
     {
+        if (InteractionFrozen)
+        {
+            return;
+        }
+
         Topmost = TopmostMenuItem.IsChecked;
-        await SaveSettingsAsync();
+        await SaveSettingsAsync(skipWhenExiting: true);
     }
 
     private async void RestorePosition_Click(object sender, RoutedEventArgs e)
     {
+        if (InteractionFrozen)
+        {
+            return;
+        }
+
         var workAreas = WorkAreaService.GetWorkAreas();
         var work = workAreas.Count > 0
             ? workAreas[0]
@@ -867,13 +980,24 @@ public partial class MainWindow : Window
         Left = point.X;
         Top = point.Y;
         ShowEventBubble(CompanionEvent.PositionRestored);
-        await SaveSettingsAsync();
+        await SaveSettingsAsync(skipWhenExiting: true);
     }
 
-    internal void HideToTray() => Hide();
+    internal void HideToTray()
+    {
+        if (!InteractionFrozen)
+        {
+            Hide();
+        }
+    }
 
     internal void ToggleVisibilityFromTray()
     {
+        if (InteractionFrozen)
+        {
+            return;
+        }
+
         if (IsVisible)
         {
             HideToTray();
@@ -890,8 +1014,20 @@ public partial class MainWindow : Window
 
     internal void ToggleAutoStartFromTray()
     {
-        var enabled = _autoStartService.TryGetEnabled(out var current) && current;
-        ApplyAutoStart(!enabled);
+        if (InteractionFrozen)
+        {
+            return;
+        }
+
+        if (!_autoStartService.TryGetEnabled(out var current))
+        {
+            MarkAutoStartUnavailable();
+            ShowBubble("Windows 暂时不允许读取开机启动设置。");
+            return;
+        }
+
+        SetKnownAutoStartState(current);
+        ApplyAutoStart(!current);
     }
 
     private void ControlMenu_Opened(object sender, RoutedEventArgs e) =>
@@ -906,13 +1042,23 @@ public partial class MainWindow : Window
     {
         if (_autoStartService.TryGetEnabled(out var enabled))
         {
-            _lastKnownAutoStart = enabled;
-            AutoStartMenuItem.IsChecked = enabled;
-            AutoStartMenuItem.IsEnabled = true;
-            AutoStartMenuItem.ToolTip = null;
+            SetKnownAutoStartState(enabled);
             return;
         }
 
+        MarkAutoStartUnavailable();
+    }
+
+    private void SetKnownAutoStartState(bool enabled)
+    {
+        _lastKnownAutoStart = enabled;
+        AutoStartMenuItem.IsChecked = enabled;
+        AutoStartMenuItem.IsEnabled = true;
+        AutoStartMenuItem.ToolTip = null;
+    }
+
+    private void MarkAutoStartUnavailable()
+    {
         AutoStartMenuItem.IsChecked = _lastKnownAutoStart;
         AutoStartMenuItem.IsEnabled = false;
         AutoStartMenuItem.ToolTip = "Windows 暂时不允许读取开机启动设置。";
@@ -920,9 +1066,16 @@ public partial class MainWindow : Window
 
     private void ApplyAutoStart(bool requested)
     {
+        if (InteractionFrozen)
+        {
+            return;
+        }
+
         var previous = _lastKnownAutoStart;
         if (_autoStartService.TrySetEnabled(requested))
         {
+            _lastKnownAutoStart = requested;
+            AutoStartMenuItem.IsChecked = requested;
             RefreshAutoStartState();
             return;
         }
@@ -945,6 +1098,7 @@ public partial class MainWindow : Window
         }
 
         _exitCommandRunning = true;
+        FreezeInteractionForExit();
         await SaveSettingsAsync();
         await SaveAgentMemoryAsync();
         if (!_isClosed)
@@ -953,31 +1107,62 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task SaveAgentMemoryAsync()
+    private void FreezeInteractionForExit()
     {
-        if (_agentMemoryService is null)
+        _automaticTimer.Stop();
+        _eventTimer.Stop();
+        _memoryTimer.Stop();
+        _bubbleTimer.Stop();
+        PreserveScheduledStartupGreeting();
+        InvalidateAmbientSchedule();
+        CancelActiveAmbientAction();
+    }
+
+    private async Task SaveAgentMemoryAsync(bool skipWhenExiting = false)
+    {
+        if (_saveAgentMemoryAsync is null)
         {
             return;
         }
 
+        await _memorySaveGate.WaitAsync();
         try
         {
-            await _agentMemoryService.SaveAsync(_dialogue.CreateSnapshot());
+            if (skipWhenExiting && InteractionFrozen)
+            {
+                return;
+            }
+
+            await _saveAgentMemoryAsync(_dialogue.CreateSnapshot());
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
         }
+        finally
+        {
+            _memorySaveGate.Release();
+        }
     }
 
-    private async Task SaveSettingsAsync()
+    private async Task SaveSettingsAsync(bool skipWhenExiting = false)
     {
-        _settings = new PetSettings(Left, Top, _scale, _paused, Topmost);
+        await _settingsSaveGate.WaitAsync();
         try
         {
+            if (skipWhenExiting && InteractionFrozen)
+            {
+                return;
+            }
+
+            _settings = new PetSettings(Left, Top, _scale, _paused, Topmost);
             await _settingsService.SaveAsync(_settings);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
+        }
+        finally
+        {
+            _settingsSaveGate.Release();
         }
     }
 
