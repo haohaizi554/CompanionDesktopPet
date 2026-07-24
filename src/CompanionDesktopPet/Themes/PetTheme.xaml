@@ -12,11 +12,157 @@
   <SolidColorBrush x:Key="CocoaBrush" Color="{StaticResource CocoaColor}" />
   <SolidColorBrush x:Key="MenuHoverBrush" Color="{StaticResource MenuHoverColor}" />
 
-  <Style TargetType="ContextMenu">
-    <Setter Property="Background" Value="{StaticResource CreamBrush}" />
+  <LinearGradientBrush x:Key="MenuSurfaceBrush" StartPoint="0,0" EndPoint="1,1">
+    <GradientStop Color="#FAFFFDF7" Offset="0" />
+    <GradientStop Color="#E8FFE0EA" Offset="1" />
+  </LinearGradientBrush>
+  <SolidColorBrush x:Key="MenuBorderBrush" Color="#B8E56F91" />
+  <SolidColorBrush x:Key="MenuInnerHighlightBrush" Color="#D9FFFFFF" />
+  <SolidColorBrush x:Key="MenuItemHoverBrush" Color="#CCFFFFFF" />
+  <LinearGradientBrush x:Key="MenuSeparatorBrush" StartPoint="0,0" EndPoint="1,0">
+    <GradientStop Color="#00E98FA4" Offset="0" />
+    <GradientStop Color="#99E98FA4" Offset="0.5" />
+    <GradientStop Color="#00E98FA4" Offset="1" />
+  </LinearGradientBrush>
+
+  <Style x:Key="KawaiiContextMenuStyle" TargetType="ContextMenu">
+    <Setter Property="Background" Value="Transparent" />
     <Setter Property="Foreground" Value="{StaticResource CocoaBrush}" />
     <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
     <Setter Property="FontSize" Value="14" />
-    <Setter Property="Padding" Value="4" />
+    <Setter Property="MinWidth" Value="270" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="HasDropShadow" Value="False" />
+    <Setter Property="OverridesDefaultStyle" Value="True" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ContextMenu">
+          <Grid Margin="12">
+            <Border x:Name="MenuShell"
+                    Padding="11"
+                    CornerRadius="24"
+                    BorderThickness="2"
+                    BorderBrush="{StaticResource MenuBorderBrush}"
+                    Background="{StaticResource MenuSurfaceBrush}">
+              <Border.Effect>
+                <DropShadowEffect Color="#784F2938"
+                                  BlurRadius="24"
+                                  ShadowDepth="5"
+                                  Opacity="0.28" />
+              </Border.Effect>
+              <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle" />
+            </Border>
+          </Grid>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+  <Style TargetType="ContextMenu" BasedOn="{StaticResource KawaiiContextMenuStyle}" />
+
+  <Style TargetType="MenuItem">
+    <Setter Property="Foreground" Value="{StaticResource CocoaBrush}" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="MinHeight" Value="35" />
+    <Setter Property="Margin" Value="2" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="MenuItem">
+          <Grid>
+            <Border x:Name="MenuItemChrome"
+                    MinHeight="35"
+                    CornerRadius="14"
+                    BorderThickness="1"
+                    BorderBrush="Transparent"
+                    Background="{TemplateBinding Background}">
+              <Grid Margin="10,0">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="24" />
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="24" />
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="IconGlyph"
+                           VerticalAlignment="Center"
+                           HorizontalAlignment="Center"
+                           FontFamily="Segoe UI Symbol"
+                           Text="{TemplateBinding Tag}" />
+                <ContentPresenter Grid.Column="1"
+                                  Margin="7,0,8,0"
+                                  VerticalAlignment="Center"
+                                  ContentSource="Header"
+                                  RecognizesAccessKey="True" />
+                <TextBlock x:Name="SubmenuArrow"
+                           Grid.Column="2"
+                           VerticalAlignment="Center"
+                           HorizontalAlignment="Center"
+                           Text="›"
+                           FontSize="18"
+                           Visibility="Collapsed" />
+              </Grid>
+            </Border>
+            <Popup x:Name="PART_Popup"
+                   AllowsTransparency="True"
+                   Focusable="False"
+                   HorizontalOffset="-4"
+                   IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}"
+                   Placement="Right"
+                   PopupAnimation="Fade">
+              <Grid Margin="12">
+                <Border Padding="11"
+                        MinWidth="190"
+                        CornerRadius="20"
+                        BorderThickness="2"
+                        BorderBrush="{StaticResource MenuBorderBrush}"
+                        Background="{StaticResource MenuSurfaceBrush}">
+                  <Border.Effect>
+                    <DropShadowEffect Color="#784F2938"
+                                      BlurRadius="22"
+                                      ShadowDepth="4"
+                                      Opacity="0.26" />
+                  </Border.Effect>
+                  <StackPanel IsItemsHost="True"
+                              KeyboardNavigation.DirectionalNavigation="Cycle" />
+                </Border>
+              </Grid>
+            </Popup>
+          </Grid>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsHighlighted" Value="True">
+              <Setter TargetName="MenuItemChrome"
+                      Property="Background"
+                      Value="{StaticResource MenuItemHoverBrush}" />
+              <Setter TargetName="MenuItemChrome"
+                      Property="BorderBrush"
+                      Value="{StaticResource MenuInnerHighlightBrush}" />
+            </Trigger>
+            <Trigger Property="IsCheckable" Value="True">
+              <Setter TargetName="IconGlyph" Property="Text" Value="" />
+            </Trigger>
+            <Trigger Property="IsChecked" Value="True">
+              <Setter TargetName="IconGlyph" Property="Text" Value="✓" />
+              <Setter TargetName="IconGlyph" Property="Foreground" Value="#FFBE4B70" />
+            </Trigger>
+            <Trigger Property="Role" Value="SubmenuHeader">
+              <Setter TargetName="SubmenuArrow" Property="Visibility" Value="Visible" />
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter TargetName="MenuItemChrome" Property="Opacity" Value="0.46" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style TargetType="Separator">
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="Separator">
+          <Border Height="1"
+                  Margin="14,6"
+                  Background="{StaticResource MenuSeparatorBrush}" />
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
   </Style>
 </ResourceDictionary>

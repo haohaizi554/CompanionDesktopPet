@@ -5,7 +5,9 @@ using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Media;
+using System.Windows.Media.Effects;
 using System.Windows.Threading;
 using CompanionDesktopPet.Models;
 using CompanionDesktopPet.Services;
@@ -910,6 +912,73 @@ public sealed class WindowShellTests
                 + $"bubble height={bubble.ActualHeight:F3}, gap={gap:F3}.");
             Assert.InRange(gap, 29.5, 30.5);
             window.Close();
+        });
+        DeleteSettingsDirectory(settingsDirectory);
+    }
+
+    [Fact]
+    public void MainWindow_KawaiiContextMenu_PreservesShellAndSubmenuBehavior()
+    {
+        var settingsDirectory = CreateSettingsDirectory();
+        RunOnStaThread(() =>
+        {
+            var window = CreateWindow(settingsDirectory);
+            ContextMenu? menu = null;
+            MenuItem? size = null;
+            try
+            {
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+
+                var stage = Assert.IsType<Grid>(window.FindName("CharacterStage"));
+                menu = Assert.IsType<ContextMenu>(stage.ContextMenu);
+                var kawaiiStyle = Assert.IsType<Style>(
+                    window.FindResource("KawaiiContextMenuStyle"));
+                Assert.Same(kawaiiStyle, menu.Style);
+
+                var surface = Assert.IsType<LinearGradientBrush>(
+                    window.FindResource("MenuSurfaceBrush"));
+                Assert.Equal(2, surface.GradientStops.Count);
+
+                menu.IsOpen = true;
+                menu.ApplyTemplate();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                var shell = Assert.IsType<Border>(menu.Template.FindName("MenuShell", menu));
+                Assert.Equal(new CornerRadius(24), shell.CornerRadius);
+                Assert.Equal(new Thickness(2), shell.BorderThickness);
+                Assert.IsType<DropShadowEffect>(shell.Effect);
+
+                var say = Assert.IsType<MenuItem>(window.FindName("SayMenuItem"));
+                say.ApplyTemplate();
+                var chrome = Assert.IsType<Border>(
+                    say.Template.FindName("MenuItemChrome", say));
+                Assert.Equal(new CornerRadius(14), chrome.CornerRadius);
+                Assert.Equal(35, say.MinHeight);
+
+                size = menu.Items
+                    .OfType<MenuItem>()
+                    .Single(item => Equals(item.Header, "大小"));
+                size.ApplyTemplate();
+                size.IsSubmenuOpen = true;
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                var popup = Assert.IsType<Popup>(
+                    size.Template.FindName("PART_Popup", size));
+                Assert.True(popup.IsOpen);
+            }
+            finally
+            {
+                if (size is not null)
+                {
+                    size.IsSubmenuOpen = false;
+                }
+
+                if (menu is not null)
+                {
+                    menu.IsOpen = false;
+                }
+
+                window.Close();
+            }
         });
         DeleteSettingsDirectory(settingsDirectory);
     }

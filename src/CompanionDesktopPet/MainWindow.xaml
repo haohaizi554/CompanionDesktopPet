@@ -69,23 +69,24 @@
         </TransformGroup>
       </Grid.RenderTransform>
       <Grid.ContextMenu>
-        <ContextMenu>
-          <MenuItem x:Name="SayMenuItem" Header="说句话 ♡" />
-          <MenuItem x:Name="GreetingMenuItem" Header="打个招呼♡" />
-          <MenuItem x:Name="PauseMenuItem" Header="暂停动画" />
+        <ContextMenu Style="{StaticResource KawaiiContextMenuStyle}">
+          <MenuItem x:Name="SayMenuItem" Header="说句话 ♡" Tag="✦" />
+          <MenuItem x:Name="GreetingMenuItem" Header="打个招呼♡" Tag="♡" />
+          <MenuItem x:Name="PauseMenuItem" Header="暂停动画" Tag="☾" />
           <Separator />
-          <MenuItem Header="大小">
+          <MenuItem Header="大小" Tag="◌">
             <MenuItem x:Name="SmallSizeMenuItem" Header="小巧" Tag="Small" IsCheckable="True" />
             <MenuItem x:Name="NormalSizeMenuItem" Header="刚刚好" Tag="Normal" IsCheckable="True" IsChecked="True" />
             <MenuItem x:Name="LargeSizeMenuItem" Header="大一点" Tag="Large" IsCheckable="True" />
           </MenuItem>
           <MenuItem x:Name="TopmostMenuItem"
                     Header="保持置顶"
+                    Tag="⌁"
                     IsCheckable="True"
                     IsChecked="True" />
-          <MenuItem x:Name="RestorePositionMenuItem" Header="回到右下角" />
+          <MenuItem x:Name="RestorePositionMenuItem" Header="回到右下角" Tag="⌂" />
           <Separator />
-          <MenuItem x:Name="ExitMenuItem" Header="先休息啦（退出）" />
+          <MenuItem x:Name="ExitMenuItem" Header="先休息啦（退出）" Tag="☁" />
         </ContextMenu>
       </Grid.ContextMenu>
 
