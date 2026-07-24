@@ -44,7 +44,7 @@ public partial class App : System.Windows.Application
             var settingsService = new SettingsService(_smokeDirectory);
             var settings = await settingsService.LoadAsync();
             var agentMemoryService = new AgentMemoryService(_smokeDirectory);
-            var agentMemory = await agentMemoryService.LoadAsync();
+            var agentMemory = await agentMemoryService.LoadForDeferredWarmupAsync();
             var factories = AppSystemIntegrationFactories.Default;
             _autoStartService = CreateAutoStartService(_smokeTest, factories);
             var window = new MainWindow(

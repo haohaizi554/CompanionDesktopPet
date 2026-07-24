@@ -12,7 +12,16 @@ public sealed record AgentReply(
     DialogueLine? SourceLine = null,
     string SemanticGroup = "");
 
-public sealed class OfflineCompanionAgent
+internal interface ICompanionDialogueAgent
+{
+    DateTime? NextStoryDueAt { get; }
+
+    AgentMemorySnapshot CreateSnapshot();
+
+    AgentReply Respond(CompanionEvent trigger, DateTime localTime, Random random);
+}
+
+public sealed class OfflineCompanionAgent : ICompanionDialogueAgent
 {
     public const int RecentMemoryLimit = 64;
 
@@ -60,6 +69,8 @@ public sealed class OfflineCompanionAgent
             _lastCategory,
             RecentLines);
     }
+
+    internal void WarmUp() => _ = SceneCatalog.All.Count;
 
     public AgentReply Respond(CompanionEvent trigger, DateTime localTime, Random random)
     {

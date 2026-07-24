@@ -550,6 +550,132 @@ public sealed class WindowShellTests
     }
 
     [Fact]
+    public void MainWindow_BlockedDialogueWarmupDoesNotBlockLoadedOrClickActions()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            using var factory = new ControlledDialogueFactory("全量回复");
+            var dialogue = DialogueService.CreateDeferred(factory.Create);
+            var window = CreateWindowWithDialogue(
+                settingsDirectory,
+                dialogue,
+                TimeProvider.System,
+                _ => Task.CompletedTask);
+            try
+            {
+                var showStopwatch = Stopwatch.StartNew();
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                showStopwatch.Stop();
+
+                Assert.True(factory.Entered.Wait(TimeSpan.FromSeconds(2)));
+                Assert.False(dialogue.IsReady);
+                Assert.InRange(showStopwatch.Elapsed, TimeSpan.Zero, TimeSpan.FromSeconds(1));
+                Assert.StartsWith(
+                    "fallback:",
+                    GetLastReply(window).SceneId,
+                    StringComparison.Ordinal);
+
+                var clickStopwatch = Stopwatch.StartNew();
+                window.SaySomething();
+                clickStopwatch.Stop();
+
+                Assert.InRange(clickStopwatch.Elapsed, TimeSpan.Zero, TimeSpan.FromMilliseconds(100));
+                Assert.Equal(CompanionEvent.Click, GetLastReply(window).Trigger);
+                Assert.StartsWith(
+                    "fallback:",
+                    GetLastReply(window).SceneId,
+                    StringComparison.Ordinal);
+                Assert.True(Assert.IsType<TextBlock>(window.FindName("HeartOne"))
+                    .HasAnimatedProperties);
+                Assert.True(Assert.IsType<RotateTransform>(window.FindName("ReactionRotation"))
+                    .HasAnimatedProperties);
+                Assert.IsType<System.Windows.Controls.Image>(window.FindName("BlinkOverlay"));
+                Assert.IsType<MenuItem>(window.FindName("GreetingMenuItem"));
+                Assert.False(GetPrivateField<DispatcherTimer>(window, "_memoryTimer").IsEnabled);
+                Assert.Equal(1, factory.CallCount);
+            }
+            finally
+            {
+                window.Close();
+                factory.Release();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
+    public async Task MainWindow_WarmupCompletionUsesDispatcherAndInjectedClockForFullStartup()
+    {
+        await RunOnStaThreadAsync(async () =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var clock = new ManualTimeProvider();
+            clock.SetUtcNow(new DateTimeOffset(2026, 7, 24, 1, 45, 0, TimeSpan.Zero));
+            using var factory = new ControlledDialogueFactory("全量文库准备好了。");
+            var dialogue = DialogueService.CreateDeferred(factory.Create, clock);
+            var window = CreateWindowWithDialogue(settingsDirectory, dialogue, clock);
+            try
+            {
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                Assert.True(factory.Entered.Wait(TimeSpan.FromSeconds(2)));
+                Assert.StartsWith(
+                    "fallback:",
+                    GetLastReply(window).SceneId,
+                    StringComparison.Ordinal);
+
+                factory.Release();
+                Assert.True(await dialogue.WarmupAsync());
+                await window.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+
+                Assert.Equal("full:test", GetLastReply(window).SceneId);
+                Assert.Equal("全量文库准备好了。", GetLastReply(window).Text);
+                Assert.Equal(
+                    clock.GetLocalNow().LocalDateTime,
+                    factory.Agent.LastRespondedAt);
+                Assert.Equal(1, factory.CallCount);
+            }
+            finally
+            {
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
+    public async Task MainWindow_CloseInvalidatesPendingWarmupContinuation()
+    {
+        await RunOnStaThreadAsync(async () =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            using var factory = new ControlledDialogueFactory("关闭后不许播");
+            var dialogue = DialogueService.CreateDeferred(factory.Create);
+            var window = CreateWindowWithDialogue(settingsDirectory, dialogue, TimeProvider.System);
+            window.Show();
+            window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+            Assert.True(factory.Entered.Wait(TimeSpan.FromSeconds(2)));
+            var replyBeforeClose = GetLastReply(window);
+            var speechBeforeClose = Assert.IsType<TextBlock>(window.FindName("SpeechText")).Text;
+
+            window.Close();
+            factory.Release();
+            Assert.True(await dialogue.WarmupAsync());
+            await window.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+
+            Assert.Same(replyBeforeClose, GetLastReply(window));
+            Assert.Equal(
+                speechBeforeClose,
+                Assert.IsType<TextBlock>(window.FindName("SpeechText")).Text);
+            Assert.False(GetPrivateField<DispatcherTimer>(window, "_automaticTimer").IsEnabled);
+            Assert.False(GetPrivateField<DispatcherTimer>(window, "_eventTimer").IsEnabled);
+            DeleteSettingsDirectory(settingsDirectory);
+        });
+    }
+
+    [Fact]
     public void MainWindow_StartupReply_DoesNotDriveActionAnimationsOrHearts()
     {
         RunOnStaThread(() =>
@@ -1490,10 +1616,10 @@ public sealed class WindowShellTests
                      })
             {
                 var settingsDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
-                var window = new MainWindow(
-                    PetSettings.Default,
-                    new SettingsService(settingsDirectory),
-                    suppressApplicationShutdownOnClose: true);
+                var window = CreateWindowWithDialogue(
+                    settingsDirectory,
+                    new DialogueService(),
+                    TimeProvider.System);
 
                 enterThroughRealHandler(window);
 
@@ -2100,7 +2226,10 @@ public sealed class WindowShellTests
             shutdownApplication: null,
             new AmbientActionScheduler(() => 0.5),
             DisabledAutoStartService.Instance,
-            saveAgentMemoryAsync);
+            saveAgentMemoryAsync,
+            saveSettingsAsync: null,
+            new DialogueService(),
+            TimeProvider.System);
 
     private static MainWindow CreateWindowWithPersistenceWriters(
         string settingsDirectory,
@@ -2118,7 +2247,29 @@ public sealed class WindowShellTests
             new AmbientActionScheduler(() => 0.5),
             DisabledAutoStartService.Instance,
             saveAgentMemoryAsync,
-            saveSettingsAsync);
+            saveSettingsAsync,
+            new DialogueService(),
+            TimeProvider.System);
+
+    private static MainWindow CreateWindowWithDialogue(
+        string settingsDirectory,
+        DialogueService dialogue,
+        TimeProvider timeProvider,
+        Func<AgentMemorySnapshot, Task>? saveAgentMemoryAsync = null) =>
+        new(
+            PetSettings.Default,
+            new SettingsService(settingsDirectory),
+            null,
+            null,
+            null,
+            suppressApplicationShutdownOnClose: true,
+            shutdownApplication: null,
+            new AmbientActionScheduler(() => 0.5),
+            DisabledAutoStartService.Instance,
+            saveAgentMemoryAsync,
+            saveSettingsAsync: null,
+            dialogue,
+            timeProvider);
 
     private static object GetPrivateFieldValue(MainWindow window, string fieldName)
     {
@@ -2421,6 +2572,66 @@ public sealed class WindowShellTests
         }
 
         public void ReleaseFirstSave() => _releaseFirstSave.TrySetResult();
+    }
+
+    private sealed class ControlledDialogueFactory : IDisposable
+    {
+        private readonly ManualResetEventSlim _entered = new();
+        private readonly ManualResetEventSlim _release = new();
+
+        public ControlledDialogueFactory(string replyText) =>
+            Agent = new FixedDialogueAgent(replyText);
+
+        public FixedDialogueAgent Agent { get; }
+        public int CallCount { get; private set; }
+        public ManualResetEventSlim Entered => _entered;
+
+        public ICompanionDialogueAgent Create(AgentMemorySnapshot? snapshot)
+        {
+            CallCount++;
+            _entered.Set();
+            _release.Wait();
+            return Agent;
+        }
+
+        public void Release() => _release.Set();
+
+        public void Dispose()
+        {
+            _release.Set();
+            _entered.Dispose();
+            _release.Dispose();
+        }
+    }
+
+    private sealed class FixedDialogueAgent : ICompanionDialogueAgent
+    {
+        private readonly string _replyText;
+        private readonly AgentMemorySnapshot _snapshot = new(
+            CharacterState.Create(new DateTime(2026, 7, 24, 9, 0, 0, DateTimeKind.Local)),
+            [],
+            0,
+            null,
+            []);
+
+        public FixedDialogueAgent(string replyText) => _replyText = replyText;
+
+        public DateTime? LastRespondedAt { get; private set; }
+        public DateTime? NextStoryDueAt => null;
+
+        public AgentMemorySnapshot CreateSnapshot() => _snapshot;
+
+        public AgentReply Respond(CompanionEvent trigger, DateTime localTime, Random random)
+        {
+            LastRespondedAt = localTime;
+            return new AgentReply(
+                _replyText,
+                DialogueCategory.CharacterLife,
+                DialogueTreeKind.Companion,
+                trigger,
+                SceneId: "full:test",
+                SemanticGroup: "full.test");
+        }
     }
 
     private static AgentReply GetLastReply(MainWindow window)

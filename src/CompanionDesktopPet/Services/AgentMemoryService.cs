@@ -35,7 +35,15 @@ public sealed class AgentMemoryService
     }
 
     public async Task<AgentMemorySnapshot?> LoadAsync()
+        => await LoadCoreAsync(IsValid);
+
+    internal async Task<AgentMemorySnapshot?> LoadForDeferredWarmupAsync()
+        => await LoadCoreAsync(IsStructurallyValid);
+
+    private async Task<AgentMemorySnapshot?> LoadCoreAsync(
+        Func<AgentMemorySnapshot?, bool> validator)
     {
+        ArgumentNullException.ThrowIfNull(validator);
         try
         {
             if (!File.Exists(MemoryPath))
@@ -47,7 +55,7 @@ public sealed class AgentMemoryService
             var snapshot = await JsonSerializer.DeserializeAsync<AgentMemorySnapshot>(
                 stream,
                 JsonOptions);
-            return IsValid(snapshot) ? snapshot : null;
+            return validator(snapshot) ? snapshot : null;
         }
         catch (Exception exception) when (
             exception is IOException
@@ -92,15 +100,7 @@ public sealed class AgentMemoryService
 
     public static bool IsValid(AgentMemorySnapshot? snapshot)
     {
-        if (snapshot?.State is null
-            || snapshot.History is null
-            || snapshot.RecentLines is null
-            || snapshot.TurnCount < 0
-            || snapshot.History.Count > 2_000
-            || snapshot.RecentLines.Count > OfflineCompanionAgent.RecentMemoryLimit
-            || snapshot.TurnCount < snapshot.History.Count
-            || (snapshot.History.Count == 0 && snapshot.RecentLines.Count != 0)
-            || (snapshot.LastCategory is { } category && !Enum.IsDefined(category)))
+        if (!IsStructurallyValid(snapshot))
         {
             return false;
         }
@@ -116,14 +116,9 @@ public sealed class AgentMemoryService
                 .Select(line => line.Text)
                 .ToHashSet(StringComparer.Ordinal);
 
-            return IsValidState(snapshot.State)
+            return HasValidStoryCatalogReferences(snapshot!.State)
                    && snapshot.History.All(entry => IsValidHistory(entry, scenes))
-                   && snapshot.RecentLines.All(line =>
-                       !string.IsNullOrWhiteSpace(line)
-                       && !line.Contains('\t')
-                       && !line.Contains('\r')
-                       && !line.Contains('\n')
-                       && knownTexts.Contains(line));
+                   && snapshot.RecentLines.All(knownTexts.Contains);
         }
         catch (Exception exception) when (
             exception is InvalidOperationException
@@ -134,7 +129,63 @@ public sealed class AgentMemoryService
         }
     }
 
-    private static bool IsValidState(CharacterState state)
+    internal static AgentMemorySnapshot? ReconcileForRuntime(AgentMemorySnapshot? snapshot)
+    {
+        if (!IsStructurallyValid(snapshot))
+        {
+            return null;
+        }
+
+        var scenes = SceneCatalog.All.ToDictionary(scene => scene.Id, StringComparer.Ordinal);
+        var knownTexts = scenes.Values
+            .SelectMany(scene => scene.Lines)
+            .Select(line => line.Text)
+            .ToHashSet(StringComparer.Ordinal);
+        var arcs = StoryArcCatalog.All.ToDictionary(arc => arc.Id, StringComparer.Ordinal);
+        var history = snapshot!.History
+            .Where(entry => IsValidHistory(entry, scenes))
+            .ToArray();
+        var recentLines = history.Length == 0
+            ? []
+            : snapshot.RecentLines.Where(knownTexts.Contains).ToArray();
+        var state = CloneState(snapshot.State);
+        state.ActiveStories = snapshot.State.ActiveStories
+            .Where(story => arcs.TryGetValue(story.ArcId, out var arc)
+                            && story.NodeIndex < arc.Nodes.Count)
+            .ToList();
+        return new AgentMemorySnapshot(
+            state,
+            history,
+            snapshot.TurnCount,
+            snapshot.LastCategory,
+            recentLines);
+    }
+
+    private static bool IsStructurallyValid(AgentMemorySnapshot? snapshot)
+    {
+        if (snapshot?.State is null
+            || snapshot.History is null
+            || snapshot.RecentLines is null
+            || snapshot.TurnCount < 0
+            || snapshot.History.Count > 2_000
+            || snapshot.RecentLines.Count > OfflineCompanionAgent.RecentMemoryLimit
+            || snapshot.TurnCount < snapshot.History.Count
+            || (snapshot.History.Count == 0 && snapshot.RecentLines.Count != 0)
+            || (snapshot.LastCategory is { } category && !Enum.IsDefined(category)))
+        {
+            return false;
+        }
+
+        return IsStructurallyValidState(snapshot.State)
+               && snapshot.History.All(IsStructurallyValidHistory)
+               && snapshot.RecentLines.All(line =>
+                   !string.IsNullOrWhiteSpace(line)
+                   && !line.Contains('\t')
+                   && !line.Contains('\r')
+                   && !line.Contains('\n'));
+    }
+
+    private static bool IsStructurallyValidState(CharacterState state)
     {
         if (!IsUnitInterval(state.Energy)
             || !IsUnitInterval(state.Sociability)
@@ -145,13 +196,8 @@ public sealed class AgentMemoryService
             || state.LastUpdatedAt == default
             || state.LastUpdatedAt < state.InstalledAt
             || state.AttachmentDays < 1
-            || state.ActiveStories is null)
-        {
-            return false;
-        }
-
-        var arcs = StoryArcCatalog.All.ToDictionary(arc => arc.Id, StringComparer.Ordinal);
-        if (state.ActiveStories.Count > arcs.Count)
+            || state.ActiveStories is null
+            || state.ActiveStories.Count > 64)
         {
             return false;
         }
@@ -162,9 +208,7 @@ public sealed class AgentMemoryService
             if (story is null
                 || string.IsNullOrWhiteSpace(story.ArcId)
                 || !seen.Add(story.ArcId)
-                || !arcs.TryGetValue(story.ArcId, out var arc)
                 || story.NodeIndex <= 0
-                || story.NodeIndex >= arc.Nodes.Count
                 || story.DueAt == default)
             {
                 return false;
@@ -174,24 +218,52 @@ public sealed class AgentMemoryService
         return true;
     }
 
+    private static bool HasValidStoryCatalogReferences(CharacterState state)
+    {
+        var arcs = StoryArcCatalog.All.ToDictionary(arc => arc.Id, StringComparer.Ordinal);
+        if (state.ActiveStories.Count > arcs.Count)
+        {
+            return false;
+        }
+
+        return state.ActiveStories.All(story =>
+            arcs.TryGetValue(story.ArcId, out var arc)
+            && story.NodeIndex < arc.Nodes.Count);
+    }
+
+    private static CharacterState CloneState(CharacterState source) => new()
+    {
+        Energy = source.Energy,
+        Sociability = source.Sociability,
+        Boredom = source.Boredom,
+        Mood = source.Mood,
+        Activity = source.Activity,
+        InstalledAt = source.InstalledAt,
+        LastUpdatedAt = source.LastUpdatedAt,
+        AttachmentDays = source.AttachmentDays,
+        ActiveStories = []
+    };
+
+    private static bool IsStructurallyValidHistory(SceneHistoryEntry? entry) =>
+        entry is not null
+        && !string.IsNullOrWhiteSpace(entry.SceneId)
+        && !string.IsNullOrWhiteSpace(entry.SemanticGroup)
+        && !string.IsNullOrWhiteSpace(entry.Variant)
+        && !string.IsNullOrWhiteSpace(entry.DialogueLineId)
+        && entry.PlayedAt != default
+        && entry.PlayedLocalDate is not null
+        && entry.PlayedLocalDate == DateOnly.FromDateTime(entry.PlayedAt)
+        && Enum.IsDefined(entry.Category)
+        && Enum.IsDefined(entry.CategoryGroup)
+        && Enum.IsDefined(entry.OutputMode)
+        && Enum.IsDefined(entry.DialogueTrigger)
+        && entry.InterruptionCost is >= 0 and <= 5;
+
     private static bool IsValidHistory(
         SceneHistoryEntry? entry,
         IReadOnlyDictionary<string, SceneDefinition> scenes)
     {
-        if (entry is null
-            || string.IsNullOrWhiteSpace(entry.SceneId)
-            || string.IsNullOrWhiteSpace(entry.SemanticGroup)
-            || string.IsNullOrWhiteSpace(entry.Variant)
-            || string.IsNullOrWhiteSpace(entry.DialogueLineId)
-            || entry.PlayedAt == default
-            || entry.PlayedLocalDate is null
-            || entry.PlayedLocalDate != DateOnly.FromDateTime(entry.PlayedAt)
-            || !Enum.IsDefined(entry.Category)
-            || !Enum.IsDefined(entry.CategoryGroup)
-            || !Enum.IsDefined(entry.OutputMode)
-            || !Enum.IsDefined(entry.DialogueTrigger)
-            || entry.InterruptionCost is < 0 or > 5
-            || !scenes.TryGetValue(entry.SceneId, out var scene))
+        if (entry is null || !scenes.TryGetValue(entry.SceneId, out var scene))
         {
             return false;
         }

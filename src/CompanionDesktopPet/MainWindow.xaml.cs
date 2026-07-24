@@ -31,6 +31,7 @@ public partial class MainWindow : Window
     private readonly AmbientActionScheduler _ambientScheduler;
     private readonly IIdleTimeProvider _idleTimeProvider;
     private readonly IAutoStartService _autoStartService;
+    private readonly TimeProvider _timeProvider;
     private readonly bool _suppressApplicationShutdownOnClose;
     private readonly Action _shutdownApplication;
     private const double BubbleShadowSafety = 10;
@@ -56,6 +57,9 @@ public partial class MainWindow : Window
     private bool _dragCompletionStarted;
     private BubblePlacementSide _bubbleSide = BubblePlacementSide.Above;
     private bool _bubbleSuspendedForWindowHide;
+    private Task<bool>? _observedDialogueWarmup;
+    private long _dialogueReplyRevision;
+    private long _dialogueWarmupGeneration;
 
     internal AgentReply? LastReply { get; private set; }
 
@@ -189,6 +193,37 @@ public partial class MainWindow : Window
         IAutoStartService autoStartService,
         Func<AgentMemorySnapshot, Task>? saveAgentMemoryAsync,
         Func<PetSettings, Task>? saveSettingsAsync)
+        : this(
+            settings,
+            settingsService,
+            agentMemoryService,
+            agentMemory,
+            idleTimeProvider,
+            suppressApplicationShutdownOnClose,
+            shutdownApplication,
+            ambientScheduler,
+            autoStartService,
+            saveAgentMemoryAsync,
+            saveSettingsAsync,
+            dialogueService: null,
+            timeProvider: null)
+    {
+    }
+
+    internal MainWindow(
+        PetSettings settings,
+        SettingsService settingsService,
+        AgentMemoryService? agentMemoryService,
+        AgentMemorySnapshot? agentMemory,
+        IIdleTimeProvider? idleTimeProvider,
+        bool suppressApplicationShutdownOnClose,
+        Action? shutdownApplication,
+        AmbientActionScheduler ambientScheduler,
+        IAutoStartService autoStartService,
+        Func<AgentMemorySnapshot, Task>? saveAgentMemoryAsync,
+        Func<PetSettings, Task>? saveSettingsAsync,
+        DialogueService? dialogueService,
+        TimeProvider? timeProvider)
     {
         InitializeComponent();
         _settings = settings;
@@ -201,10 +236,12 @@ public partial class MainWindow : Window
             ?? throw new ArgumentNullException(nameof(ambientScheduler));
         _autoStartService = autoStartService
             ?? throw new ArgumentNullException(nameof(autoStartService));
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _suppressApplicationShutdownOnClose = suppressApplicationShutdownOnClose;
         _shutdownApplication = shutdownApplication
             ?? (() => System.Windows.Application.Current?.Shutdown());
-        _dialogue = new DialogueService(agentMemory);
+        _dialogue = dialogueService
+            ?? DialogueService.CreateDeferred(agentMemory, timeProvider: _timeProvider);
         _scheduler = new DialogueScheduler(_random);
         _animation = new AnimationController(
             BreathingScale,
@@ -274,7 +311,8 @@ public partial class MainWindow : Window
 
         UpdatePauseLabel();
         ShowEventBubble(CompanionEvent.Startup);
-        _eventPump = new CompanionEventPump(DateTime.Now, _idleTimeProvider.GetIdleTime());
+        var now = LocalNow;
+        _eventPump = new CompanionEventPump(now, _idleTimeProvider.GetIdleTime());
         _eventTimer.Start();
         ScheduleNextPhrase();
     }
@@ -286,6 +324,7 @@ public partial class MainWindow : Window
             return;
         }
 
+        ObserveDialogueWarmup(replayStartupWhenReady: true);
         ScheduleNextAmbientAction();
     }
 
@@ -1007,7 +1046,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        _automaticTimer.Interval = _scheduler.NextDelay(DateTime.Now);
+        _automaticTimer.Interval = _scheduler.NextDelay(LocalNow);
         _automaticTimer.Start();
     }
 
@@ -1031,7 +1070,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        var now = DateTime.Now;
+        var now = LocalNow;
         _eventPump ??= new CompanionEventPump(now, _idleTimeProvider.GetIdleTime());
         var companionEvent = _eventPump.Poll(
             now,
@@ -1050,14 +1089,92 @@ public partial class MainWindow : Window
             return;
         }
 
-        var reply = _dialogue.GetReply(trigger, DateTime.Now, _random);
+        if (!_dialogue.IsReady && trigger != CompanionEvent.Startup)
+        {
+            ObserveDialogueWarmup(replayStartupWhenReady: false);
+        }
+
+        var reply = _dialogue.GetReply(trigger, LocalNow, _random);
         LastReply = reply;
+        _dialogueReplyRevision++;
         PresentReply(reply);
 
-        if (_saveAgentMemoryAsync is not null)
+        if (_saveAgentMemoryAsync is not null && _dialogue.IsReady)
         {
             _memoryTimer.Stop();
             _memoryTimer.Start();
+        }
+    }
+
+    private DateTime LocalNow => _timeProvider.GetLocalNow().LocalDateTime;
+
+    private void ObserveDialogueWarmup(bool replayStartupWhenReady)
+    {
+        if (InteractionFrozen || _dialogue.IsReady)
+        {
+            return;
+        }
+
+        var warmup = _dialogue.WarmupAsync();
+        if (ReferenceEquals(warmup, _observedDialogueWarmup))
+        {
+            return;
+        }
+
+        _observedDialogueWarmup = warmup;
+        var generation = ++_dialogueWarmupGeneration;
+        var replyRevision = _dialogueReplyRevision;
+        _ = CompleteDialogueWarmupAsync(
+            warmup,
+            generation,
+            replyRevision,
+            replayStartupWhenReady);
+    }
+
+    private async Task CompleteDialogueWarmupAsync(
+        Task<bool> warmup,
+        long generation,
+        long replyRevision,
+        bool replayStartupWhenReady)
+    {
+        bool succeeded;
+        try
+        {
+            succeeded = await warmup.ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            Trace.TraceError("Dialogue warmup failed fatally: {0}", exception);
+            succeeded = false;
+        }
+
+        try
+        {
+            await Dispatcher.InvokeAsync(() =>
+            {
+                if (InteractionFrozen || generation != _dialogueWarmupGeneration)
+                {
+                    return;
+                }
+
+                if (!succeeded)
+                {
+                    if (ReferenceEquals(_observedDialogueWarmup, warmup))
+                    {
+                        _observedDialogueWarmup = null;
+                    }
+
+                    return;
+                }
+
+                if (replayStartupWhenReady && replyRevision == _dialogueReplyRevision)
+                {
+                    ShowEventBubble(CompanionEvent.Startup);
+                }
+            }, DispatcherPriority.Background);
+        }
+        catch (Exception exception) when (exception is TaskCanceledException or InvalidOperationException)
+        {
         }
     }
 
@@ -1471,7 +1588,7 @@ public partial class MainWindow : Window
 
     private async Task SaveAgentMemoryAsync(bool skipWhenExiting = false)
     {
-        if (_saveAgentMemoryAsync is null)
+        if (_saveAgentMemoryAsync is null || !_dialogue.IsReady)
         {
             return;
         }
@@ -1520,6 +1637,8 @@ public partial class MainWindow : Window
     private void Window_Closed(object? sender, EventArgs e)
     {
         _isClosed = true;
+        _dialogueWarmupGeneration++;
+        _observedDialogueWarmup = null;
         ContentRendered -= Window_ContentRendered;
         _ambientTimer.Tick -= AmbientTimer_Tick;
         InvalidateAmbientSchedule();

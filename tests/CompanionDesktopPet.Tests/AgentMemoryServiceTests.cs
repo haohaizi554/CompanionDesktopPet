@@ -1,5 +1,7 @@
 using System.IO;
+using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using CompanionDesktopPet.Services;
 
 namespace CompanionDesktopPet.Tests;
@@ -147,6 +149,67 @@ public sealed class AgentMemoryServiceTests : IDisposable
                 stories.Add(stories[0]!.DeepClone());
             },
             root => root["State"]!["ActiveStories"]![0]!["DueAt"] = "0001-01-01T00:00:00");
+    }
+
+    [Fact]
+    public async Task DeferredWarmupLoad_UsesOnlyStructuralSafetyBeforeTheBackgroundCatalogGate()
+    {
+        var now = new DateTime(2026, 7, 24, 9, 0, 0, DateTimeKind.Local);
+        var snapshot = new AgentMemorySnapshot(
+            CharacterState.Create(now),
+            [
+                new SceneHistoryEntry(
+                    "retired-scene",
+                    "retired.semantic",
+                    now,
+                    "旧版本留下的一句话。",
+                    "retired-line",
+                    DialogueCategory.CharacterLife,
+                    DialogueCategoryGroup.CharacterLife,
+                    DialogueOutputMode.SelfTalk,
+                    DialogueTrigger.Any,
+                    0,
+                    DateOnly.FromDateTime(now))
+            ],
+            1,
+            DialogueCategory.CharacterLife,
+            ["旧版本留下的一句话。"]);
+        Directory.CreateDirectory(_directory);
+        await File.WriteAllTextAsync(
+            Path.Combine(_directory, "agent-memory.json"),
+            JsonSerializer.Serialize(snapshot, new JsonSerializerOptions
+            {
+                Converters = { new JsonStringEnumConverter(allowIntegerValues: false) }
+            }));
+        var service = new AgentMemoryService(_directory);
+
+        var deferred = await service.LoadForDeferredWarmupAsync();
+
+        Assert.NotNull(deferred);
+        Assert.Equal("retired-scene", Assert.Single(deferred!.History).SceneId);
+        Assert.Null(await service.LoadAsync());
+    }
+
+    [Fact]
+    public async Task DeferredWarmupLoad_RejectsStructurallyBrokenMemoryImmediately()
+    {
+        var now = new DateTime(2026, 7, 24, 9, 0, 0, DateTimeKind.Local);
+        var snapshot = new AgentMemorySnapshot(
+            CharacterState.Create(now),
+            [],
+            0,
+            null,
+            []);
+        snapshot.State.Energy = 2;
+        Directory.CreateDirectory(_directory);
+        await File.WriteAllTextAsync(
+            Path.Combine(_directory, "agent-memory.json"),
+            JsonSerializer.Serialize(snapshot, new JsonSerializerOptions
+            {
+                Converters = { new JsonStringEnumConverter(allowIntegerValues: false) }
+            }));
+
+        Assert.Null(await new AgentMemoryService(_directory).LoadForDeferredWarmupAsync());
     }
 
     [Fact]
