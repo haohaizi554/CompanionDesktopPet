@@ -250,6 +250,7 @@ public static class PersonaCorpus
                     || category != DialogueCategory.EasterEgg
                     || categoryGroup != DialogueCategoryGroup.EasterEgg
                     || sourceReference != identityRule.SourceReference
+                    || topicId != identityRule.TopicId
                     || digest != identityRule.TextSha256
                     || !identityHits.SetEquals(identityRule.AllowedMarkers)
                     || cooldown != identityRule.CooldownHours

@@ -108,4 +108,11 @@
 
 ## 完成条件
 
+## Topic 与语义场景契约
+
+- `topic_id` 是逐行编辑和来源溯源元数据，不属于运行时 semantic scene signature；同一个 `semantic_group` 可以跨越多个 `topic_id`，但其分类、输出模式、触发、上下文、语气、冷却、配额、权重、回复和启用状态必须一致。
+- 每条 legacy/surface `source_reference` 的 `topic:` token 必须与该行 `topic_id` 完全一致；catalog 行通过唯一 variant 在 catalog registry 中逐行绑定 `runtime_topic_id`。
+- editorial variant 用 variant 前缀绑定 topic；身份彩蛋 manifest 对 catalog 条目显式保存 `topic_id`，对 legacy/surface 条目由 `source_reference` 的 `topic:` token 绑定。任何一侧漂移都属于硬错误。
+- dry-sharp 场景用稳定哈希阈值选择资格，variant 扩充不得改变 scene eligibility。
+
 只有在原库哈希复核不变、Python 全测通过、验证器成功、30 天 10-seed 模拟无硬约束违规、.NET 全测通过、C# 嵌入 v2、单 EXE 重新发布并通过无 DLL 启动烟测后，任务才算完成。

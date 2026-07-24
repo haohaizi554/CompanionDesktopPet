@@ -38,6 +38,7 @@ _IDENTITY_KEYS = frozenset(
         "text",
     }
 )
+_IDENTITY_OPTIONAL_KEYS = frozenset({"topic_id"})
 _POLICY_KEYS = frozenset(
     {
         "allowed_markers",
@@ -93,6 +94,7 @@ class IdentityEasterEggAdjudication:
     variant_id: str
     source_line: int | None
     source_reference: str
+    topic_id: str
     text_sha256: str
     allowed_markers: tuple[str, ...]
     category: str
@@ -174,11 +176,16 @@ def load_editorial_manifest(
         raise EditorialManifestError("identity_easter_eggs must be a non-empty object")
     parsed: dict[str, IdentityEasterEggAdjudication] = {}
     for line_id, value in identities.items():
-        if _ID.fullmatch(line_id) is None or not isinstance(value, dict) or set(value) != _IDENTITY_KEYS:
+        if (
+            _ID.fullmatch(line_id) is None
+            or not isinstance(value, dict)
+            or not _IDENTITY_KEYS <= set(value) <= _IDENTITY_KEYS | _IDENTITY_OPTIONAL_KEYS
+        ):
             raise EditorialManifestError(f"identity adjudication {line_id!r} is malformed")
         variant_id = value.get("variant_id")
         source_line = value.get("source_line")
         reference = value.get("source_reference")
+        topic_id = value.get("topic_id")
         digest = value.get("text_sha256")
         markers = _string_tuple(value.get("allowed_markers"), f"{line_id}.allowed_markers")
         cooldown = value.get("cooldown_hours")
@@ -190,6 +197,7 @@ def load_editorial_manifest(
             or _ID.fullmatch(variant_id) is None
             or (source_line is not None and (type(source_line) is not int or source_line <= 0))
             or not isinstance(reference, str)
+            or (topic_id is not None and (not isinstance(topic_id, str) or _ID.fullmatch(topic_id) is None))
             or not isinstance(digest, str)
             or _HASH.fullmatch(digest) is None
             or not set(markers) <= set(allowed)
@@ -214,8 +222,12 @@ def load_editorial_manifest(
             raise EditorialManifestError(f"identity adjudication {line_id!r} variant mismatch")
         if legacy is not None and source_line != int(legacy.group(1)):
             raise EditorialManifestError(f"identity adjudication {line_id!r} source mismatch")
-        if catalog is not None and (source_line is not None or not text):
+        if legacy is not None and topic_id is not None and topic_id != legacy.group(2):
+            raise EditorialManifestError(f"identity adjudication {line_id!r} topic mismatch")
+        if catalog is not None and (source_line is not None or not text or topic_id is None):
             raise EditorialManifestError(f"catalog identity {line_id!r} needs exact authored text")
+        bound_topic_id = legacy.group(2) if legacy is not None else topic_id
+        assert isinstance(bound_topic_id, str)
         if text:
             actual = hashlib.sha256(text.encode("utf-8")).hexdigest()
             if actual != digest:
@@ -225,6 +237,7 @@ def load_editorial_manifest(
             variant_id=variant_id,
             source_line=source_line,
             source_reference=reference,
+            topic_id=bound_topic_id,
             text_sha256=digest,
             allowed_markers=markers,
             category=required_category,
@@ -261,6 +274,7 @@ def is_exact_identity_easter_egg(row: CorpusLine) -> bool:
         row.category == item.category
         and row.category_group == item.category_group
         and row.source_reference == item.source_reference
+        and row.topic_id == item.topic_id
         and digest == item.text_sha256
         and marker_hits == set(item.allowed_markers)
         and not any(

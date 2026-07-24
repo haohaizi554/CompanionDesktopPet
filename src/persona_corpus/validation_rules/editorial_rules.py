@@ -37,21 +37,31 @@ def validate_dry_sharp_contract(
     enabled = tuple(row for row in rows if row.enabled is True)
     if not enabled:
         return
-    count = sum(row.tone == "dry_sharp" for row in enabled)
-    enforcement_minimum = int(policy["inventory_enforcement_minimum_rows"])
-    bootstrap_minimum = int(policy["bootstrap_minimum_rows"])
-    if len(enabled) >= enforcement_minimum:
-        lower, upper = (float(value) for value in policy["inventory_acceptance"])
-        ratio = count / len(enabled)
+    scene_tones = {
+        row.semantic_group: row.tone
+        for row in enabled
+        if isinstance(row.semantic_group, str) and row.semantic_group
+    }
+    scene_count = len(scene_tones)
+    dry_scene_count = sum(tone == "dry_sharp" for tone in scene_tones.values())
+    enforcement_profile = str(policy["scene_inventory_enforcement_profile"])
+    enforcement_minimum_rows = int(PERSONA_CONTRACT.inventory[enforcement_profile][0])
+    bootstrap_minimum = int(policy["bootstrap_minimum_scenes"])
+    if len(enabled) >= enforcement_minimum_rows:
+        lower, upper = (
+            float(value) for value in policy["scene_inventory_acceptance"]
+        )
+        ratio = dry_scene_count / scene_count
         if not lower <= ratio <= upper:
             issues.error(
-                "dry_sharp_inventory_ratio",
-                f"dry_sharp inventory ratio {ratio:.6f} must be in [{lower}, {upper}]",
+                "dry_sharp_scene_inventory_ratio",
+                f"dry_sharp scene inventory ratio {ratio:.6f} must be in [{lower}, {upper}]",
             )
-    elif len(enabled) >= 800 and count < bootstrap_minimum:
+    elif len(enabled) >= 800 and dry_scene_count < bootstrap_minimum:
         issues.error(
-            "dry_sharp_inventory_bootstrap",
-            f"bootstrap corpus needs at least {bootstrap_minimum} dry_sharp rows; found {count}",
+            "dry_sharp_scene_inventory_bootstrap",
+            "bootstrap corpus needs at least "
+            f"{bootstrap_minimum} dry_sharp scenes; found {dry_scene_count}",
         )
 
 

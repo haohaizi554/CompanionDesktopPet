@@ -188,13 +188,17 @@
     }
   },
   "dry_sharp": {
-    "inventory_target": 0.05,
-    "inventory_acceptance": [
+    "scene_hash_namespace": "persona-dry-sharp-scene-v1",
+    "scene_assignment_field": "semantic_group",
+    "scene_hash_threshold": 0.06,
+    "scene_inventory_target": 0.05,
+    "scene_inventory_acceptance": [
       0.04,
       0.06
     ],
-    "inventory_enforcement_minimum_rows": 5000,
-    "bootstrap_minimum_rows": 4,
+    "scene_inventory_enforcement_profile": "expanded_runtime",
+    "bootstrap_minimum_scenes": 4,
+    "row_inventory_policy": "observation_only",
     "playback_target": 0.03,
     "playback_acceptance": [
       0.02,
@@ -256,6 +260,26 @@
     }
   },
   "lineage": {
+    "topic_id_role": "row_editorial_lineage",
+    "semantic_group_topic_policy": "may_span_topics",
+    "editorial_variant_topic_binding": "variant_prefix",
+    "surface_variant_topic_binding": "source_reference_topic_token",
+    "catalog_variant_topic_binding": "catalog_registry",
+    "semantic_scene_signature_fields": [
+      "category",
+      "category_group",
+      "output_mode",
+      "trigger",
+      "required_context",
+      "tone",
+      "cooldown_hours",
+      "semantic_cooldown_hours",
+      "max_per_day",
+      "interrupt_cost",
+      "weight",
+      "requires_reply",
+      "enabled"
+    ],
     "legacy_source_min_line": 1,
     "legacy_source_max_line": 75375,
     "legacy_reference_pattern": "^legacy:(\\d+);topic:([A-Za-z0-9._-]+);variant:([A-Za-z0-9._-]+)$",

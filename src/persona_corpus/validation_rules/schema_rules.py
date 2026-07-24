@@ -3,27 +3,17 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Sequence
 
-from ..contract import CATEGORY_GROUP_BY_CATEGORY, PERSONA_CONTRACT
+from ..contract import (
+    CATEGORY_GROUP_BY_CATEGORY,
+    PERSONA_CONTRACT,
+    SEMANTIC_SCENE_SIGNATURE_FIELDS,
+)
 from ..models import CorpusLine
 from ..normalization import normalize_text
 from .common import IssueSink
 
 
-SEMANTIC_RUNTIME_FIELDS = (
-    "category",
-    "category_group",
-    "output_mode",
-    "trigger",
-    "required_context",
-    "tone",
-    "cooldown_hours",
-    "semantic_cooldown_hours",
-    "max_per_day",
-    "interrupt_cost",
-    "weight",
-    "requires_reply",
-    "enabled",
-)
+SEMANTIC_RUNTIME_FIELDS = SEMANTIC_SCENE_SIGNATURE_FIELDS
 
 
 def validate_category_groups(rows: Sequence[CorpusLine], issues: IssueSink) -> None:

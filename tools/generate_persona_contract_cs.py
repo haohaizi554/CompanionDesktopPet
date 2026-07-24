@@ -77,6 +77,7 @@ def render_contract() -> str:
     identity_rules = ",\n".join(
         "            "
         f"[{_quoted(item.line_id)}] = new({_quoted(item.source_reference)}, "
+        f"{_quoted(item.topic_id)}, "
         f"{_quoted(item.text_sha256)}, "
         "new HashSet<string>(StringComparer.Ordinal) { "
         + ", ".join(_quoted(marker) for marker in item.allowed_markers)
@@ -91,6 +92,7 @@ namespace CompanionDesktopPet.Services;
 
 internal sealed record IdentityEasterEggRule(
     string SourceReference,
+    string TopicId,
     string TextSha256,
     IReadOnlySet<string> AllowedMarkers,
     double CooldownHours,
@@ -103,6 +105,13 @@ internal static class PersonaContractGenerated
     public const int CuratedCoreMaximumRows = {curated_core_maximum};
     public const int ExpandedRuntimeMinimumRows = {expanded_runtime_minimum};
     public const int ExpandedRuntimeMaximumRows = {expanded_runtime_maximum};
+    public const string DrySharpSceneHashNamespace = {_quoted(str(dry_sharp['scene_hash_namespace']))};
+    public const string DrySharpSceneAssignmentField = {_quoted(str(dry_sharp['scene_assignment_field']))};
+    public const double DrySharpSceneHashThreshold = {float(dry_sharp['scene_hash_threshold']):.2f};
+    public const double DrySharpSceneInventoryMinimum = {float(dry_sharp['scene_inventory_acceptance'][0]):.2f};
+    public const double DrySharpSceneInventoryMaximum = {float(dry_sharp['scene_inventory_acceptance'][1]):.2f};
+    public const string DrySharpSceneInventoryEnforcementProfile = {_quoted(str(dry_sharp['scene_inventory_enforcement_profile']))};
+    public const string DrySharpRowInventoryPolicy = {_quoted(str(dry_sharp['row_inventory_policy']))};
     public const int EasterEggRecentWindow = {int(limits['easter_egg_recent_window'])};
     public const int EasterEggRecentMaximum = {int(limits['easter_egg_recent_max'])};
     public const int DrySharpRecentWindow = {int(dry_sharp['recent_window'])};

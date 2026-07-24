@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -24,6 +25,13 @@ class EditorialManifestTests(unittest.TestCase):
         self.assertTrue(adjudicated <= catalog_ids)
         self.assertTrue(retired.isdisjoint(catalog_ids))
         self.assertTrue(adjudicated.isdisjoint(retired))
+        entries = {entry.variant_id: entry for entry in CONTENT_CATALOG}
+        for variant_id in adjudicated:
+            self.assertEqual(
+                variant_id.rsplit(".", 1)[0], entries[variant_id].runtime_topic_id
+            )
+        for variant_id in retired:
+            self.assertTrue(variant_id.endswith(".practice"), variant_id)
 
     def test_identity_adjudications_are_exact_small_and_privacy_scoped(self) -> None:
         adjudications = tuple(EDITORIAL_MANIFEST.identity_easter_eggs.values())
@@ -37,6 +45,7 @@ class EditorialManifestTests(unittest.TestCase):
             self.assertGreaterEqual(item.cooldown_hours, 720)
             self.assertLessEqual(item.weight, 0.1)
             self.assertIn(f";variant:{item.variant_id}", item.source_reference)
+            self.assertTrue(item.topic_id)
             self.assertNotIn("75138", item.source_reference)
             self.assertNotIn("75153", item.source_reference)
             self.assertNotIn("75154", item.source_reference)
@@ -56,6 +65,7 @@ class EditorialManifestTests(unittest.TestCase):
             self.assertEqual(item.text, entry.text)
             self.assertEqual(item.category, entry.category)
             self.assertEqual(item.category_group, entry.category_group)
+            self.assertEqual(item.topic_id, entry.runtime_topic_id)
 
     def test_legacy_identity_entries_bind_line_id_variant_reference_and_text(self) -> None:
         legacy = [
@@ -70,6 +80,12 @@ class EditorialManifestTests(unittest.TestCase):
         )
         self.assertEqual(len(legacy), len({item.line_id for item in legacy}))
         self.assertEqual(len(legacy), len({item.variant_id for item in legacy}))
+        for item in legacy:
+            match = re.fullmatch(
+                r"legacy:\d+;topic:([^;]+);variant:[^;]+", item.source_reference
+            )
+            self.assertIsNotNone(match)
+            self.assertEqual(match.group(1), item.topic_id)
 
     def test_loader_rejects_duplicate_keys(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

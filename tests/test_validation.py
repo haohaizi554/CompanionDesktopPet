@@ -27,6 +27,9 @@ from src.persona_corpus.validation import (
     validate_file,
 )
 from src.persona_corpus.validation_rules.lineage_rules import build_repository_registry
+from src.persona_corpus.validation_rules.editorial_rules import (
+    validate_dry_sharp_contract,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -362,6 +365,25 @@ class ValidationContractTests(unittest.TestCase):
         self.assertIn("requires_reply", issue.message)
         self.assertIn("enabled", issue.message)
 
+    def test_semantic_group_may_span_lineage_topics(self) -> None:
+        first = valid_line(
+            id="first-topic",
+            topic_id="fixture.topic.one",
+            semantic_group="shared.semantic.scene",
+            source_reference="catalog:test-fixture;variant:fixture.topic.one",
+        )
+        second = valid_line(
+            id="second-topic",
+            topic_id="fixture.topic.two",
+            semantic_group="shared.semantic.scene",
+            source_reference="catalog:test-fixture;variant:fixture.topic.two",
+            text="把一小段笔记整理好，之后回看会轻松一些。",
+        )
+
+        report = validate_corpus([first, second], valid_config(), {"exceptions": []})
+
+        self.assertNotIn("semantic_group_inconsistent", issue_codes(report))
+
     def test_disabled_rows_receive_full_safety_preflight(self) -> None:
         row = valid_line(
             id="disabled-risk",
@@ -671,7 +693,7 @@ class ValidationContractTests(unittest.TestCase):
             id=item.line_id,
             category="EasterEgg",
             category_group="easter_egg",
-            topic_id="egg_editorial_full_name_01",
+            topic_id=item.topic_id,
             semantic_group="easter_egg.editorial_identity.full_name",
             tone="playful",
             cooldown_hours=720.0,
@@ -688,6 +710,7 @@ class ValidationContractTests(unittest.TestCase):
         forbidden_combo = replace(row, text=f"{row.text} 湖南。")
         punctuation_edit = replace(row, text=row.text[:-1] + "！")
         phone_append = replace(row, text=f"{row.text} 13800138000")
+        wrong_topic = replace(row, topic_id="easter_egg.editorial_identity.wrong")
 
         self.assertNotIn("pii_enabled", issue_codes(exact))
         self.assertIn(
@@ -698,7 +721,7 @@ class ValidationContractTests(unittest.TestCase):
                 )
             ),
         )
-        for changed in (punctuation_edit, phone_append):
+        for changed in (punctuation_edit, phone_append, wrong_topic):
             changed_report = validate_corpus(
                 [changed], valid_config(), bound_allowlist([changed])
             )
@@ -739,6 +762,45 @@ class ValidationContractTests(unittest.TestCase):
         for row in (forbidden_group, forbidden_trigger, forbidden_context):
             report = validate_corpus([row], valid_config(), bound_allowlist([row]))
             self.assertIn("dry_sharp_placement", issue_codes(report), row.id)
+
+    def test_dry_sharp_inventory_uses_scenes_and_never_row_variant_share(self) -> None:
+        class Sink:
+            def __init__(self) -> None:
+                self.codes: list[str] = []
+
+            def error(
+                self,
+                code: str,
+                message: str,
+                line_id: object = "",
+                row_number: int | None = None,
+            ) -> None:
+                self.codes.append(code)
+
+        rows = [
+            valid_line(
+                id=f"scene-{index}",
+                semantic_group=f"fixture.scene.{index}",
+                tone="dry_sharp" if index < 22 else "calm",
+            )
+            for index in range(500)
+        ]
+        expanded = rows + rows[:22] * 2300
+        passing = Sink()
+
+        validate_dry_sharp_contract(expanded, passing)
+
+        self.assertNotIn("dry_sharp_scene_inventory_ratio", passing.codes)
+        row_ratio = sum(row.tone == "dry_sharp" for row in expanded) / len(expanded)
+        self.assertGreater(row_ratio, 0.40)
+
+        failing = Sink()
+        failing_rows = [
+            replace(row, tone="calm") if index >= 19 else row
+            for index, row in enumerate(rows)
+        ]
+        validate_dry_sharp_contract(failing_rows * 100, failing)
+        self.assertIn("dry_sharp_scene_inventory_ratio", failing.codes)
 
     def test_category_group_output_mode_mapping_applies_to_enabled_and_disabled(self) -> None:
         rows = [

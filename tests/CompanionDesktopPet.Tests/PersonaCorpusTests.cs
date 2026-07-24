@@ -48,6 +48,11 @@ public sealed class PersonaCorpusTests
     public void ApplicationAssembly_EmbedsTheExactEditorialIdentityPolicy()
     {
         Assert.Equal(29, PersonaCorpus.EditorialIdentityEasterEggIds.Count);
+        Assert.Equal(0.06, PersonaContractGenerated.DrySharpSceneHashThreshold, 8);
+        Assert.Equal(0.04, PersonaContractGenerated.DrySharpSceneInventoryMinimum, 8);
+        Assert.Equal(0.06, PersonaContractGenerated.DrySharpSceneInventoryMaximum, 8);
+        Assert.Equal("expanded_runtime", PersonaContractGenerated.DrySharpSceneInventoryEnforcementProfile);
+        Assert.Equal("observation_only", PersonaContractGenerated.DrySharpRowInventoryPolicy);
     }
 
     [Fact]
@@ -279,6 +284,25 @@ public sealed class PersonaCorpusTests
 
             Assert.Throws<InvalidDataException>(() => PersonaCorpus.Load(stream));
         }
+
+        using var wrongTopic = CorpusStream(
+            new UTF8Encoding(false, true),
+            ("id", "v2_egg_editorial_full_name_01_3230a1453d30"),
+            ("category", "EasterEgg"),
+            ("category_group", "easter_egg"),
+            ("topic_id", "easter_egg.editorial_identity.wrong"),
+            ("semantic_group", "easter_egg.editorial_identity.full_name"),
+            ("output_mode", "self_talk"),
+            ("tone", "playful"),
+            ("interrupt_cost", "0"),
+            ("cooldown_hours", "720"),
+            ("semantic_cooldown_hours", "720"),
+            ("weight", "0.1"),
+            ("text", exact),
+            ("source_kind", "curated_standalone"),
+            ("source_reference", "catalog:editorial-easter-egg.identity-v1;variant:egg_editorial_full_name_01"));
+
+        Assert.Throws<InvalidDataException>(() => PersonaCorpus.Load(wrongTopic));
     }
 
     [Theory]

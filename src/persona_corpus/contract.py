@@ -225,6 +225,119 @@ def load_persona_contract(path: Path = DEFAULT_CONTRACT_PATH) -> PersonaContract
     lineage = _mapping(raw.get("lineage"), "lineage")
     if "dry_sharp" not in tones:
         raise PersonaContractError("dry_sharp policy requires the dry_sharp controlled tone")
+    expected_dry_sharp_keys = {
+        "scene_hash_namespace",
+        "scene_assignment_field",
+        "scene_hash_threshold",
+        "scene_inventory_target",
+        "scene_inventory_acceptance",
+        "scene_inventory_enforcement_profile",
+        "bootstrap_minimum_scenes",
+        "row_inventory_policy",
+        "playback_target",
+        "playback_acceptance",
+        "recent_window",
+        "recent_max",
+        "forbidden_category_groups",
+        "forbidden_triggers",
+        "forbidden_context_tokens",
+    }
+    if set(dry_sharp) != expected_dry_sharp_keys:
+        raise PersonaContractError("dry_sharp uses an unexpected key set")
+    scene_hash_threshold = dry_sharp.get("scene_hash_threshold")
+    if (
+        isinstance(scene_hash_threshold, bool)
+        or not isinstance(scene_hash_threshold, (int, float))
+        or not math.isfinite(float(scene_hash_threshold))
+        or not 0 < float(scene_hash_threshold) <= 1
+    ):
+        raise PersonaContractError("dry_sharp.scene_hash_threshold must be in (0, 1]")
+    if (
+        dry_sharp.get("scene_hash_namespace") != "persona-dry-sharp-scene-v1"
+        or dry_sharp.get("scene_assignment_field") != "semantic_group"
+        or dry_sharp.get("row_inventory_policy") != "observation_only"
+    ):
+        raise PersonaContractError(
+            "dry_sharp scene assignment must be stable and row inventory observation-only"
+        )
+    scene_target = dry_sharp.get("scene_inventory_target")
+    enforcement_profile = dry_sharp.get("scene_inventory_enforcement_profile")
+    bootstrap_scenes = dry_sharp.get("bootstrap_minimum_scenes")
+    if (
+        isinstance(scene_target, bool)
+        or not isinstance(scene_target, (int, float))
+        or not math.isfinite(float(scene_target))
+        or not 0 <= float(scene_target) <= 1
+        or enforcement_profile != "expanded_runtime"
+        or type(bootstrap_scenes) is not int
+        or bootstrap_scenes <= 0
+    ):
+        raise PersonaContractError("dry_sharp scene inventory limits are invalid")
+    scene_acceptance = dry_sharp.get("scene_inventory_acceptance")
+    if (
+        not isinstance(scene_acceptance, list)
+        or len(scene_acceptance) != 2
+        or any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            for value in scene_acceptance
+        )
+        or not 0 <= float(scene_acceptance[0]) <= float(scene_acceptance[1]) <= 1
+    ):
+        raise PersonaContractError(
+            "dry_sharp.scene_inventory_acceptance must be an ascending ratio range"
+        )
+    if not float(scene_acceptance[0]) <= float(scene_target) <= float(scene_acceptance[1]):
+        raise PersonaContractError(
+            "dry_sharp.scene_inventory_target must be inside its acceptance range"
+        )
+    expected_lineage_keys = {
+        "topic_id_role",
+        "semantic_group_topic_policy",
+        "editorial_variant_topic_binding",
+        "surface_variant_topic_binding",
+        "catalog_variant_topic_binding",
+        "semantic_scene_signature_fields",
+        "legacy_source_min_line",
+        "legacy_source_max_line",
+        "legacy_reference_pattern",
+        "catalog_reference_pattern",
+    }
+    if set(lineage) != expected_lineage_keys:
+        raise PersonaContractError("lineage uses an unexpected key set")
+    if (
+        lineage.get("topic_id_role") != "row_editorial_lineage"
+        or lineage.get("semantic_group_topic_policy") != "may_span_topics"
+        or lineage.get("editorial_variant_topic_binding") != "variant_prefix"
+        or lineage.get("surface_variant_topic_binding")
+        != "source_reference_topic_token"
+        or lineage.get("catalog_variant_topic_binding") != "catalog_registry"
+    ):
+        raise PersonaContractError("lineage topic-binding policy is invalid")
+    signature_fields = _string_tuple(
+        lineage.get("semantic_scene_signature_fields"),
+        "lineage.semantic_scene_signature_fields",
+    )
+    expected_signature_fields = {
+        "category",
+        "category_group",
+        "output_mode",
+        "trigger",
+        "required_context",
+        "tone",
+        "cooldown_hours",
+        "semantic_cooldown_hours",
+        "max_per_day",
+        "interrupt_cost",
+        "weight",
+        "requires_reply",
+        "enabled",
+    }
+    if set(signature_fields) != expected_signature_fields or "topic_id" in signature_fields:
+        raise PersonaContractError(
+            "semantic scene signature must contain runtime metadata and exclude topic_id"
+        )
 
     frozen_raw = _freeze(raw)
     return PersonaContract(
@@ -260,6 +373,9 @@ ALLOWED_CONTEXT_TOKENS = PERSONA_CONTRACT.context_tokens
 MVP_TRIGGERS = PERSONA_CONTRACT.mvp_triggers
 FUTURE_TRIGGERS = PERSONA_CONTRACT.future_triggers
 TRIGGERS = MVP_TRIGGERS | FUTURE_TRIGGERS
+SEMANTIC_SCENE_SIGNATURE_FIELDS = tuple(
+    PERSONA_CONTRACT.lineage["semantic_scene_signature_fields"]
+)
 
 
 def category_group_for(category: str) -> str:
@@ -283,6 +399,7 @@ __all__ = [
     "PersonaContract",
     "PersonaContractError",
     "SOURCE_KINDS",
+    "SEMANTIC_SCENE_SIGNATURE_FIELDS",
     "TONES",
     "TRIGGERS",
     "category_group_for",

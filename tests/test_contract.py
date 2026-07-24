@@ -117,6 +117,38 @@ class PersonaContractFileTests(unittest.TestCase):
             (50000, 60000), PERSONA_CONTRACT.inventory["expanded_runtime"]
         )
 
+    def test_topic_id_is_lineage_metadata_not_a_semantic_scene_dimension(self) -> None:
+        contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
+        lineage = contract["lineage"]
+
+        self.assertEqual("row_editorial_lineage", lineage["topic_id_role"])
+        self.assertEqual("may_span_topics", lineage["semantic_group_topic_policy"])
+        self.assertEqual("variant_prefix", lineage["editorial_variant_topic_binding"])
+        self.assertEqual(
+            "source_reference_topic_token",
+            lineage["surface_variant_topic_binding"],
+        )
+        self.assertEqual("catalog_registry", lineage["catalog_variant_topic_binding"])
+        self.assertNotIn("topic_id", lineage["semantic_scene_signature_fields"])
+        self.assertIn("category_group", lineage["semantic_scene_signature_fields"])
+        self.assertIn("weight", lineage["semantic_scene_signature_fields"])
+
+    def test_dry_sharp_scene_eligibility_is_hash_stable(self) -> None:
+        contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
+        dry_sharp = contract["dry_sharp"]
+
+        self.assertEqual("semantic_group", dry_sharp["scene_assignment_field"])
+        self.assertEqual(
+            "persona-dry-sharp-scene-v1", dry_sharp["scene_hash_namespace"]
+        )
+        self.assertEqual(0.06, dry_sharp["scene_hash_threshold"])
+        self.assertEqual([0.04, 0.06], dry_sharp["scene_inventory_acceptance"])
+        self.assertEqual(
+            "expanded_runtime", dry_sharp["scene_inventory_enforcement_profile"]
+        )
+        self.assertEqual("observation_only", dry_sharp["row_inventory_policy"])
+        self.assertNotIn("inventory_acceptance", dry_sharp)
+
     def test_csharp_contract_is_generated_and_current(self) -> None:
         generator = ROOT / "tools/generate_persona_contract_cs.py"
         self.assertTrue(generator.is_file(), "C# persona contract generator is missing")
