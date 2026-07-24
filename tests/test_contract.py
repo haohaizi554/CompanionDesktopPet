@@ -5,11 +5,32 @@ import importlib.util
 import subprocess
 import sys
 import unittest
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT_PATH = ROOT / "config/persona-contract.json"
+TEST_PROJECT_PATH = (
+    ROOT / "tests/CompanionDesktopPet.Tests/CompanionDesktopPet.Tests.csproj"
+)
+
+
+class ReleaseTestProjectContractTests(unittest.TestCase):
+    def test_dotnet_test_project_is_explicitly_discoverable_without_restore_artifacts(self) -> None:
+        project = ET.parse(TEST_PROJECT_PATH).getroot()
+        values = [
+            node.text.strip().lower()
+            for node in project.findall(".//IsTestProject")
+            if node.text is not None
+        ]
+
+        self.assertIn(
+            "true",
+            values,
+            "The test project must declare IsTestProject=true so a clean checkout cannot "
+            "silently report zero tests when restore artifacts are absent.",
+        )
 
 
 class PersonaContractFileTests(unittest.TestCase):
