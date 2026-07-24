@@ -8,6 +8,7 @@ namespace CompanionDesktopPet;
 
 public partial class App : System.Windows.Application
 {
+    private static readonly TimeSpan SmokeWarmupTimeout = TimeSpan.FromSeconds(15);
     private SingleInstanceGuard? _instanceGuard;
     private IAutoStartService? _autoStartService;
     private TrayIconService? _trayIconService;
@@ -266,7 +267,8 @@ public partial class App : System.Windows.Application
         window.ContentRendered -= HandleSmokeContentRendered;
         try
         {
-            if (!window.TryVerifySmokeReadiness(out _))
+            if (!await window.PrepareSmokeReadinessAsync(SmokeWarmupTimeout)
+                || !window.TryVerifySmokeReadiness(out _))
             {
                 Shutdown(1);
                 return;

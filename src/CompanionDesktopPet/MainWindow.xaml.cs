@@ -32,6 +32,8 @@ public partial class MainWindow : Window
     private readonly IIdleTimeProvider _idleTimeProvider;
     private readonly IAutoStartService _autoStartService;
     private readonly TimeProvider _timeProvider;
+    private readonly DialogueWarmupCoordinator _dialogueWarmup;
+    private readonly CancellationTokenSource _dialogueWarmupLifetime = new();
     private readonly bool _suppressApplicationShutdownOnClose;
     private readonly Action _shutdownApplication;
     private const double BubbleShadowSafety = 10;
@@ -57,9 +59,11 @@ public partial class MainWindow : Window
     private bool _dragCompletionStarted;
     private BubblePlacementSide _bubbleSide = BubblePlacementSide.Above;
     private bool _bubbleSuspendedForWindowHide;
-    private Task<bool>? _observedDialogueWarmup;
+    private Task<DialogueWarmupOutcome>? _observedDialogueWarmup;
     private long _dialogueReplyRevision;
     private long _dialogueWarmupGeneration;
+    private long _startupFallbackReplyRevision;
+    private bool _replayStartupAfterWarmupRequested;
 
     internal AgentReply? LastReply { get; private set; }
 
@@ -224,6 +228,39 @@ public partial class MainWindow : Window
         Func<PetSettings, Task>? saveSettingsAsync,
         DialogueService? dialogueService,
         TimeProvider? timeProvider)
+        : this(
+            settings,
+            settingsService,
+            agentMemoryService,
+            agentMemory,
+            idleTimeProvider,
+            suppressApplicationShutdownOnClose,
+            shutdownApplication,
+            ambientScheduler,
+            autoStartService,
+            saveAgentMemoryAsync,
+            saveSettingsAsync,
+            dialogueService,
+            timeProvider,
+            warmupCoordinator: null)
+    {
+    }
+
+    internal MainWindow(
+        PetSettings settings,
+        SettingsService settingsService,
+        AgentMemoryService? agentMemoryService,
+        AgentMemorySnapshot? agentMemory,
+        IIdleTimeProvider? idleTimeProvider,
+        bool suppressApplicationShutdownOnClose,
+        Action? shutdownApplication,
+        AmbientActionScheduler ambientScheduler,
+        IAutoStartService autoStartService,
+        Func<AgentMemorySnapshot, Task>? saveAgentMemoryAsync,
+        Func<PetSettings, Task>? saveSettingsAsync,
+        DialogueService? dialogueService,
+        TimeProvider? timeProvider,
+        DialogueWarmupCoordinator? warmupCoordinator)
     {
         InitializeComponent();
         _settings = settings;
@@ -242,6 +279,8 @@ public partial class MainWindow : Window
             ?? (() => System.Windows.Application.Current?.Shutdown());
         _dialogue = dialogueService
             ?? DialogueService.CreateDeferred(agentMemory, timeProvider: _timeProvider);
+        _dialogueWarmup = warmupCoordinator
+            ?? new DialogueWarmupCoordinator(_dialogue, _timeProvider);
         _scheduler = new DialogueScheduler(_random);
         _animation = new AnimationController(
             BreathingScale,
@@ -311,6 +350,7 @@ public partial class MainWindow : Window
 
         UpdatePauseLabel();
         ShowEventBubble(CompanionEvent.Startup);
+        _startupFallbackReplyRevision = _dialogueReplyRevision;
         var now = LocalNow;
         _eventPump = new CompanionEventPump(now, _idleTimeProvider.GetIdleTime());
         _eventTimer.Start();
@@ -612,6 +652,12 @@ public partial class MainWindow : Window
             return false;
         }
 
+        if (!_dialogue.IsReady)
+        {
+            failure = "The full dialogue runtime is not ready.";
+            return false;
+        }
+
         if (LastReply is not
             {
                 Trigger: CompanionEvent.Startup,
@@ -620,6 +666,13 @@ public partial class MainWindow : Window
             } reply)
         {
             failure = "The startup reply is not ready.";
+            return false;
+        }
+
+        if (reply.SceneId.StartsWith("fallback:", StringComparison.Ordinal)
+            || reply.SourceLine!.SourceKind == "builtin_fallback")
+        {
+            failure = "The full startup reply is not ready.";
             return false;
         }
 
@@ -634,6 +687,72 @@ public partial class MainWindow : Window
 
         failure = string.Empty;
         return true;
+    }
+
+    internal async Task<bool> PrepareSmokeReadinessAsync(TimeSpan timeout)
+    {
+        if (timeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(timeout));
+        }
+
+        if (InteractionFrozen)
+        {
+            return false;
+        }
+
+        ObserveDialogueWarmup(replayStartupWhenReady: false);
+        var warmup = _observedDialogueWarmup
+            ?? _dialogueWarmup.StartAsync(_dialogueWarmupLifetime.Token);
+        DialogueWarmupOutcome outcome;
+        try
+        {
+            outcome = await warmup.WaitAsync(timeout);
+        }
+        catch (TimeoutException)
+        {
+            return false;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+
+        if (outcome != DialogueWarmupOutcome.Ready || InteractionFrozen)
+        {
+            return false;
+        }
+
+        if (!Dispatcher.CheckAccess())
+        {
+            return await Dispatcher.InvokeAsync(PrepareRealStartupForSmoke);
+        }
+
+        return PrepareRealStartupForSmoke();
+    }
+
+    private bool PrepareRealStartupForSmoke()
+    {
+        if (InteractionFrozen || !_dialogue.IsReady)
+        {
+            return false;
+        }
+
+        if (LastReply is not
+            {
+                Trigger: CompanionEvent.Startup,
+                ShouldDisplayText: true,
+                SourceLine.SourceKind: not "builtin_fallback"
+            } reply
+            || reply.SceneId.StartsWith("fallback:", StringComparison.Ordinal))
+        {
+            ShowEventBubble(CompanionEvent.Startup);
+        }
+
+        UpdateLayout();
+        SpeechBubble.UpdateLayout();
+        PositionBubble();
+        return TryVerifySmokeReadiness(out _);
     }
 
     private void PlaceOnScreen()
@@ -1110,12 +1229,13 @@ public partial class MainWindow : Window
 
     private void ObserveDialogueWarmup(bool replayStartupWhenReady)
     {
+        _replayStartupAfterWarmupRequested |= replayStartupWhenReady;
         if (InteractionFrozen || _dialogue.IsReady)
         {
             return;
         }
 
-        var warmup = _dialogue.WarmupAsync();
+        var warmup = _dialogueWarmup.StartAsync(_dialogueWarmupLifetime.Token);
         if (ReferenceEquals(warmup, _observedDialogueWarmup))
         {
             return;
@@ -1123,29 +1243,38 @@ public partial class MainWindow : Window
 
         _observedDialogueWarmup = warmup;
         var generation = ++_dialogueWarmupGeneration;
-        var replyRevision = _dialogueReplyRevision;
-        _ = CompleteDialogueWarmupAsync(
-            warmup,
-            generation,
-            replyRevision,
-            replayStartupWhenReady);
+        _ = CompleteDialogueWarmupAsync(warmup, generation);
     }
 
     private async Task CompleteDialogueWarmupAsync(
-        Task<bool> warmup,
-        long generation,
-        long replyRevision,
-        bool replayStartupWhenReady)
+        Task<DialogueWarmupOutcome> warmup,
+        long generation)
     {
-        bool succeeded;
+        DialogueWarmupOutcome outcome;
         try
         {
-            succeeded = await warmup.ConfigureAwait(false);
+            outcome = await warmup.ConfigureAwait(false);
         }
-        catch (Exception exception)
+        catch (OperationCanceledException)
         {
-            Trace.TraceError("Dialogue warmup failed fatally: {0}", exception);
-            succeeded = false;
+            return;
+        }
+        catch (Exception exception) when (!IsFatalException(exception))
+        {
+            Trace.TraceError("Dialogue warmup coordinator failed: {0}", exception);
+            return;
+        }
+
+        if (outcome != DialogueWarmupOutcome.Ready)
+        {
+            if (outcome is (DialogueWarmupOutcome.PermanentFailure
+                    or DialogueWarmupOutcome.RetriesExhausted)
+                && _dialogueWarmup.LastError is { } error)
+            {
+                Trace.TraceError("Dialogue warmup stopped after {0}: {1}", outcome, error);
+            }
+
+            return;
         }
 
         try
@@ -1157,24 +1286,23 @@ public partial class MainWindow : Window
                     return;
                 }
 
-                if (!succeeded)
-                {
-                    if (ReferenceEquals(_observedDialogueWarmup, warmup))
-                    {
-                        _observedDialogueWarmup = null;
-                    }
-
-                    return;
-                }
-
-                if (replayStartupWhenReady && replyRevision == _dialogueReplyRevision)
+                if (_replayStartupAfterWarmupRequested
+                    && _startupFallbackReplyRevision == _dialogueReplyRevision)
                 {
                     ShowEventBubble(CompanionEvent.Startup);
                 }
             }, DispatcherPriority.Background);
         }
-        catch (Exception exception) when (exception is TaskCanceledException or InvalidOperationException)
+        catch (OperationCanceledException)
         {
+        }
+        catch (InvalidOperationException) when (
+            Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+        {
+        }
+        catch (Exception exception) when (!IsFatalException(exception))
+        {
+            Trace.TraceError("Could not present the warmed dialogue startup: {0}", exception);
         }
     }
 
@@ -1638,6 +1766,8 @@ public partial class MainWindow : Window
     {
         _isClosed = true;
         _dialogueWarmupGeneration++;
+        _dialogueWarmupLifetime.Cancel();
+        _dialogueWarmupLifetime.Dispose();
         _observedDialogueWarmup = null;
         ContentRendered -= Window_ContentRendered;
         _ambientTimer.Tick -= AmbientTimer_Tick;
