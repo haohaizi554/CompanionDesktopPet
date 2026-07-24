@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="角色桌宠"
         Width="420"
-        Height="500"
+        Height="520"
         WindowStyle="None"
         AllowsTransparency="True"
         Background="{x:Null}"
@@ -13,13 +13,15 @@
         SnapsToDevicePixels="True"
         UseLayoutRounding="True">
   <Grid x:Name="InteractionSurface">
-    <StackPanel x:Name="SpeechBubble"
-                Width="276"
-                Margin="12,8,12,0"
+    <StackPanel x:Name="PetStack"
                 HorizontalAlignment="Center"
-                VerticalAlignment="Top"
-                Visibility="Collapsed"
-                Panel.ZIndex="2">
+                VerticalAlignment="Bottom">
+      <StackPanel x:Name="SpeechBubble"
+                  Width="276"
+                  Margin="12,0,12,30"
+                  HorizontalAlignment="Center"
+                  Visibility="Collapsed"
+                  Panel.ZIndex="2">
       <Border Padding="18,13"
               CornerRadius="25"
               Background="{StaticResource CreamBrush}"
@@ -46,16 +48,14 @@
             Stroke="{StaticResource RoseBrush}"
             StrokeThickness="2"
             Data="M 0,0 L 20,0 L 10,12 Z" />
-    </StackPanel>
+      </StackPanel>
 
-    <Grid x:Name="CharacterStage"
-          Width="320"
-          Height="320"
-          Margin="0,72,0,0"
-          VerticalAlignment="Bottom"
-          HorizontalAlignment="Center"
-          Background="Transparent"
-          RenderTransformOrigin="0.5,0.92">
+      <Grid x:Name="CharacterStage"
+            Width="320"
+            Height="320"
+            HorizontalAlignment="Center"
+            Background="Transparent"
+            RenderTransformOrigin="0.5,0.92">
       <Grid.RenderTransform>
         <TransformGroup>
           <ScaleTransform x:Name="BreathingScale" ScaleX="1" ScaleY="1" />
@@ -168,6 +168,7 @@
       </Canvas>
         </Grid>
       </Viewbox>
-    </Grid>
+      </Grid>
+    </StackPanel>
   </Grid>
 </Window>

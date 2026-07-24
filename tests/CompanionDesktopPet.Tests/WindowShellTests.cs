@@ -820,6 +820,64 @@ public sealed class WindowShellTests
     }
 
     [Fact]
+    public void MainWindow_BubbleHover_PausesUntilEveryHoverSourceLeaves()
+    {
+        var settingsDirectory = CreateSettingsDirectory();
+        RunOnStaThread(() =>
+        {
+            var window = CreateWindow(settingsDirectory);
+            window.Show();
+            window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+            InvokePrivate(window, "ShowBubble", "hover countdown");
+            var stage = Assert.IsType<Grid>(window.FindName("CharacterStage"));
+            var bubble = Assert.IsAssignableFrom<FrameworkElement>(window.FindName("SpeechBubble"));
+
+            InvokePrivate(window, "BubbleHover_MouseEnter", stage, null);
+            Assert.False(GetPrivateField<DispatcherTimer>(window, "_bubbleTimer").IsEnabled);
+            InvokePrivate(window, "BubbleHover_MouseEnter", bubble, null);
+            InvokePrivate(window, "BubbleHover_MouseLeave", stage, null);
+            Assert.False(GetPrivateField<DispatcherTimer>(window, "_bubbleTimer").IsEnabled);
+
+            InvokePrivate(window, "BubbleTimer_Tick", null, EventArgs.Empty);
+
+            Assert.Equal(Visibility.Visible, bubble.Visibility);
+            InvokePrivate(window, "BubbleHover_MouseLeave", bubble, null);
+            Assert.True(GetPrivateField<DispatcherTimer>(window, "_bubbleTimer").IsEnabled);
+            window.Close();
+        });
+        DeleteSettingsDirectory(settingsDirectory);
+    }
+
+    [Theory]
+    [InlineData(PetScale.Small)]
+    [InlineData(PetScale.Normal)]
+    [InlineData(PetScale.Large)]
+    public void MainWindow_BubbleGap_IsThirtyDipsAtEveryScale(PetScale scale)
+    {
+        var settingsDirectory = CreateSettingsDirectory();
+        RunOnStaThread(() =>
+        {
+            var window = CreateWindow(settingsDirectory);
+            window.Show();
+            InvokePrivate(window, "ApplyScale", scale);
+            InvokePrivate(window, "ShowBubble", "layout measurement");
+            var stage = Assert.IsType<Grid>(window.FindName("CharacterStage"));
+            var bubble = Assert.IsAssignableFrom<FrameworkElement>(window.FindName("SpeechBubble"));
+            stage.RenderTransform = Transform.Identity;
+            window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+            window.UpdateLayout();
+
+            var bubbleBottom = bubble.TranslatePoint(
+                new System.Windows.Point(0, bubble.ActualHeight), window).Y;
+            var characterTop = stage.TranslatePoint(new System.Windows.Point(0, 0), window).Y;
+
+            Assert.InRange(characterTop - bubbleBottom, 29.5, 30.5);
+            window.Close();
+        });
+        DeleteSettingsDirectory(settingsDirectory);
+    }
+
+    [Fact]
     public void MainWindow_UsesTransparentDesktopPetChrome()
     {
         var settingsDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));

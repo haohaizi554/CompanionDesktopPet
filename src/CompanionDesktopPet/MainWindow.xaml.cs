@@ -22,6 +22,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _memoryTimer = new() { Interval = TimeSpan.FromSeconds(2) };
     private readonly DispatcherTimer _eventTimer = new() { Interval = TimeSpan.FromSeconds(30) };
     private readonly DispatcherTimer _ambientTimer = new();
+    private readonly BubbleCountdownController _bubbleCountdown = new();
     private readonly PetActionCoordinator _actionCoordinator = new();
     private readonly AmbientActionScheduler _ambientScheduler;
     private readonly IIdleTimeProvider _idleTimeProvider;
@@ -107,6 +108,10 @@ public partial class MainWindow : Window
         PetImage.PreviewMouseLeftButtonDown += PetImage_MouseLeftButtonDown;
         PetImage.PreviewMouseMove += PetImage_MouseMove;
         PetImage.PreviewMouseLeftButtonUp += PetImage_MouseLeftButtonUp;
+        CharacterStage.MouseEnter += BubbleHover_MouseEnter;
+        CharacterStage.MouseLeave += BubbleHover_MouseLeave;
+        SpeechBubble.MouseEnter += BubbleHover_MouseEnter;
+        SpeechBubble.MouseLeave += BubbleHover_MouseLeave;
         SayMenuItem.Click += SaySomething_Click;
         GreetingMenuItem.Click += Greeting_Click;
         PauseMenuItem.Click += ToggleAnimation_Click;
@@ -594,20 +599,63 @@ public partial class MainWindow : Window
     {
         SpeechText.Text = text;
         SpeechBubble.Visibility = Visibility.Visible;
-        _bubbleTimer.Stop();
-        _bubbleTimer.Start();
+        _bubbleCountdown.Show();
+        SynchronizeBubbleTimer();
+    }
+
+    private void BubbleHover_MouseEnter(object sender, MouseEventArgs? e)
+    {
+        _bubbleCountdown.Enter(sender == SpeechBubble
+            ? BubbleHoverTarget.Bubble
+            : BubbleHoverTarget.Character);
+        SynchronizeBubbleTimer();
+    }
+
+    private void BubbleHover_MouseLeave(object sender, MouseEventArgs? e)
+    {
+        _bubbleCountdown.Leave(sender == SpeechBubble
+            ? BubbleHoverTarget.Bubble
+            : BubbleHoverTarget.Character);
+        SynchronizeBubbleTimer();
     }
 
     private void BubbleTimer_Tick(object? sender, EventArgs e)
     {
-        HideBubble();
+        if (_bubbleCountdown.TryExpire())
+        {
+            CollapseBubble();
+            return;
+        }
+
+        SynchronizeBubbleTimer();
     }
 
     private void HideBubble()
     {
+        _bubbleCountdown.Hide();
+        CollapseBubble();
+    }
+
+    private void CollapseBubble()
+    {
         _bubbleTimer.Stop();
         SpeechText.Text = string.Empty;
         SpeechBubble.Visibility = Visibility.Collapsed;
+    }
+
+    private void SynchronizeBubbleTimer()
+    {
+        _bubbleTimer.Stop();
+        if (_bubbleCountdown.State != BubbleCountdownState.CountingDown)
+        {
+            return;
+        }
+
+        var remaining = _bubbleCountdown.Remaining;
+        _bubbleTimer.Interval = remaining > TimeSpan.FromMilliseconds(1)
+            ? remaining
+            : TimeSpan.FromMilliseconds(1);
+        _bubbleTimer.Start();
     }
 
     private void ScheduleNextPhrase()
@@ -803,6 +851,7 @@ public partial class MainWindow : Window
         InvalidateAmbientSchedule();
         CancelActiveAmbientAction();
         _automaticTimer.Stop();
+        _bubbleCountdown.Close();
         _bubbleTimer.Stop();
         _memoryTimer.Stop();
         _eventTimer.Stop();
