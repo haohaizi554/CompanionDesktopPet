@@ -9,6 +9,7 @@ from ..context import ContextError, PersonaContext, daypart_for
 from ..history import HistoryRecord, SelectionHistory
 from ..models import CorpusLine
 from ..selector import SchedulerConfig, select_line
+from .metrics import derive_dry_sharp_policy
 
 
 _EPSILON = 1e-9
@@ -121,6 +122,7 @@ def analyze_constraints(
 ) -> ConstraintAnalysis:
     """Recompute scheduler hard limits from a supplied output trace."""
 
+    dry_sharp_policy = derive_dry_sharp_policy()
     by_seed: dict[int, list[AttemptLike]] = defaultdict(list)
     for attempt in attempts:
         if attempt.row is not None:
@@ -190,6 +192,20 @@ def analyze_constraints(
                 config,
             ) or not _required_context_satisfied(attempt, row):
                 add("context_or_trigger_violation", attempt)
+            required_context_tokens = frozenset(
+                token.strip()
+                for token in row.required_context.split(",")
+                if token.strip() and token.strip() != "none"
+            )
+            if row.tone == "dry_sharp" and (
+                row.category_group in dry_sharp_policy.forbidden_category_groups
+                or row.trigger in dry_sharp_policy.forbidden_triggers
+                or bool(
+                    required_context_tokens
+                    & dry_sharp_policy.forbidden_context_tokens
+                )
+            ):
+                add("dry_sharp_forbidden_metadata_violation", attempt)
             if row.requires_reply or "?" in row.text or "？" in row.text:
                 add("question_or_reply_violation", attempt)
 
@@ -253,6 +269,14 @@ def analyze_constraints(
                 > config.easter_egg_recent_max
             ):
                 add("recent_easter_egg_violation", attempt)
+            if (
+                sum(
+                    item.tone == "dry_sharp"
+                    for item in recent_rows[-dry_sharp_policy.recent_window :]
+                )
+                > dry_sharp_policy.recent_max
+            ):
+                add("recent_dry_sharp_violation", attempt)
 
             last_id[row.id] = now
             last_semantic[row.semantic_group] = now
@@ -286,7 +310,7 @@ def _fixture_row(
         output_mode=output_mode,
         trigger="any",
         required_context="none",
-        tone="factual",
+        tone="calm",
         interrupt_cost=interrupt_cost,
         cooldown_hours=0.01,
         semantic_cooldown_hours=0.01,

@@ -7,12 +7,19 @@ from datetime import datetime, timedelta
 from typing import Iterable, Mapping, Sequence
 
 from ..context import ContextError, PersonaContext
+from ..contract import TONES
 from ..models import CorpusLine
 from ..selector import SchedulerConfig
 from ..validation import CATCHPHRASES
 from .constraints import AdversarialSuiteResult
 from .constraints import analyze_constraints
-from .metrics import DistributionPolicy, DistributionTolerance, derive_distribution_policy
+from .metrics import (
+    DistributionPolicy,
+    DistributionTolerance,
+    DrySharpPolicy,
+    derive_distribution_policy,
+    derive_dry_sharp_policy,
+)
 from .scenarios import (
     SUBSEED_DERIVATION_VERSION,
     InventoryCoverage,
@@ -31,6 +38,7 @@ CATEGORY_GROUPS = (
     "system_ambient",
 )
 OUTPUT_MODES = ("self_talk", "ambient", "user_direct", "system_observe")
+TONE_VALUES = tuple(sorted(TONES))
 LENGTH_BUCKETS = ("<8", "8-16", "17-24", "25-36", ">36")
 PREFIX_WIDTHS = (2, 3, 4, 5, 6)
 SUFFIX_WIDTHS = (4, 6, 8, 10)
@@ -92,6 +100,9 @@ class SeedMetrics:
     group_ratio: Mapping[str, float]
     mode_counts: Mapping[str, int]
     mode_ratio: Mapping[str, float]
+    tone_counts: Mapping[str, int]
+    tone_ratio: Mapping[str, float]
+    dry_sharp_ratio: float
     anomalies: tuple[str, ...]
 
 
@@ -102,6 +113,7 @@ class SimulationReport:
     scheduler_config_sha256: str
     subseed_derivation_version: str
     distribution_policy: DistributionPolicy
+    dry_sharp_policy: DrySharpPolicy
     scenario_coverage: ScenarioCoverage
     inventory_coverage: InventoryCoverage
     adversarial_result: AdversarialSuiteResult
@@ -117,9 +129,20 @@ class SimulationReport:
     group_ratio: dict[str, float]
     mode_counts: dict[str, int]
     mode_ratio: dict[str, float]
+    tone_counts: dict[str, int]
+    tone_ratio: dict[str, float]
     technical_ratio: float
     easter_egg_ratio: float
     user_direct_ratio: float
+    dry_sharp_ratio: float
+    dry_sharp_recent_violations: int
+    dry_sharp_forbidden_hits: int
+    enabled_corpus_count: int
+    dry_sharp_inventory_count: int
+    dry_sharp_inventory_ratio: float
+    dry_sharp_inventory_enforced: bool
+    dry_sharp_playback_enforced: bool
+    dry_sharp_inventory_bootstrap_gap: bool
     id_cooldown_repeats: int
     semantic_cooldown_repeats: int
     adjacent_same_category_group: int
@@ -258,6 +281,8 @@ def _add_hard(
 def analyze_simulation(
     *,
     corpus_sha256: str,
+    enabled_corpus_count: int,
+    dry_sharp_inventory_count: int,
     config_sha256: str,
     config: SchedulerConfig,
     days: int,
@@ -270,8 +295,31 @@ def analyze_simulation(
 ) -> SimulationReport:
     hard: set[str] = set()
     distribution_policy = derive_distribution_policy(config, distribution_tolerance)
+    dry_sharp_policy = derive_dry_sharp_policy()
+    dry_sharp_inventory_ratio = (
+        dry_sharp_inventory_count / enabled_corpus_count
+        if enabled_corpus_count
+        else 0.0
+    )
+    dry_sharp_inventory_enforced = (
+        enabled_corpus_count >= dry_sharp_policy.inventory_enforcement_minimum_rows
+    )
+    dry_sharp_playback_enforced = dry_sharp_inventory_enforced
+    dry_sharp_inventory_bootstrap_gap = (
+        dry_sharp_inventory_count < dry_sharp_policy.bootstrap_minimum_rows
+    )
+    if dry_sharp_inventory_enforced and not (
+        dry_sharp_policy.inventory_acceptance[0]
+        <= dry_sharp_inventory_ratio
+        <= dry_sharp_policy.inventory_acceptance[1]
+    ):
+        hard.add("dry_sharp_inventory_ratio_out_of_bounds")
     anomalies: dict[int, set[str]] = {seed: set() for seed in seeds}
-    for violation in analyze_constraints(attempts, config).violations:
+    constraint_analysis = analyze_constraints(attempts, config)
+    constraint_counts = Counter(
+        violation.code for violation in constraint_analysis.violations
+    )
+    for violation in constraint_analysis.violations:
         _add_hard(hard, anomalies, violation.seed, violation.code)
     if days < 30:
         hard.add("duration_below_30_days")
@@ -284,6 +332,7 @@ def analyze_simulation(
 
     total_group_counts: Counter[str] = Counter()
     total_mode_counts: Counter[str] = Counter()
+    total_tone_counts: Counter[str] = Counter()
     selected_texts: list[str] = []
     id_cooldown_repeats = 0
     semantic_cooldown_repeats = 0
@@ -302,6 +351,7 @@ def analyze_simulation(
         outputs = [attempt for attempt in seed_attempts if attempt.row is not None]
         seed_group_counts: Counter[str] = Counter()
         seed_mode_counts: Counter[str] = Counter()
+        seed_tone_counts: Counter[str] = Counter()
         previous: SimulationAttempt | None = None
         last_id: dict[str, datetime] = {}
         last_semantic: dict[str, datetime] = {}
@@ -316,8 +366,10 @@ def analyze_simulation(
             now = attempt.attempted_at
             seed_group_counts[row.category_group] += 1
             seed_mode_counts[row.output_mode] += 1
+            seed_tone_counts[row.tone] += 1
             total_group_counts[row.category_group] += 1
             total_mode_counts[row.output_mode] += 1
+            total_tone_counts[row.tone] += 1
             selected_texts.append(row.text)
 
             if previous is not None and previous.row is not None:
@@ -367,6 +419,7 @@ def analyze_simulation(
         seed_output_count = len(outputs)
         seed_group_ratio = _ratio(seed_group_counts, CATEGORY_GROUPS, seed_output_count)
         seed_mode_ratio = _ratio(seed_mode_counts, OUTPUT_MODES, seed_output_count)
+        seed_tone_ratio = _ratio(seed_tone_counts, TONE_VALUES, seed_output_count)
         if seed_output_count:
             if not (
                 distribution_policy.technical.minimum
@@ -374,7 +427,9 @@ def analyze_simulation(
                 <= distribution_policy.technical.maximum
             ):
                 _add_hard(hard, anomalies, seed, "technical_ratio_out_of_bounds")
-            if seed_group_ratio["easter_egg"] > distribution_policy.easter_egg.maximum:
+            if seed_group_ratio["easter_egg"] < distribution_policy.easter_egg.minimum:
+                _add_hard(hard, anomalies, seed, "easter_egg_ratio_below_minimum")
+            elif seed_group_ratio["easter_egg"] > distribution_policy.easter_egg.maximum:
                 _add_hard(hard, anomalies, seed, "easter_egg_ratio_above_limit")
             if (
                 seed_mode_ratio["self_talk"] + seed_mode_ratio["ambient"]
@@ -383,10 +438,18 @@ def analyze_simulation(
                 _add_hard(hard, anomalies, seed, "self_ambient_ratio_below_minimum")
             if seed_mode_ratio["user_direct"] > distribution_policy.user_direct.maximum:
                 _add_hard(hard, anomalies, seed, "user_direct_ratio_above_limit")
+            if dry_sharp_playback_enforced and not (
+                dry_sharp_policy.playback_acceptance[0]
+                <= seed_tone_ratio["dry_sharp"]
+                <= dry_sharp_policy.playback_acceptance[1]
+            ):
+                _add_hard(hard, anomalies, seed, "dry_sharp_ratio_out_of_bounds")
             if seed_group_counts["easter_egg"] == 0:
                 anomalies[seed].add("easter_egg_not_observed")
             if seed_mode_counts["user_direct"] == 0:
                 anomalies[seed].add("user_direct_not_observed")
+            if seed_tone_counts["dry_sharp"] == 0:
+                anomalies[seed].add("dry_sharp_not_observed")
 
         per_seed[seed] = SeedMetrics(
             seed=seed,
@@ -397,14 +460,19 @@ def analyze_simulation(
             group_ratio=seed_group_ratio,
             mode_counts={key: seed_mode_counts[key] for key in OUTPUT_MODES},
             mode_ratio=seed_mode_ratio,
+            tone_counts={key: seed_tone_counts[key] for key in TONE_VALUES},
+            tone_ratio=seed_tone_ratio,
+            dry_sharp_ratio=seed_tone_ratio["dry_sharp"],
             anomalies=(),
         )
 
     output_count = len(selected_texts)
     group_counts = {key: total_group_counts[key] for key in CATEGORY_GROUPS}
     mode_counts = {key: total_mode_counts[key] for key in OUTPUT_MODES}
+    tone_counts = {key: total_tone_counts[key] for key in TONE_VALUES}
     group_ratio = _ratio(group_counts, CATEGORY_GROUPS, output_count)
     mode_ratio = _ratio(mode_counts, OUTPUT_MODES, output_count)
+    tone_ratio = _ratio(tone_counts, TONE_VALUES, output_count)
     if output_count == 0:
         hard.add("zero_outputs")
     else:
@@ -414,7 +482,9 @@ def analyze_simulation(
             <= distribution_policy.technical.maximum
         ):
             hard.add("technical_ratio_out_of_bounds")
-        if group_ratio["easter_egg"] > distribution_policy.easter_egg.maximum:
+        if group_ratio["easter_egg"] < distribution_policy.easter_egg.minimum:
+            hard.add("easter_egg_ratio_below_minimum")
+        elif group_ratio["easter_egg"] > distribution_policy.easter_egg.maximum:
             hard.add("easter_egg_ratio_above_limit")
         if (
             mode_ratio["self_talk"] + mode_ratio["ambient"]
@@ -423,6 +493,12 @@ def analyze_simulation(
             hard.add("self_ambient_ratio_below_minimum")
         if mode_ratio["user_direct"] > distribution_policy.user_direct.maximum:
             hard.add("user_direct_ratio_above_limit")
+        if dry_sharp_playback_enforced and not (
+            dry_sharp_policy.playback_acceptance[0]
+            <= tone_ratio["dry_sharp"]
+            <= dry_sharp_policy.playback_acceptance[1]
+        ):
+            hard.add("dry_sharp_ratio_out_of_bounds")
 
     lengths = [len(text) for text in selected_texts]
     length_counts = Counter(_length_bucket(length) for length in lengths)
@@ -433,6 +509,9 @@ def analyze_simulation(
     catchphrase_lines = sum(
         any(phrase in text for phrase in CATCHPHRASES) for text in selected_texts
     )
+    catchphrase_ratio = catchphrase_lines / output_count if output_count else 0.0
+    if catchphrase_ratio > 0.10 + _EPSILON:
+        hard.add("catchphrase_ratio_above_limit")
 
 
     per_seed_anomalies = {
@@ -449,6 +528,9 @@ def analyze_simulation(
             group_ratio=metrics.group_ratio,
             mode_counts=metrics.mode_counts,
             mode_ratio=metrics.mode_ratio,
+            tone_counts=metrics.tone_counts,
+            tone_ratio=metrics.tone_ratio,
+            dry_sharp_ratio=metrics.dry_sharp_ratio,
             anomalies=tuple(per_seed_anomalies[seed]),
         )
 
@@ -458,6 +540,7 @@ def analyze_simulation(
         scheduler_config_sha256=config_sha256,
         subseed_derivation_version=SUBSEED_DERIVATION_VERSION,
         distribution_policy=distribution_policy,
+        dry_sharp_policy=dry_sharp_policy,
         scenario_coverage=scenario_coverage,
         inventory_coverage=inventory_coverage,
         adversarial_result=adversarial_result,
@@ -473,9 +556,22 @@ def analyze_simulation(
         group_ratio=group_ratio,
         mode_counts=mode_counts,
         mode_ratio=mode_ratio,
+        tone_counts=tone_counts,
+        tone_ratio=tone_ratio,
         technical_ratio=group_ratio["technical"],
         easter_egg_ratio=group_ratio["easter_egg"],
         user_direct_ratio=mode_ratio["user_direct"],
+        dry_sharp_ratio=tone_ratio["dry_sharp"],
+        dry_sharp_recent_violations=constraint_counts["recent_dry_sharp_violation"],
+        dry_sharp_forbidden_hits=constraint_counts[
+            "dry_sharp_forbidden_metadata_violation"
+        ],
+        enabled_corpus_count=enabled_corpus_count,
+        dry_sharp_inventory_count=dry_sharp_inventory_count,
+        dry_sharp_inventory_ratio=dry_sharp_inventory_ratio,
+        dry_sharp_inventory_enforced=dry_sharp_inventory_enforced,
+        dry_sharp_playback_enforced=dry_sharp_playback_enforced,
+        dry_sharp_inventory_bootstrap_gap=dry_sharp_inventory_bootstrap_gap,
         id_cooldown_repeats=id_cooldown_repeats,
         semantic_cooldown_repeats=semantic_cooldown_repeats,
         adjacent_same_category_group=adjacent_same_group,
@@ -487,7 +583,7 @@ def analyze_simulation(
         length_distribution=length_distribution,
         common_openings=_stable_common(selected_texts, PREFIX_WIDTHS),
         common_endings=_stable_common_endings(selected_texts, SUFFIX_WIDTHS),
-        catchphrase_ratio=(catchphrase_lines / output_count if output_count else 0.0),
+        catchphrase_ratio=catchphrase_ratio,
         catchphrase_counts=catchphrase_counts,
         question_count=question_count,
         unmet_context_count=unmet_context_count,
@@ -562,6 +658,12 @@ def render_simulation_report(report: SimulationReport) -> str:
                 ("8. Technical playback ratio", _percent(report.technical_ratio)),
                 ("9. EasterEgg playback ratio", _percent(report.easter_egg_ratio)),
                 ("10. user_direct playback ratio", _percent(report.user_direct_ratio)),
+                ("dry_sharp playback ratio", _percent(report.dry_sharp_ratio)),
+                (
+                    "dry_sharp recent-window violations",
+                    report.dry_sharp_recent_violations,
+                ),
+                ("dry_sharp forbidden metadata hits", report.dry_sharp_forbidden_hits),
                 ("11. ID cooldown repeats", report.id_cooldown_repeats),
                 ("12. Semantic cooldown repeats", report.semantic_cooldown_repeats),
                 ("13. Adjacent same category_group", report.adjacent_same_category_group),
@@ -628,6 +730,46 @@ def render_simulation_report(report: SimulationReport) -> str:
                 ),
             ),
         )
+    )
+
+    dry_policy = report.dry_sharp_policy
+    lines.extend(["", "## dry_sharp contract evidence", ""])
+    lines.extend(
+        _markdown_table(
+            ("Metric", "Observed", "Target", "Acceptance", "Enforced"),
+            (
+                (
+                    "dry_sharp inventory",
+                    f"{report.dry_sharp_inventory_count}/{report.enabled_corpus_count} "
+                    f"({_percent(report.dry_sharp_inventory_ratio)})",
+                    _percent(dry_policy.inventory_target),
+                    f"{_percent(dry_policy.inventory_acceptance[0])}–"
+                    f"{_percent(dry_policy.inventory_acceptance[1])}",
+                    "yes" if report.dry_sharp_inventory_enforced else "no (bootstrap)",
+                ),
+                (
+                    "dry_sharp playback",
+                    f"{report.tone_counts['dry_sharp']}/{report.output_count} "
+                    f"({_percent(report.dry_sharp_ratio)})",
+                    _percent(dry_policy.playback_target),
+                    f"{_percent(dry_policy.playback_acceptance[0])}–"
+                    f"{_percent(dry_policy.playback_acceptance[1])}",
+                    "yes" if report.dry_sharp_playback_enforced else "no (bootstrap)",
+                ),
+            ),
+        )
+    )
+    lines.extend(
+        [
+            "",
+            (
+                "Bootstrap inventory gap: "
+                + ("yes" if report.dry_sharp_inventory_bootstrap_gap else "no")
+                + f" (minimum {dry_policy.bootstrap_minimum_rows} rows)."
+            ),
+            f"Recent playback limit: at most {dry_policy.recent_max} dry_sharp line(s) "
+            f"in the latest {dry_policy.recent_window} outputs.",
+        ]
     )
 
     coverage = report.scenario_coverage
@@ -699,6 +841,16 @@ def render_simulation_report(report: SimulationReport) -> str:
             ),
         )
     )
+    lines.extend(["", "## Tone playback", ""])
+    lines.extend(
+        _markdown_table(
+            ("tone", "Count", "Ratio"),
+            (
+                (tone, report.tone_counts[tone], _percent(report.tone_ratio[tone]))
+                for tone in TONE_VALUES
+            ),
+        )
+    )
     lines.extend(["", "## 17. Playback text-length distribution", ""])
     lines.extend(
         _markdown_table(
@@ -735,6 +887,7 @@ def render_simulation_report(report: SimulationReport) -> str:
                 "Self-talk + ambient",
                 "user_direct",
                 "EasterEgg",
+                "dry_sharp",
                 "Anomalies",
             ),
             (
@@ -750,6 +903,7 @@ def render_simulation_report(report: SimulationReport) -> str:
                     ),
                     _percent(report.per_seed[seed].mode_ratio["user_direct"]),
                     _percent(report.per_seed[seed].group_ratio["easter_egg"]),
+                    _percent(report.per_seed[seed].dry_sharp_ratio),
                     ", ".join(report.per_seed_anomalies[seed]) or "none",
                 )
                 for seed in report.seeds
@@ -759,7 +913,7 @@ def render_simulation_report(report: SimulationReport) -> str:
     lines.extend(
         [
             "",
-            "`easter_egg_not_observed` and `user_direct_not_observed` are transparent non-hard observations. They are not fabricated into the event stream; the current selector and enabled inventory naturally produced zero during this fixed schedule.",
+            "`easter_egg_not_observed`, `user_direct_not_observed`, and `dry_sharp_not_observed` are transparent non-hard observations. They are not fabricated into the event stream; the current selector and enabled inventory naturally produced zero during this fixed schedule.",
         ]
     )
     return _final_markdown(lines)

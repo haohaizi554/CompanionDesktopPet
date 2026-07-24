@@ -17,7 +17,11 @@ from .normalization import normalize_text
 from .schema import ARCHIVE_HEADER, PII_REVIEW_HEADER, REVIEW_HEADER
 from .selector import SchedulerConfig, SelectorConfigError, select_line
 from .simulation_core.constraints import analyze_constraints, run_adversarial_suite
-from .simulation_core.metrics import DistributionTolerance, derive_distribution_policy
+from .simulation_core.metrics import (
+    DistributionTolerance,
+    derive_distribution_policy,
+    derive_dry_sharp_policy,
+)
 from .simulation_core.report import (
     SeedMetrics,
     SimulationAttempt,
@@ -259,6 +263,10 @@ def simulate(
 
     return analyze_simulation(
         corpus_sha256=corpus_digest,
+        enabled_corpus_count=sum(row.enabled for row in rows),
+        dry_sharp_inventory_count=sum(
+            row.enabled and row.tone == "dry_sharp" for row in rows
+        ),
         config_sha256=config_digest,
         config=scheduler,
         days=days,
@@ -888,6 +896,7 @@ __all__ = [
     "build_scenario_coverage",
     "combine_hard_violations",
     "derive_distribution_policy",
+    "derive_dry_sharp_policy",
     "derive_subseed",
     "probe_inventory_coverage",
     "render_simulation_report",

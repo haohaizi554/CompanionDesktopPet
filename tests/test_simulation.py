@@ -12,6 +12,7 @@ from pathlib import Path
 
 from src.persona_corpus.builder import serialize_v2
 from src.persona_corpus.context import PersonaContext
+from src.persona_corpus.contract import PERSONA_CONTRACT
 from src.persona_corpus.loader import load_v2
 from src.persona_corpus.simulation import (
     SUBSEED_DERIVATION_VERSION,
@@ -24,6 +25,7 @@ from src.persona_corpus.simulation import (
     combine_hard_violations,
     derive_subseed,
     derive_distribution_policy,
+    derive_dry_sharp_policy,
     probe_inventory_coverage,
     render_simulation_report,
     run_adversarial_suite,
@@ -31,7 +33,12 @@ from src.persona_corpus.simulation import (
     write_editorial_reports,
 )
 from src.persona_corpus.selector import SchedulerConfig
-from src.persona_corpus.validation import load_json_object, scheduler_config_sha256
+from src.persona_corpus.simulation_core.report import analyze_simulation
+from src.persona_corpus.validation import (
+    CATCHPHRASES,
+    load_json_object,
+    scheduler_config_sha256,
+)
 from src.persona_corpus.validation import validate_corpus
 from tools.simulate_persona import seed_sequence_from_count
 
@@ -55,6 +62,18 @@ METRIC_ATTRIBUTES = (
     "technical_ratio",
     "easter_egg_ratio",
     "user_direct_ratio",
+    "tone_counts",
+    "tone_ratio",
+    "dry_sharp_policy",
+    "dry_sharp_ratio",
+    "dry_sharp_recent_violations",
+    "dry_sharp_forbidden_hits",
+    "enabled_corpus_count",
+    "dry_sharp_inventory_count",
+    "dry_sharp_inventory_ratio",
+    "dry_sharp_inventory_enforced",
+    "dry_sharp_playback_enforced",
+    "dry_sharp_inventory_bootstrap_gap",
     "id_cooldown_repeats",
     "semantic_cooldown_repeats",
     "adjacent_same_category_group",
@@ -139,6 +158,7 @@ class SimulationIntegrationTests(unittest.TestCase):
         self.assertTrue(self.report.inventory_coverage.trigger_hits)
         self.assertEqual((), self.report.inventory_coverage.trigger_misses)
         self.assertEqual((), self.report.inventory_coverage.context_misses)
+        self.assertEqual((), self.report.inventory_coverage.unreachable_pairs)
 
     def test_combined_hard_status_requires_natural_and_adversarial_success(self) -> None:
         self.assertEqual([], combine_hard_violations((), ()))
@@ -234,12 +254,50 @@ class SimulationIntegrationTests(unittest.TestCase):
         self.assertIn("Adversarial hard violations", first_markdown)
         self.assertIn("Selector decision", first_markdown)
         self.assertIn("Inventory trigger misses", first_markdown)
+        self.assertIn("dry_sharp playback", first_markdown)
+        self.assertIn("dry_sharp inventory", first_markdown)
         first_events = self.report.to_validation_json()
         second_events = self.report.to_validation_json()
         self.assertEqual(first_events, second_events)
         self.assertTrue(first_events.endswith(b"\n"))
         self.assertNotIn(b"\r", first_events)
         self.assertEqual(EVENT_KEYS, set(json.loads(first_events)))
+
+    def test_dry_sharp_report_discloses_inventory_playback_and_constraint_evidence(self) -> None:
+        enabled = [row for row in self.corpus if row.enabled]
+        inventory_count = sum(row.tone == "dry_sharp" for row in enabled)
+        playback_count = sum(
+            attempt.row is not None and attempt.row.tone == "dry_sharp"
+            for attempt in self.report.attempts
+        )
+        policy = derive_dry_sharp_policy()
+
+        self.assertEqual(inventory_count, self.report.dry_sharp_inventory_count)
+        self.assertAlmostEqual(
+            inventory_count / len(enabled) if enabled else 0.0,
+            self.report.dry_sharp_inventory_ratio,
+        )
+        self.assertEqual(playback_count, self.report.tone_counts["dry_sharp"])
+        self.assertAlmostEqual(
+            playback_count / self.report.output_count if self.report.output_count else 0.0,
+            self.report.dry_sharp_ratio,
+        )
+        self.assertEqual(
+            len(enabled) >= policy.inventory_enforcement_minimum_rows,
+            self.report.dry_sharp_inventory_enforced,
+        )
+        self.assertEqual(
+            inventory_count < policy.bootstrap_minimum_rows,
+            self.report.dry_sharp_inventory_bootstrap_gap,
+        )
+        self.assertEqual(
+            sum(self.report.tone_counts.values()),
+            self.report.output_count,
+        )
+        self.assertEqual(
+            sum(self.report.tone_ratio.values()),
+            1.0 if self.report.output_count else 0.0,
+        )
 
     def test_per_seed_anomalies_disclose_zero_frequency_groups_without_making_them_hard(self) -> None:
         self.assertEqual([], self.report.hard_violations)
@@ -365,6 +423,7 @@ class SimulationUnitTests(unittest.TestCase):
         interrupt_cost: int = 0,
         category_group: str = "character_life",
         output_mode: str = "self_talk",
+        tone: str = "calm",
     ) -> SimulationAttempt:
         source = self.corpus[row_index % len(self.corpus)]
         row = replace(
@@ -374,6 +433,7 @@ class SimulationUnitTests(unittest.TestCase):
             category_group=category_group,
             semantic_group=f"constraint-semantic-{row_index}",
             output_mode=output_mode,
+            tone=tone,
             trigger="any",
             required_context="none",
             interrupt_cost=interrupt_cost,
@@ -578,6 +638,70 @@ class SimulationUnitTests(unittest.TestCase):
             analyze_constraints(easter, scheduler).codes,
         )
 
+    def test_constraint_checker_enforces_dry_sharp_recent_window(self) -> None:
+        scheduler = SchedulerConfig.from_mapping(self.config)
+        policy = derive_dry_sharp_policy()
+        start = datetime(2026, 7, 1, 8, 0, tzinfo=timezone(timedelta(hours=8)))
+        attempts = tuple(
+            self._constraint_attempt(
+                when=start + timedelta(minutes=61 * index),
+                row_index=300 + index,
+                elapsed_minutes=1440 if index == 0 else 61,
+                tone="dry_sharp" if index in {0, policy.recent_window - 1} else "calm",
+            )
+            for index in range(policy.recent_window)
+        )
+
+        self.assertIn(
+            "recent_dry_sharp_violation",
+            analyze_constraints(attempts, scheduler).codes,
+        )
+        self.assertNotIn(
+            "recent_dry_sharp_violation",
+            analyze_constraints(attempts[1:], scheduler).codes,
+        )
+
+    def test_constraint_checker_enforces_dry_sharp_metadata_policy(self) -> None:
+        scheduler = SchedulerConfig.from_mapping(self.config)
+        policy = derive_dry_sharp_policy()
+        when = datetime(2026, 7, 1, 8, 0, tzinfo=timezone(timedelta(hours=8)))
+        allowed = self._constraint_attempt(
+            when=when,
+            row_index=330,
+            elapsed_minutes=1440,
+            tone="dry_sharp",
+        )
+        self.assertNotIn(
+            "dry_sharp_forbidden_metadata_violation",
+            analyze_constraints((allowed,), scheduler).codes,
+        )
+
+        assert allowed.row is not None
+        for group in sorted(policy.forbidden_category_groups):
+            with self.subTest(category_group=group):
+                attempt = replace(allowed, row=replace(allowed.row, category_group=group))
+                self.assertIn(
+                    "dry_sharp_forbidden_metadata_violation",
+                    analyze_constraints((attempt,), scheduler).codes,
+                )
+        for trigger in sorted(policy.forbidden_triggers):
+            with self.subTest(trigger=trigger):
+                attempt = replace(allowed, row=replace(allowed.row, trigger=trigger))
+                self.assertIn(
+                    "dry_sharp_forbidden_metadata_violation",
+                    analyze_constraints((attempt,), scheduler).codes,
+                )
+        for token in sorted(policy.forbidden_context_tokens):
+            with self.subTest(required_context=token):
+                attempt = replace(
+                    allowed,
+                    row=replace(allowed.row, required_context=token),
+                )
+                self.assertIn(
+                    "dry_sharp_forbidden_metadata_violation",
+                    analyze_constraints((attempt,), scheduler).codes,
+                )
+
     def test_constraint_checker_retains_context_question_and_cooldown_gates(self) -> None:
         scheduler = SchedulerConfig.from_mapping(self.config)
         start = datetime(2026, 7, 1, 8, 0, tzinfo=timezone(timedelta(hours=8)))
@@ -720,20 +844,153 @@ class SimulationUnitTests(unittest.TestCase):
         tolerance = DistributionTolerance(absolute=0.05)
         policy = derive_distribution_policy(scheduler, tolerance)
 
-        self.assertAlmostEqual(0.13, policy.technical.minimum)
-        self.assertAlmostEqual(0.23, policy.technical.maximum)
-        self.assertAlmostEqual(0.07, policy.easter_egg.maximum)
+        acceptance = PERSONA_CONTRACT.scheduler["acceptance"]
+        self.assertEqual(
+            tuple(acceptance["technical_playback_ratio"]),
+            (policy.technical.minimum, policy.technical.maximum),
+        )
+        self.assertEqual(
+            tuple(acceptance["easter_egg_playback_ratio"]),
+            (policy.easter_egg.minimum, policy.easter_egg.maximum),
+        )
         self.assertAlmostEqual(0.65, policy.self_ambient.minimum)
         self.assertAlmostEqual(0.15, policy.user_direct.maximum)
 
-        shifted_weights = dict(scheduler.category_group_weights)
-        shifted_weights["easter_egg"] = 0.10
-        shifted_weights["character_life"] -= 0.08
-        shifted = replace(scheduler, category_group_weights=shifted_weights)
-        shifted_policy = derive_distribution_policy(shifted, tolerance)
-        self.assertAlmostEqual(0.05, shifted_policy.easter_egg.minimum)
-        self.assertAlmostEqual(0.15, shifted_policy.easter_egg.maximum)
-        self.assertNotEqual(policy.easter_egg, shifted_policy.easter_egg)
+        injected = derive_distribution_policy(
+            scheduler,
+            tolerance,
+            acceptance={
+                "technical_playback_ratio": (0.11, 0.22),
+                "easter_egg_playback_ratio": (0.09, 0.13),
+                "self_talk_ambient_minimum": 0.66,
+                "user_direct_maximum": 0.16,
+            },
+        )
+        self.assertEqual((0.09, 0.13), (injected.easter_egg.minimum, injected.easter_egg.maximum))
+
+    def test_dry_sharp_policy_is_loaded_from_shared_contract(self) -> None:
+        policy = derive_dry_sharp_policy()
+        contract = PERSONA_CONTRACT.dry_sharp
+
+        self.assertEqual(contract["inventory_target"], policy.inventory_target)
+        self.assertEqual(tuple(contract["inventory_acceptance"]), policy.inventory_acceptance)
+        self.assertEqual(
+            contract["inventory_enforcement_minimum_rows"],
+            policy.inventory_enforcement_minimum_rows,
+        )
+        self.assertEqual(contract["bootstrap_minimum_rows"], policy.bootstrap_minimum_rows)
+        self.assertEqual(contract["playback_target"], policy.playback_target)
+        self.assertEqual(tuple(contract["playback_acceptance"]), policy.playback_acceptance)
+        self.assertEqual(contract["recent_window"], policy.recent_window)
+        self.assertEqual(contract["recent_max"], policy.recent_max)
+        self.assertEqual(
+            frozenset(contract["forbidden_category_groups"]),
+            policy.forbidden_category_groups,
+        )
+        self.assertEqual(
+            frozenset(contract["forbidden_triggers"]),
+            policy.forbidden_triggers,
+        )
+        self.assertEqual(
+            frozenset(contract["forbidden_context_tokens"]),
+            policy.forbidden_context_tokens,
+        )
+
+    def test_dry_sharp_inventory_threshold_controls_hard_enforcement(self) -> None:
+        scheduler = SchedulerConfig.from_mapping(self.config)
+        base = simulate(self.corpus, self.config, days=1, seeds=(0,))
+
+        def report_for(enabled_rows: int):
+            return analyze_simulation(
+                corpus_sha256=base.corpus_sha256,
+                enabled_corpus_count=enabled_rows,
+                dry_sharp_inventory_count=0,
+                config_sha256=base.scheduler_config_sha256,
+                config=scheduler,
+                days=30,
+                seeds=base.seeds,
+                attempts=base.attempts,
+                distribution_tolerance=DistributionTolerance(),
+                scenario_coverage=base.scenario_coverage,
+                inventory_coverage=base.inventory_coverage,
+                adversarial_result=base.adversarial_result,
+            )
+
+        minimum = derive_dry_sharp_policy().inventory_enforcement_minimum_rows
+        bootstrap = report_for(minimum - 1)
+        enforced = report_for(minimum)
+
+        self.assertFalse(bootstrap.dry_sharp_inventory_enforced)
+        self.assertNotIn(
+            "dry_sharp_inventory_ratio_out_of_bounds",
+            bootstrap.natural_hard_violations,
+        )
+        self.assertNotIn(
+            "dry_sharp_ratio_out_of_bounds",
+            bootstrap.natural_hard_violations,
+        )
+        self.assertTrue(enforced.dry_sharp_inventory_enforced)
+        self.assertIn(
+            "dry_sharp_inventory_ratio_out_of_bounds",
+            enforced.natural_hard_violations,
+        )
+        self.assertIn(
+            "dry_sharp_ratio_out_of_bounds",
+            enforced.natural_hard_violations,
+        )
+        self.assertIn(
+            "seed_0:dry_sharp_ratio_out_of_bounds",
+            enforced.natural_hard_violations,
+        )
+
+    def test_playback_catchphrase_hard_limit_allows_ten_percent_only(self) -> None:
+        scheduler = SchedulerConfig.from_mapping(self.config)
+        base = simulate(self.corpus, self.config, days=1, seeds=(0,))
+        start = datetime(2026, 7, 1, 8, 0, tzinfo=timezone(timedelta(hours=8)))
+
+        def report_for(catchphrase_outputs: int):
+            attempts = []
+            for index in range(10):
+                attempt = self._constraint_attempt(
+                    when=start + timedelta(minutes=61 * index),
+                    row_index=380 + index,
+                    elapsed_minutes=1440 if index == 0 else 61,
+                )
+                assert attempt.row is not None
+                text = (
+                    f"{CATCHPHRASES[1]} playback fixture {index}"
+                    if index < catchphrase_outputs
+                    else f"plain playback fixture {index}"
+                )
+                attempts.append(replace(attempt, row=replace(attempt.row, text=text)))
+            return analyze_simulation(
+                corpus_sha256=base.corpus_sha256,
+                enabled_corpus_count=len(self.corpus),
+                dry_sharp_inventory_count=0,
+                config_sha256=base.scheduler_config_sha256,
+                config=scheduler,
+                days=30,
+                seeds=(0,),
+                attempts=tuple(attempts),
+                distribution_tolerance=DistributionTolerance(),
+                scenario_coverage=base.scenario_coverage,
+                inventory_coverage=base.inventory_coverage,
+                adversarial_result=base.adversarial_result,
+            )
+
+        exact = report_for(1)
+        above = report_for(2)
+
+        self.assertAlmostEqual(0.10, exact.catchphrase_ratio)
+        self.assertNotIn(
+            "catchphrase_ratio_above_limit",
+            exact.natural_hard_violations,
+        )
+        self.assertAlmostEqual(0.20, above.catchphrase_ratio)
+        self.assertIn(
+            "catchphrase_ratio_above_limit",
+            above.natural_hard_violations,
+        )
 
     def test_seed_order_is_canonical_but_corpus_order_changes_replay_anchor(self) -> None:
         forward = simulate(self.corpus, self.config, days=1, seeds=(9, 3))
