@@ -276,6 +276,10 @@ public static class InterruptionBudget
     internal static DialogueTrigger DayPart(DateTime now) => TemporalDialogueService.GetDialogueTrigger(now);
 }
 
+internal sealed record ClickFallbackSelection(
+    SceneDefinition Scene,
+    DialogueLine? ReusedLine = null);
+
 public sealed class SceneScheduler
 {
     public SceneDefinition? Select(
@@ -301,8 +305,7 @@ public sealed class SceneScheduler
             }
         }
 
-        var candidates = SceneCatalog.All
-            .Where(scene => scene.StoryArcId is null || (scene.StoryNode == 0 && context.State.ActiveStories.Count == 0))
+        var candidates = AvailableScenes(context)
             .Where(scene => CanSelect(
                 scene,
                 context,
@@ -311,7 +314,65 @@ public sealed class SceneScheduler
                 bypassInterruptionBudget))
             .Select(scene => Score(scene, history))
             .ToArray();
-        if (candidates.Length == 0)
+        return ChooseBest(candidates, random);
+    }
+
+    internal ClickFallbackSelection? SelectClickFallback(
+        SceneContext context,
+        SceneHistory history,
+        Random random)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(history);
+        ArgumentNullException.ThrowIfNull(random);
+
+        if (context.Trigger != CompanionEvent.Click)
+        {
+            return null;
+        }
+
+        var quotaRelaxed = AvailableScenes(context)
+            .Where(scene => TriggerAndContextMatch(scene, context, history))
+            .Where(scene => !history.IsSemanticGroupCoolingDown(scene, context.Now))
+            .Where(scene => history.EligibleLines(scene, context.Now).Count > 0)
+            .Select(scene => Score(scene, history))
+            .ToArray();
+        if (ChooseBest(quotaRelaxed, random) is { } quotaRelaxedScene)
+        {
+            return new ClickFallbackSelection(quotaRelaxedScene);
+        }
+
+        var reusableScenes = AvailableScenes(context)
+            .Where(scene => TriggerAndContextMatch(scene, context, history))
+            .Where(scene => scene.Lines.Any(line => line.Enabled))
+            .ToArray();
+        if (reusableScenes.Length == 0)
+        {
+            return null;
+        }
+
+        var lastLineId = history.Entries.LastOrDefault()?.DialogueLineId;
+        var nonRepeatingScenes = reusableScenes
+            .Where(scene => scene.Lines.Any(line => line.Enabled && line.Id != lastLineId))
+            .ToArray();
+        var reusableScene = ChooseBest(
+            (nonRepeatingScenes.Length > 0 ? nonRepeatingScenes : reusableScenes)
+                .Select(scene => Score(scene, history))
+                .ToArray(),
+            random);
+        if (reusableScene is null)
+        {
+            return null;
+        }
+
+        return new ClickFallbackSelection(
+            reusableScene,
+            SelectLeastRecentlyUsedLine(reusableScene, history, random));
+    }
+
+    private static SceneDefinition? ChooseBest(IReadOnlyList<ScoredScene> candidates, Random random)
+    {
+        if (candidates.Count == 0)
         {
             return null;
         }
@@ -331,14 +392,56 @@ public sealed class SceneScheduler
         return band[^1].Scene;
     }
 
+    private static DialogueLine SelectLeastRecentlyUsedLine(
+        SceneDefinition scene,
+        SceneHistory history,
+        Random random)
+    {
+        var enabled = scene.Lines.Where(line => line.Enabled).ToArray();
+        var lastLineId = history.Entries.LastOrDefault()?.DialogueLineId;
+        var nonRepeating = enabled.Where(line => line.Id != lastLineId).ToArray();
+        var candidates = nonRepeating.Length > 0 ? nonRepeating : enabled;
+        var lastPlayedAt = candidates.ToDictionary(
+            line => line.Id,
+            line => history.Entries.LastOrDefault(entry => entry.DialogueLineId == line.Id)?.PlayedAt
+                    ?? DateTime.MinValue);
+        var oldest = lastPlayedAt.Values.Min();
+        var leastRecentlyUsed = candidates.Where(line => lastPlayedAt[line.Id] == oldest).ToArray();
+
+        var roll = random.NextDouble() * leastRecentlyUsed.Sum(line => line.Weight);
+        foreach (var line in leastRecentlyUsed)
+        {
+            roll -= line.Weight;
+            if (roll <= 0)
+            {
+                return line;
+            }
+        }
+
+        return leastRecentlyUsed[^1];
+    }
+
+    private static IEnumerable<SceneDefinition> AvailableScenes(SceneContext context) =>
+        SceneCatalog.All.Where(scene =>
+            scene.StoryArcId is null || (scene.StoryNode == 0 && context.State.ActiveStories.Count == 0));
+
+    private static bool TriggerAndContextMatch(
+        SceneDefinition scene,
+        SceneContext context,
+        SceneHistory history) =>
+        scene.Triggers.Contains(context.Trigger)
+        && TriggerMatches(scene, context, history)
+        && ContextMatches(scene, context);
+
     private static bool CanSelect(
         SceneDefinition scene,
         SceneContext context,
         SceneHistory history,
         bool ignoreTrigger,
         bool bypassInterruptionBudget = false) =>
-        (ignoreTrigger || (scene.Triggers.Contains(context.Trigger) && TriggerMatches(scene, context, history)))
-        && ContextMatches(scene, context)
+        (ignoreTrigger
+            ? ContextMatches(scene, context)
+            : TriggerAndContextMatch(scene, context, history))
         && !history.IsSemanticGroupCoolingDown(scene, context.Now)
         && history.MeetsAdjacencyAndRecentQuotas(scene)
         && history.EligibleLines(scene, context.Now).Count > 0

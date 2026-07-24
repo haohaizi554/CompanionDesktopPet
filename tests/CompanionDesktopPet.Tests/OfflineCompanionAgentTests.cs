@@ -173,4 +173,108 @@ public sealed class OfflineCompanionAgentTests
         Assert.False(reply.ShouldDisplayText);
         Assert.True(Assert.Single(agent.State!.ActiveStories).DueAt > now);
     }
+
+    [Fact]
+    public void Respond_ClicksRemainLiveAcrossAnEightHourSession()
+    {
+        var agent = new OfflineCompanionAgent();
+        var random = new Random(20260724);
+        var start = new DateTime(2026, 7, 24, 9, 0, 0, DateTimeKind.Local);
+
+        for (var minute = 0; minute <= 8 * 60; minute += 5)
+        {
+            var now = start.AddMinutes(minute);
+            if (minute % 30 == 0)
+            {
+                agent.Respond(CompanionEvent.Automatic, now, random);
+            }
+
+            var click = agent.Respond(CompanionEvent.Click, now.AddSeconds(1), random);
+            Assert.True(
+                click.ShouldDisplayText,
+                $"Click became silent at minute {minute}; history={agent.History.Entries.Count}, scene={click.SceneId}.");
+        }
+    }
+
+    [Fact]
+    public void Respond_RepeatedClicksDoNotBecomePermanentlySilent()
+    {
+        var agent = new OfflineCompanionAgent();
+        var random = new Random(20260724);
+        var start = new DateTime(2026, 7, 24, 9, 0, 0, DateTimeKind.Local);
+        string? previousLineId = null;
+        var usedDeepFallback = false;
+
+        for (var clickIndex = 0; clickIndex < 900; clickIndex++)
+        {
+            var now = start.AddSeconds(clickIndex * 10);
+            var historyBefore = agent.History.Entries.ToArray();
+            var click = agent.Respond(
+                CompanionEvent.Click,
+                now,
+                random);
+            Assert.True(
+                click.ShouldDisplayText,
+                $"Click became silent at index {clickIndex}; history={agent.History.Entries.Count}, scene={click.SceneId}.");
+            Assert.NotNull(click.SourceLine);
+            Assert.True(click.SourceLine!.Enabled);
+            Assert.NotEqual("intentional_silence", click.SceneId);
+            Assert.NotEqual(previousLineId, click.SourceLine!.Id);
+
+            var scene = SceneCatalog.All.Single(item => item.Id == click.SceneId);
+            var previousSemantic = historyBefore.LastOrDefault(entry => entry.SemanticGroup == scene.SemanticGroup);
+            var semanticWasCoolingDown = previousSemantic is not null
+                                         && SceneHistory.Elapsed(now, previousSemantic.PlayedAt) < scene.SemanticCooldown;
+            var previousLine = historyBefore.LastOrDefault(entry => entry.DialogueLineId == click.SourceLine.Id);
+            var lineWasCoolingDown = previousLine is not null
+                                     && SceneHistory.Elapsed(now, previousLine.PlayedAt) < click.SourceLine.Cooldown;
+            var dailyCount = historyBefore.Count(entry =>
+                entry.DialogueLineId == click.SourceLine.Id
+                && (entry.PlayedLocalDate ?? DateOnly.FromDateTime(entry.PlayedAt)) == DateOnly.FromDateTime(now));
+
+            if (clickIndex == 129)
+            {
+                Assert.False(semanticWasCoolingDown);
+                Assert.False(lineWasCoolingDown);
+                Assert.True(dailyCount < click.SourceLine.MaxPerDay);
+                Assert.Contains(click.SourceLine.CategoryGroup,
+                    new[] { DialogueCategoryGroup.Technical, DialogueCategoryGroup.EasterEgg });
+            }
+
+            usedDeepFallback |= semanticWasCoolingDown
+                                || lineWasCoolingDown
+                                || dailyCount >= click.SourceLine.MaxPerDay;
+            previousLineId = click.SourceLine.Id;
+        }
+
+        Assert.True(usedDeepFallback);
+
+        var automatic = agent.Respond(
+            CompanionEvent.Automatic,
+            start.AddSeconds(900 * 10),
+            random);
+        Assert.False(automatic.ShouldDisplayText);
+        Assert.Equal("intentional_silence", automatic.SceneId);
+    }
+
+    [Fact]
+    public void Respond_RestoredExhaustedSessionStillAnswersClicks()
+    {
+        var random = new Random(20260724);
+        var start = new DateTime(2026, 7, 24, 9, 0, 0, DateTimeKind.Local);
+        var original = new OfflineCompanionAgent();
+        for (var clickIndex = 0; clickIndex < 300; clickIndex++)
+        {
+            original.Respond(CompanionEvent.Click, start.AddSeconds(clickIndex * 10), random);
+        }
+
+        var restored = new OfflineCompanionAgent(original.CreateSnapshot());
+        var reply = restored.Respond(CompanionEvent.Click, start.AddSeconds(300 * 10), random);
+
+        Assert.True(reply.ShouldDisplayText);
+        Assert.NotNull(reply.SourceLine);
+        Assert.Equal(original.History.Entries.Count + 1, restored.History.Entries.Count);
+        Assert.Equal(reply.SourceLine!.Id, restored.History.Entries[^1].DialogueLineId);
+        Assert.Equal(reply.SceneId, restored.History.Entries[^1].SceneId);
+    }
 }

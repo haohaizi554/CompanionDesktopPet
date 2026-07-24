@@ -79,6 +79,13 @@ public sealed class OfflineCompanionAgent
             _history,
             random,
             bypassInterruptionBudget: trigger == CompanionEvent.Click);
+        DialogueLine? fallbackLine = null;
+        if (scene is null && trigger == CompanionEvent.Click)
+        {
+            var fallback = _scheduler.SelectClickFallback(context, _history, random);
+            scene = fallback?.Scene;
+            fallbackLine = fallback?.ReusedLine;
+        }
         TurnCount++;
         if (scene is null)
         {
@@ -98,9 +105,7 @@ public sealed class OfflineCompanionAgent
                 ShouldDisplayText: false);
         }
 
-        var eligible = _history.EligibleLines(scene, localTime);
-        var unused = eligible.Where(line => !_usedThisSession.Contains(line.Text)).ToArray();
-        var line = WeightedChoice(unused.Length > 0 ? unused : eligible, random);
+        var line = fallbackLine ?? SelectEligibleLine(scene, localTime, random);
         _history.Record(scene, localTime, line);
         _state.ApplyScene(scene);
         UpdateActivity(line.CategoryGroup, line.Category);
@@ -118,6 +123,13 @@ public sealed class OfflineCompanionAgent
             ShouldDisplayText: true,
             SourceLine: line,
             SemanticGroup: line.SemanticGroup);
+    }
+
+    private DialogueLine SelectEligibleLine(SceneDefinition scene, DateTime localTime, Random random)
+    {
+        var eligible = _history.EligibleLines(scene, localTime);
+        var unused = eligible.Where(line => !_usedThisSession.Contains(line.Text)).ToArray();
+        return WeightedChoice(unused.Length > 0 ? unused : eligible, random);
     }
 
     private static DialogueLine WeightedChoice(IReadOnlyList<DialogueLine> source, Random random)
