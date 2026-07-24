@@ -12,7 +12,9 @@ from pathlib import Path
 from src.persona_corpus.builder import serialize_v2
 from src.persona_corpus.loader import load_v2
 from src.persona_corpus.simulation import (
+    SUBSEED_DERIVATION_VERSION,
     SimulationError,
+    derive_subseed,
     render_simulation_report,
     simulate,
     write_editorial_reports,
@@ -243,6 +245,68 @@ class SimulationUnitTests(unittest.TestCase):
         second = simulate(self.corpus, self.config, days=2, seeds=(7,))
         self.assertEqual(first.to_validation_json(), second.to_validation_json())
         self.assertEqual(render_simulation_report(first), render_simulation_report(second))
+
+    def test_subseed_v2_is_bound_to_corpus_config_version_and_scenario(self) -> None:
+        corpus_sha = "1" * 64
+        config_sha = "2" * 64
+        baseline = derive_subseed(
+            seed=7,
+            day_index=3,
+            slot_index=2,
+            corpus_sha256=corpus_sha,
+            scheduler_config_sha256=config_sha,
+            scenario="natural:morning",
+        )
+
+        self.assertEqual(
+            baseline,
+            derive_subseed(
+                seed=7,
+                day_index=3,
+                slot_index=2,
+                corpus_sha256=corpus_sha,
+                scheduler_config_sha256=config_sha,
+                scenario="natural:morning",
+            ),
+        )
+        variants = {
+            derive_subseed(
+                seed=7,
+                day_index=3,
+                slot_index=2,
+                corpus_sha256="3" * 64,
+                scheduler_config_sha256=config_sha,
+                scenario="natural:morning",
+            ),
+            derive_subseed(
+                seed=7,
+                day_index=3,
+                slot_index=2,
+                corpus_sha256=corpus_sha,
+                scheduler_config_sha256="4" * 64,
+                scenario="natural:morning",
+            ),
+            derive_subseed(
+                seed=7,
+                day_index=3,
+                slot_index=2,
+                corpus_sha256=corpus_sha,
+                scheduler_config_sha256=config_sha,
+                scenario="coverage:dawn",
+            ),
+            derive_subseed(
+                seed=7,
+                day_index=3,
+                slot_index=2,
+                corpus_sha256=corpus_sha,
+                scheduler_config_sha256=config_sha,
+                scenario="natural:morning",
+                derivation_version="persona-simulation-v3-test",
+            ),
+        }
+        self.assertEqual(4, len(variants))
+        self.assertNotIn(baseline, variants)
+        self.assertEqual("persona-simulation-v2", SUBSEED_DERIVATION_VERSION)
 
     def test_seed_order_and_corpus_order_do_not_change_selected_event_stream(self) -> None:
         forward = simulate(self.corpus, self.config, days=1, seeds=(9, 3))

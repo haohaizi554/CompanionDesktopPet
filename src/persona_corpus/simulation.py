@@ -17,6 +17,7 @@ from .models import CorpusLine, LegacyLine
 from .normalization import normalize_text
 from .schema import ARCHIVE_HEADER, PII_REVIEW_HEADER, REVIEW_HEADER
 from .selector import SchedulerConfig, SelectorConfigError, select_line
+from .simulation_core.scenarios import SUBSEED_DERIVATION_VERSION, derive_subseed
 from .validation import (
     CATCHPHRASES,
     DIRECT_STATE_PATTERNS,
@@ -246,11 +247,6 @@ def _canonical_seeds(seeds: Sequence[int]) -> tuple[int, ...]:
     if len(values) != len(set(values)):
         raise SimulationError("seeds must be distinct")
     return tuple(sorted(values))
-
-
-def _subseed(seed: int, day_index: int, slot_index: int) -> int:
-    identity = f"persona-simulation-v1:{seed}:{day_index}:{slot_index}".encode("ascii")
-    return int.from_bytes(hashlib.sha256(identity).digest()[:8], "big", signed=False)
 
 
 def _ratio(counts: Mapping[str, int], keys: Sequence[str], total: int) -> dict[str, float]:
@@ -684,7 +680,14 @@ def simulate(
                     context,
                     history,
                     now,
-                    seed=_subseed(seed, day_index, slot_index),
+                    seed=derive_subseed(
+                        seed=seed,
+                        day_index=day_index,
+                        slot_index=slot_index,
+                        corpus_sha256=corpus_digest,
+                        scheduler_config_sha256=config_digest,
+                        scenario=f"natural:{event}:{hour:02d}:{minute:02d}",
+                    ),
                     scheduler_config=scheduler,
                 )
                 row = selected.row if selected is not None else None
