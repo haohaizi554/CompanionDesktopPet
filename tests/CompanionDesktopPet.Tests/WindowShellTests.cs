@@ -556,13 +556,17 @@ public sealed class WindowShellTests
     }
 
     [Fact]
-    public async Task MainWindow_SmokeReadinessFailsWhenWarmupHasDeterministicError()
+    public async Task MainWindow_SmokeReadinessDeterministicFailureIsVisibleAndNeverAutoRetries()
     {
         await RunOnStaThreadAsync(async () =>
         {
             var settingsDirectory = CreateSettingsDirectory();
+            var factoryCalls = 0;
             var dialogue = DialogueService.CreateDeferred(_ =>
-                throw new InvalidDataException("invalid corpus"));
+            {
+                factoryCalls++;
+                throw new InvalidDataException("invalid corpus");
+            });
             var window = CreateWindowWithDialogue(settingsDirectory, dialogue, TimeProvider.System);
             try
             {
@@ -570,8 +574,25 @@ public sealed class WindowShellTests
                 window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
 
                 Assert.False(await window.PrepareSmokeReadinessAsync(TimeSpan.FromSeconds(1)));
-                Assert.False(window.TryVerifySmokeReadiness(out _));
+                WaitForCondition(
+                    () => Assert.IsType<TextBlock>(window.FindName("SpeechText")).Text
+                        == "文库没醒，点我重试",
+                    TimeSpan.FromSeconds(2),
+                    () => "The deterministic warmup failure was not presented.");
+                Assert.Equal(
+                    "文库没醒，点我重试",
+                    Assert.IsType<TextBlock>(window.FindName("SpeechText")).Text);
+                Assert.Equal(
+                    "重试文库 ♡",
+                    Assert.IsType<MenuItem>(window.FindName("SayMenuItem")).Header);
+                Assert.False(window.TryVerifySmokeReadiness(out var failure));
+                Assert.Contains("failed", failure, StringComparison.OrdinalIgnoreCase);
                 Assert.False(dialogue.IsReady);
+
+                InvokePrivate(window, "AutomaticTimer_Tick", null, EventArgs.Empty);
+                InvokePrivate(window, "AutomaticTimer_Tick", null, EventArgs.Empty);
+                Assert.False(await window.PrepareSmokeReadinessAsync(TimeSpan.FromSeconds(1)));
+                Assert.Equal(1, factoryCalls);
             }
             finally
             {
@@ -819,6 +840,71 @@ public sealed class WindowShellTests
                 Assert.Equal(2, factoryCalls);
                 Assert.Equal([TimeSpan.FromSeconds(1)], delays);
                 Assert.Equal(CompanionEvent.Startup, GetLastReply(window).Trigger);
+            }
+            finally
+            {
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
+    public void MainWindow_ClickAfterRetriesExhaustedStartsNewRunAndRendersRealReply()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var factoryCalls = 0;
+            var delays = new List<TimeSpan>();
+            var fixedAgent = new FixedDialogueAgent("重试后文库真的醒了");
+            var dialogue = DialogueService.CreateDeferred(_ =>
+            {
+                if (Interlocked.Increment(ref factoryCalls) <= 4)
+                {
+                    throw new IOException("temporary corpus access");
+                }
+
+                return fixedAgent;
+            });
+            var coordinator = new DialogueWarmupCoordinator(
+                dialogue,
+                delayAsync: (delay, _) =>
+                {
+                    delays.Add(delay);
+                    return Task.CompletedTask;
+                });
+            var window = CreateWindowWithDialogue(
+                settingsDirectory,
+                dialogue,
+                TimeProvider.System,
+                warmupCoordinator: coordinator);
+            try
+            {
+                window.Show();
+                WaitForCondition(
+                    () => Assert.IsType<TextBlock>(window.FindName("SpeechText")).Text
+                        == "文库没醒，点我重试",
+                    TimeSpan.FromSeconds(2),
+                    () => "Retries-exhausted state was not visible.");
+                Assert.Equal(4, factoryCalls);
+                Assert.Equal(
+                    [TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(30)],
+                    delays);
+
+                window.SaySomething();
+                WaitForCondition(
+                    () => GetLastReply(window).SceneId == "full:test",
+                    TimeSpan.FromSeconds(2),
+                    () => "The explicit retry did not render a real corpus reply.");
+
+                Assert.Equal(5, factoryCalls);
+                Assert.Equal(CompanionEvent.Click, GetLastReply(window).Trigger);
+                Assert.Equal("重试后文库真的醒了", GetLastReply(window).Text);
+                Assert.NotEqual("builtin_fallback", GetLastReply(window).SourceLine!.SourceKind);
+                Assert.Equal(
+                    "说句话 ♡",
+                    Assert.IsType<MenuItem>(window.FindName("SayMenuItem")).Header);
             }
             finally
             {

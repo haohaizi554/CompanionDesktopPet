@@ -24,6 +24,7 @@ internal sealed class DialogueWarmupCoordinator
     private readonly Func<TimeSpan, CancellationToken, Task> _delayAsync;
     private Task<DialogueWarmupOutcome>? _run;
     private Exception? _lastError;
+    private DialogueWarmupOutcome? _lastOutcome;
 
     internal DialogueWarmupCoordinator(
         DialogueService dialogue,
@@ -47,13 +48,66 @@ internal sealed class DialogueWarmupCoordinator
         }
     }
 
+    internal bool CanRetryAfterFailure
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _lastOutcome is DialogueWarmupOutcome.PermanentFailure
+                    or DialogueWarmupOutcome.RetriesExhausted;
+            }
+        }
+    }
+
     internal Task<DialogueWarmupOutcome> StartAsync(CancellationToken cancellationToken)
     {
         lock (_sync)
         {
-            _run ??= RunCoreAsync(cancellationToken);
+            _run ??= StartNewRunLocked(cancellationToken);
             return _run;
         }
+    }
+
+    internal Task<DialogueWarmupOutcome> RetryAfterFailureAsync(
+        CancellationToken cancellationToken)
+    {
+        lock (_sync)
+        {
+            if (_run is null)
+            {
+                _run = StartNewRunLocked(cancellationToken);
+            }
+            else if (_run.IsCompleted
+                && _lastOutcome is (
+                    DialogueWarmupOutcome.PermanentFailure
+                    or DialogueWarmupOutcome.RetriesExhausted))
+            {
+                _run = StartNewRunLocked(cancellationToken);
+            }
+
+            return _run;
+        }
+    }
+
+    private Task<DialogueWarmupOutcome> StartNewRunLocked(
+        CancellationToken cancellationToken)
+    {
+        _lastError = null;
+        _lastOutcome = null;
+        return RunAndRecordOutcomeAsync(cancellationToken);
+    }
+
+    private async Task<DialogueWarmupOutcome> RunAndRecordOutcomeAsync(
+        CancellationToken cancellationToken)
+    {
+        var outcome = await RunCoreAsync(cancellationToken).ConfigureAwait(false);
+        lock (_sync)
+        {
+            _lastOutcome = outcome;
+        }
+
+        return outcome;
     }
 
     private async Task<DialogueWarmupOutcome> RunCoreAsync(CancellationToken cancellationToken)
@@ -80,6 +134,11 @@ internal sealed class DialogueWarmupCoordinator
             {
                 ready = false;
                 error = exception;
+            }
+
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return DialogueWarmupOutcome.Cancelled;
             }
 
             if (ready)

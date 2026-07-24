@@ -37,6 +37,7 @@ public partial class MainWindow : Window
     private readonly bool _suppressApplicationShutdownOnClose;
     private readonly Action _shutdownApplication;
     private const double BubbleShadowSafety = 10;
+    private const string DialogueWarmupFailureMessage = "文库没醒，点我重试";
     private CompanionEventPump? _eventPump;
     private PetSettings _settings;
     private PetScale _scale;
@@ -63,7 +64,10 @@ public partial class MainWindow : Window
     private long _dialogueReplyRevision;
     private long _dialogueWarmupGeneration;
     private long _startupFallbackReplyRevision;
+    private long _userRetryFallbackReplyRevision;
     private bool _replayStartupAfterWarmupRequested;
+    private bool _replayUserClickAfterWarmupRequested;
+    private DialogueWarmupViewState _dialogueWarmupViewState = DialogueWarmupViewState.Pending;
 
     internal AgentReply? LastReply { get; private set; }
 
@@ -654,7 +658,10 @@ public partial class MainWindow : Window
 
         if (!_dialogue.IsReady)
         {
-            failure = "The full dialogue runtime is not ready.";
+            failure = _dialogueWarmup.CanRetryAfterFailure
+                || _dialogueWarmupViewState == DialogueWarmupViewState.RetryAvailable
+                ? "The full dialogue runtime failed to warm up."
+                : "The full dialogue runtime is not ready.";
             return false;
         }
 
@@ -955,6 +962,9 @@ public partial class MainWindow : Window
             return;
         }
 
+        var retryFailedWarmup = _dialogueWarmupViewState is
+            DialogueWarmupViewState.RetryAvailable or DialogueWarmupViewState.Retrying;
+
         if (clickSide is { } resolvedClickSide)
         {
             _animation.PlayClickReaction(resolvedClickSide);
@@ -965,6 +975,11 @@ public partial class MainWindow : Window
         }
 
         ShowEventBubble(CompanionEvent.Click);
+        if (retryFailedWarmup)
+        {
+            RetryDialogueWarmupAfterUserAction();
+        }
+
         ScheduleNextPhrase();
     }
 
@@ -1227,7 +1242,9 @@ public partial class MainWindow : Window
 
     private DateTime LocalNow => _timeProvider.GetLocalNow().LocalDateTime;
 
-    private void ObserveDialogueWarmup(bool replayStartupWhenReady)
+    private void ObserveDialogueWarmup(
+        bool replayStartupWhenReady,
+        bool retryAfterFailure = false)
     {
         _replayStartupAfterWarmupRequested |= replayStartupWhenReady;
         if (InteractionFrozen || _dialogue.IsReady)
@@ -1235,15 +1252,43 @@ public partial class MainWindow : Window
             return;
         }
 
-        var warmup = _dialogueWarmup.StartAsync(_dialogueWarmupLifetime.Token);
+        var warmup = retryAfterFailure
+            ? _dialogueWarmup.RetryAfterFailureAsync(_dialogueWarmupLifetime.Token)
+            : _dialogueWarmup.StartAsync(_dialogueWarmupLifetime.Token);
         if (ReferenceEquals(warmup, _observedDialogueWarmup))
         {
             return;
         }
 
         _observedDialogueWarmup = warmup;
+        if (_dialogueWarmupViewState == DialogueWarmupViewState.Pending)
+        {
+            _dialogueWarmupViewState = DialogueWarmupViewState.Loading;
+        }
+
         var generation = ++_dialogueWarmupGeneration;
         _ = CompleteDialogueWarmupAsync(warmup, generation);
+    }
+
+    private void RetryDialogueWarmupAfterUserAction()
+    {
+        if (InteractionFrozen
+            || _dialogue.IsReady
+            || _dialogueWarmupViewState is not (
+                DialogueWarmupViewState.RetryAvailable
+                or DialogueWarmupViewState.Retrying))
+        {
+            return;
+        }
+
+        _dialogueWarmupViewState = DialogueWarmupViewState.Retrying;
+        _replayUserClickAfterWarmupRequested = true;
+        _userRetryFallbackReplyRevision = _dialogueReplyRevision;
+        SayMenuItem.Header = "文库正在醒…";
+        SayMenuItem.IsEnabled = false;
+        ObserveDialogueWarmup(
+            replayStartupWhenReady: false,
+            retryAfterFailure: true);
     }
 
     private async Task CompleteDialogueWarmupAsync(
@@ -1265,33 +1310,24 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (outcome != DialogueWarmupOutcome.Ready)
+        if (outcome is DialogueWarmupOutcome.PermanentFailure
+            or DialogueWarmupOutcome.RetriesExhausted)
         {
-            if (outcome is (DialogueWarmupOutcome.PermanentFailure
-                    or DialogueWarmupOutcome.RetriesExhausted)
-                && _dialogueWarmup.LastError is { } error)
+            if (_dialogueWarmup.LastError is { } error)
             {
                 Trace.TraceError("Dialogue warmup stopped after {0}: {1}", outcome, error);
             }
-
+        }
+        else if (outcome != DialogueWarmupOutcome.Ready)
+        {
             return;
         }
 
         try
         {
-            await Dispatcher.InvokeAsync(() =>
-            {
-                if (InteractionFrozen || generation != _dialogueWarmupGeneration)
-                {
-                    return;
-                }
-
-                if (_replayStartupAfterWarmupRequested
-                    && _startupFallbackReplyRevision == _dialogueReplyRevision)
-                {
-                    ShowEventBubble(CompanionEvent.Startup);
-                }
-            }, DispatcherPriority.Background);
+            await Dispatcher.InvokeAsync(
+                () => ApplyDialogueWarmupOutcome(outcome, generation),
+                DispatcherPriority.Background);
         }
         catch (OperationCanceledException)
         {
@@ -1304,6 +1340,45 @@ public partial class MainWindow : Window
         {
             Trace.TraceError("Could not present the warmed dialogue startup: {0}", exception);
         }
+    }
+
+    private void ApplyDialogueWarmupOutcome(
+        DialogueWarmupOutcome outcome,
+        long generation)
+    {
+        if (InteractionFrozen || generation != _dialogueWarmupGeneration)
+        {
+            return;
+        }
+
+        if (outcome == DialogueWarmupOutcome.Ready)
+        {
+            _dialogueWarmupViewState = DialogueWarmupViewState.Ready;
+            SayMenuItem.Header = "说句话 ♡";
+            SayMenuItem.IsEnabled = true;
+            var replayUserClick = _replayUserClickAfterWarmupRequested
+                && _userRetryFallbackReplyRevision == _dialogueReplyRevision;
+            var replayStartup = _replayStartupAfterWarmupRequested
+                && _startupFallbackReplyRevision == _dialogueReplyRevision;
+            _replayUserClickAfterWarmupRequested = false;
+            _replayStartupAfterWarmupRequested = false;
+            if (replayUserClick)
+            {
+                ShowEventBubble(CompanionEvent.Click);
+            }
+            else if (replayStartup)
+            {
+                ShowEventBubble(CompanionEvent.Startup);
+            }
+
+            return;
+        }
+
+        _dialogueWarmupViewState = DialogueWarmupViewState.RetryAvailable;
+        _replayUserClickAfterWarmupRequested = false;
+        SayMenuItem.Header = "重试文库 ♡";
+        SayMenuItem.IsEnabled = true;
+        ShowBubble(DialogueWarmupFailureMessage);
     }
 
     private void PresentReply(AgentReply reply)
@@ -1765,6 +1840,7 @@ public partial class MainWindow : Window
     private void Window_Closed(object? sender, EventArgs e)
     {
         _isClosed = true;
+        _dialogueWarmupViewState = DialogueWarmupViewState.Closed;
         _dialogueWarmupGeneration++;
         _dialogueWarmupLifetime.Cancel();
         _dialogueWarmupLifetime.Dispose();
@@ -1791,5 +1867,15 @@ public partial class MainWindow : Window
         Scheduled,
         Running,
         Completed
+    }
+
+    private enum DialogueWarmupViewState
+    {
+        Pending,
+        Loading,
+        RetryAvailable,
+        Retrying,
+        Ready,
+        Closed
     }
 }

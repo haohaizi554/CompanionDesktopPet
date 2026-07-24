@@ -63,15 +63,20 @@ public sealed class DialogueWarmupCoordinatorTests
                 return Task.CompletedTask;
             });
 
-        var result = await coordinator.StartAsync(CancellationToken.None);
+        var initialRun = coordinator.StartAsync(CancellationToken.None);
+        var result = await initialRun;
 
         Assert.Equal(DialogueWarmupOutcome.PermanentFailure, result);
         Assert.Equal(1, factoryCalls);
         Assert.Equal(0, delayCalls);
         Assert.IsType<InvalidDataException>(coordinator.LastError);
-        Assert.Same(
-            coordinator.StartAsync(CancellationToken.None),
-            coordinator.StartAsync(CancellationToken.None));
+        Assert.True(coordinator.CanRetryAfterFailure);
+
+        var automaticObservation = coordinator.StartAsync(CancellationToken.None);
+
+        Assert.Same(initialRun, automaticObservation);
+        Assert.Equal(DialogueWarmupOutcome.PermanentFailure, await automaticObservation);
+        Assert.Equal(1, factoryCalls);
     }
 
     [Fact]
@@ -103,6 +108,48 @@ public sealed class DialogueWarmupCoordinatorTests
     }
 
     [Fact]
+    public async Task RetryAfterFailureAsync_AfterRetriesExhaustedStartsOneNewSharedRun()
+    {
+        var factoryCalls = 0;
+        var delays = new List<TimeSpan>();
+        var dialogue = DialogueService.CreateDeferred(snapshot =>
+        {
+            if (Interlocked.Increment(ref factoryCalls) <= 4)
+            {
+                throw new IOException("temporary read failure");
+            }
+
+            return new FixedAgent(snapshot);
+        });
+        var coordinator = new DialogueWarmupCoordinator(
+            dialogue,
+            delayAsync: (delay, _) =>
+            {
+                delays.Add(delay);
+                return Task.CompletedTask;
+            });
+
+        Assert.Equal(
+            DialogueWarmupOutcome.RetriesExhausted,
+            await coordinator.StartAsync(CancellationToken.None));
+        Assert.True(coordinator.CanRetryAfterFailure);
+
+        var userRuns = Enumerable.Range(0, 8)
+            .Select(_ => coordinator.RetryAfterFailureAsync(CancellationToken.None))
+            .ToArray();
+
+        Assert.All(userRuns, run => Assert.Same(userRuns[0], run));
+        Assert.All(await Task.WhenAll(userRuns), outcome =>
+            Assert.Equal(DialogueWarmupOutcome.Ready, outcome));
+        Assert.Equal(5, factoryCalls);
+        Assert.Equal(
+            [TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(30)],
+            delays);
+        Assert.False(coordinator.CanRetryAfterFailure);
+        Assert.Null(coordinator.LastError);
+    }
+
+    [Fact]
     public async Task StartAsync_CancellationStopsPendingBackoffWithoutAnotherFactoryCall()
     {
         var delayEntered = new TaskCompletionSource(
@@ -128,6 +175,33 @@ public sealed class DialogueWarmupCoordinatorTests
 
         Assert.Equal(DialogueWarmupOutcome.Cancelled, await run);
         Assert.Equal(1, factoryCalls);
+    }
+
+    [Fact]
+    public async Task StartAsync_CancellationDuringInFlightWarmupWinsOverLateSuccess()
+    {
+        using var factoryEntered = new ManualResetEventSlim();
+        using var releaseFactory = new ManualResetEventSlim();
+        var dialogue = DialogueService.CreateDeferred(snapshot =>
+        {
+            factoryEntered.Set();
+            if (!releaseFactory.Wait(TimeSpan.FromSeconds(2)))
+            {
+                throw new TimeoutException("test did not release the factory");
+            }
+
+            return new FixedAgent(snapshot);
+        });
+        var coordinator = new DialogueWarmupCoordinator(dialogue);
+        using var lifetime = new CancellationTokenSource();
+
+        var run = coordinator.StartAsync(lifetime.Token);
+        Assert.True(factoryEntered.Wait(TimeSpan.FromSeconds(2)));
+        lifetime.Cancel();
+        releaseFactory.Set();
+
+        Assert.Equal(DialogueWarmupOutcome.Cancelled, await run);
+        Assert.True(dialogue.IsReady);
     }
 
     private sealed class FixedAgent : ICompanionDialogueAgent
