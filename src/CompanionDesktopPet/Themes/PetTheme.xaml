@@ -1,25 +1,34 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-  <Color x:Key="CreamColor">#FFFFF8EE</Color>
-  <Color x:Key="BlushColor">#FFFFD6DF</Color>
-  <Color x:Key="RoseColor">#FFE98FA4</Color>
-  <Color x:Key="CocoaColor">#FF543A3F</Color>
-  <Color x:Key="MenuHoverColor">#FFFFE8ED</Color>
+  <Color x:Key="Pet.Color.Surface.Bubble">#FFFFF8EE</Color>
+  <Color x:Key="Pet.Color.Surface.BubbleArrow">#FFFFD6DF</Color>
+  <Color x:Key="Pet.Color.Border.Accent">#FFE98FA4</Color>
+  <Color x:Key="Pet.Color.Text.Primary">#FF543A3F</Color>
+  <Color x:Key="Pet.Color.Shadow.Bubble">#663A2026</Color>
+  <Color x:Key="Pet.Color.Shadow.Popup">#784F2938</Color>
 
-  <SolidColorBrush x:Key="CreamBrush" Color="{StaticResource CreamColor}" />
-  <SolidColorBrush x:Key="BlushBrush" Color="{StaticResource BlushColor}" />
-  <SolidColorBrush x:Key="RoseBrush" Color="{StaticResource RoseColor}" />
-  <SolidColorBrush x:Key="CocoaBrush" Color="{StaticResource CocoaColor}" />
-  <SolidColorBrush x:Key="MenuHoverBrush" Color="{StaticResource MenuHoverColor}" />
+  <SolidColorBrush x:Key="Pet.Brush.BubbleSurface"
+                   Color="{StaticResource Pet.Color.Surface.Bubble}" />
+  <SolidColorBrush x:Key="Pet.Brush.BubbleArrow"
+                   Color="{StaticResource Pet.Color.Surface.BubbleArrow}" />
+  <SolidColorBrush x:Key="Pet.Brush.AccentBorder"
+                   Color="{StaticResource Pet.Color.Border.Accent}" />
+  <SolidColorBrush x:Key="Pet.Brush.TextPrimary"
+                   Color="{StaticResource Pet.Color.Text.Primary}" />
+  <SolidColorBrush x:Key="Pet.Brush.HeartPrimary" Color="#FFFF6F91" />
+  <SolidColorBrush x:Key="Pet.Brush.HeartSecondary" Color="#FFFF9BB2" />
+  <SolidColorBrush x:Key="Pet.Brush.HeartTertiary" Color="#FFFFB3C6" />
+  <FontFamily x:Key="Pet.FontFamily.Ui">Microsoft YaHei UI</FontFamily>
 
-  <LinearGradientBrush x:Key="MenuSurfaceBrush" StartPoint="0,0" EndPoint="1,1">
+  <LinearGradientBrush x:Key="Pet.Brush.MenuSurface" StartPoint="0,0" EndPoint="1,1">
     <GradientStop Color="#FAFFFDF7" Offset="0" />
     <GradientStop Color="#E8FFE0EA" Offset="1" />
   </LinearGradientBrush>
-  <SolidColorBrush x:Key="MenuBorderBrush" Color="#B8E56F91" />
-  <SolidColorBrush x:Key="MenuInnerHighlightBrush" Color="#D9FFFFFF" />
-  <SolidColorBrush x:Key="MenuItemHoverBrush" Color="#CCFFFFFF" />
-  <LinearGradientBrush x:Key="MenuSeparatorBrush" StartPoint="0,0" EndPoint="1,0">
+  <SolidColorBrush x:Key="Pet.Brush.MenuBorder" Color="#B8E56F91" />
+  <SolidColorBrush x:Key="Pet.Brush.MenuHighlight" Color="#D9FFFFFF" />
+  <SolidColorBrush x:Key="Pet.Brush.MenuItemHover" Color="#CCFFFFFF" />
+  <SolidColorBrush x:Key="Pet.Brush.MenuChecked" Color="#FFBE4B70" />
+  <LinearGradientBrush x:Key="Pet.Brush.MenuSeparator" StartPoint="0,0" EndPoint="1,0">
     <GradientStop Color="#00E98FA4" Offset="0" />
     <GradientStop Color="#99E98FA4" Offset="0.5" />
     <GradientStop Color="#00E98FA4" Offset="1" />
@@ -27,8 +36,8 @@
 
   <Style x:Key="KawaiiContextMenuStyle" TargetType="ContextMenu">
     <Setter Property="Background" Value="Transparent" />
-    <Setter Property="Foreground" Value="{StaticResource CocoaBrush}" />
-    <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+    <Setter Property="Foreground" Value="{StaticResource Pet.Brush.TextPrimary}" />
+    <Setter Property="FontFamily" Value="{StaticResource Pet.FontFamily.Ui}" />
     <Setter Property="FontSize" Value="14" />
     <Setter Property="MinWidth" Value="270" />
     <Setter Property="Padding" Value="0" />
@@ -42,10 +51,10 @@
                     Padding="11"
                     CornerRadius="24"
                     BorderThickness="2"
-                    BorderBrush="{StaticResource MenuBorderBrush}"
-                    Background="{StaticResource MenuSurfaceBrush}">
+                    BorderBrush="{StaticResource Pet.Brush.MenuBorder}"
+                    Background="{StaticResource Pet.Brush.MenuSurface}">
               <Border.Effect>
-                <DropShadowEffect Color="#784F2938"
+                <DropShadowEffect Color="{StaticResource Pet.Color.Shadow.Popup}"
                                   BlurRadius="24"
                                   ShadowDepth="5"
                                   Opacity="0.28" />
@@ -57,10 +66,9 @@
       </Setter.Value>
     </Setter>
   </Style>
-  <Style TargetType="ContextMenu" BasedOn="{StaticResource KawaiiContextMenuStyle}" />
 
-  <Style TargetType="MenuItem">
-    <Setter Property="Foreground" Value="{StaticResource CocoaBrush}" />
+  <Style x:Key="KawaiiMenuItemStyle" TargetType="MenuItem">
+    <Setter Property="Foreground" Value="{StaticResource Pet.Brush.TextPrimary}" />
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="MinHeight" Value="35" />
     <Setter Property="Margin" Value="2" />
@@ -112,10 +120,10 @@
                         MinWidth="190"
                         CornerRadius="20"
                         BorderThickness="2"
-                        BorderBrush="{StaticResource MenuBorderBrush}"
-                        Background="{StaticResource MenuSurfaceBrush}">
+                        BorderBrush="{StaticResource Pet.Brush.MenuBorder}"
+                        Background="{StaticResource Pet.Brush.MenuSurface}">
                   <Border.Effect>
-                    <DropShadowEffect Color="#784F2938"
+                    <DropShadowEffect Color="{StaticResource Pet.Color.Shadow.Popup}"
                                       BlurRadius="22"
                                       ShadowDepth="4"
                                       Opacity="0.26" />
@@ -130,17 +138,19 @@
             <Trigger Property="IsHighlighted" Value="True">
               <Setter TargetName="MenuItemChrome"
                       Property="Background"
-                      Value="{StaticResource MenuItemHoverBrush}" />
+                      Value="{StaticResource Pet.Brush.MenuItemHover}" />
               <Setter TargetName="MenuItemChrome"
                       Property="BorderBrush"
-                      Value="{StaticResource MenuInnerHighlightBrush}" />
+                      Value="{StaticResource Pet.Brush.MenuHighlight}" />
             </Trigger>
             <Trigger Property="IsCheckable" Value="True">
               <Setter TargetName="IconGlyph" Property="Text" Value="" />
             </Trigger>
             <Trigger Property="IsChecked" Value="True">
               <Setter TargetName="IconGlyph" Property="Text" Value="✓" />
-              <Setter TargetName="IconGlyph" Property="Foreground" Value="#FFBE4B70" />
+              <Setter TargetName="IconGlyph"
+                      Property="Foreground"
+                      Value="{StaticResource Pet.Brush.MenuChecked}" />
             </Trigger>
             <Trigger Property="Role" Value="SubmenuHeader">
               <Setter TargetName="SubmenuArrow" Property="Visibility" Value="Visible" />
@@ -160,14 +170,9 @@
         <ControlTemplate TargetType="Separator">
           <Border Height="1"
                   Margin="14,6"
-                  Background="{StaticResource MenuSeparatorBrush}" />
+                  Background="{StaticResource Pet.Brush.MenuSeparator}" />
         </ControlTemplate>
       </Setter.Value>
     </Setter>
   </Style>
-  <Style x:Key="{x:Static MenuItem.SeparatorStyleKey}"
-         TargetType="Separator"
-         BasedOn="{StaticResource KawaiiSeparatorStyle}" />
-  <Style TargetType="Separator"
-         BasedOn="{StaticResource KawaiiSeparatorStyle}" />
 </ResourceDictionary>

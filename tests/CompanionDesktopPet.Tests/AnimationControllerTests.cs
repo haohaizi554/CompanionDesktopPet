@@ -4,6 +4,7 @@ using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using CompanionDesktopPet.UI;
 
@@ -314,6 +315,188 @@ public sealed class AnimationControllerTests
             }
             finally
             {
+                host.Close();
+            }
+        });
+    }
+
+    [Fact]
+    public void SuspendFreezesAmbientProgressUntilResumeAndCompletesOnce()
+    {
+        RunOnStaThread(() =>
+        {
+            var blinkOverlay = new Border();
+            var controller = new AnimationController(
+                new ScaleTransform(),
+                new RotateTransform(),
+                new TranslateTransform(),
+                new ScaleTransform(),
+                new RotateTransform(),
+                new ScaleTransform(),
+                new RotateTransform(),
+                new TranslateTransform(),
+                [],
+                blinkOverlay,
+                new Border(),
+                new TranslateTransform());
+            var host = new Window { Content = blinkOverlay };
+            host.Show();
+            host.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+
+            try
+            {
+                var completions = 0;
+                controller.PlayBlink(doubleBlink: false, () => completions++);
+                var blinkClock = Assert.Single(controller.ActiveClocks);
+                blinkClock.Controller!.SeekAlignedToLastTick(
+                    TimeSpan.FromMilliseconds(100),
+                    TimeSeekOrigin.BeginTime);
+
+                controller.Suspend();
+                WaitFor(() => blinkClock.IsPaused, TimeSpan.FromSeconds(1));
+                Assert.True(controller.IsSuspended);
+                Assert.True(blinkClock.IsPaused);
+                Assert.Equal(0, completions);
+
+                controller.Resume();
+                WaitFor(() => !blinkClock.IsPaused, TimeSpan.FromSeconds(1));
+                Assert.False(controller.IsSuspended);
+                Assert.False(blinkClock.IsPaused);
+
+                blinkClock.Controller!.SkipToFill();
+                WaitFor(() => completions == 1, TimeSpan.FromSeconds(1));
+                Assert.Equal(1, completions);
+                Assert.Empty(controller.ActiveClocks);
+            }
+            finally
+            {
+                controller.Dispose();
+                host.Close();
+            }
+        });
+    }
+
+    [Fact]
+    public void PauseIdleThenSuspendAndResume_PreservesTheUserPause()
+    {
+        RunOnStaThread(() =>
+        {
+            var breathing = new ScaleTransform();
+            var sway = new RotateTransform();
+            var floating = new TranslateTransform();
+            var controller = new AnimationController(
+                breathing,
+                sway,
+                floating,
+                new ScaleTransform(),
+                new RotateTransform(),
+                new ScaleTransform(),
+                new RotateTransform(),
+                new TranslateTransform(),
+                []);
+            var host = new Window
+            {
+                Content = new Grid
+                {
+                    RenderTransform = new TransformGroup
+                    {
+                        Children = { breathing, sway, floating }
+                    }
+                }
+            };
+            host.Show();
+            host.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+
+            try
+            {
+                controller.StartIdle();
+                var idleClocks = controller.ActiveClocks;
+                Assert.Equal(4, idleClocks.Count);
+                foreach (var clock in idleClocks)
+                {
+                    clock.Controller!.SeekAlignedToLastTick(
+                        TimeSpan.FromMilliseconds(100),
+                        TimeSeekOrigin.BeginTime);
+                }
+
+                controller.PauseIdle();
+                WaitFor(
+                    () => idleClocks.All(clock => clock.IsPaused),
+                    TimeSpan.FromSeconds(1));
+                Assert.True(controller.IsPaused);
+                Assert.All(idleClocks, clock => Assert.True(clock.IsPaused));
+
+                controller.Suspend();
+                controller.Resume();
+                host.Dispatcher.Invoke(() => { }, DispatcherPriority.Render);
+
+                Assert.False(controller.IsSuspended);
+                Assert.True(controller.IsPaused);
+                Assert.All(idleClocks, clock => Assert.True(clock.IsPaused));
+            }
+            finally
+            {
+                controller.Dispose();
+                host.Close();
+            }
+        });
+    }
+
+    [Fact]
+    [Trait("Category", "Performance")]
+    public void RestartAndDisposeKeepAConstantClockBudgetAndDetachAnimations()
+    {
+        RunOnStaThread(() =>
+        {
+            var breathing = new ScaleTransform();
+            var sway = new RotateTransform();
+            var floating = new TranslateTransform();
+            var blinkOverlay = new Border();
+            var controller = new AnimationController(
+                breathing,
+                sway,
+                floating,
+                new ScaleTransform(),
+                new RotateTransform(),
+                new ScaleTransform(),
+                new RotateTransform(),
+                new TranslateTransform(),
+                [],
+                blinkOverlay,
+                new Border(),
+                new TranslateTransform());
+            var host = new Window { Content = blinkOverlay };
+            host.Show();
+            host.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+
+            try
+            {
+                for (var iteration = 0; iteration < 50; iteration++)
+                {
+                    controller.StartIdle();
+                }
+
+                Assert.Equal(4, controller.ActiveClockCount);
+                var completions = 0;
+                controller.PlayBlink(doubleBlink: false, () => completions++);
+                Assert.Equal(5, controller.ActiveClockCount);
+
+                controller.Dispose();
+                controller.Dispose();
+
+                WaitFor(() => false, TimeSpan.FromMilliseconds(400), expectCompletion: false);
+                Assert.Equal(0, completions);
+                Assert.Equal(0, controller.ActiveClockCount);
+                Assert.False(breathing.HasAnimatedProperties);
+                Assert.False(sway.HasAnimatedProperties);
+                Assert.False(floating.HasAnimatedProperties);
+                Assert.False(blinkOverlay.HasAnimatedProperties);
+                controller.StartIdle();
+                Assert.Equal(0, controller.ActiveClockCount);
+            }
+            finally
+            {
+                controller.Dispose();
                 host.Close();
             }
         });

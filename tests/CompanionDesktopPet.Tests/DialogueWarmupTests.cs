@@ -4,12 +4,14 @@ using CompanionDesktopPet.Services;
 
 namespace CompanionDesktopPet.Tests;
 
+[Collection(PerformanceTestCollection.Name)]
 public sealed class DialogueWarmupTests
 {
     private static readonly DateTime LocalNow =
         new(2026, 7, 24, 9, 30, 0, DateTimeKind.Local);
 
     [Fact]
+    [Trait("Category", "Performance")]
     public async Task WarmupAsync_ConcurrentCallersInitializeExactlyOnceWhileRepliesStayImmediate()
     {
         using var factoryEntered = new ManualResetEventSlim();

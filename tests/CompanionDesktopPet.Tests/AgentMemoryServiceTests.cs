@@ -249,6 +249,42 @@ public sealed class AgentMemoryServiceTests : IDisposable
         Assert.Equal(original.History.Entries.Count, restored.History.Entries.Count);
     }
 
+    [Fact]
+    [Trait("Category", "Performance")]
+    public void IsValid_AfterWarmupHasBoundedSteadyStateAllocations()
+    {
+        var snapshot = CreateValidSnapshot();
+        Assert.True(AgentMemoryService.IsValid(snapshot));
+        Assert.True(AgentMemoryService.IsValid(snapshot));
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var iteration = 0; iteration < 32; iteration++)
+        {
+            Assert.True(AgentMemoryService.IsValid(snapshot));
+        }
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.InRange(allocated, 0, 64 * 1024);
+    }
+
+    [Fact]
+    [Trait("Category", "Performance")]
+    public void ReconcileForRuntime_AfterWarmupDoesNotRebuildCatalogIndexes()
+    {
+        var snapshot = CreateValidSnapshot();
+        Assert.NotNull(AgentMemoryService.ReconcileForRuntime(snapshot));
+        Assert.NotNull(AgentMemoryService.ReconcileForRuntime(snapshot));
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var iteration = 0; iteration < 16; iteration++)
+        {
+            Assert.NotNull(AgentMemoryService.ReconcileForRuntime(snapshot));
+        }
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.InRange(allocated, 0, 512 * 1024);
+    }
+
     private async Task AssertRejectedAsync(params Action<JsonObject>[] mutations)
     {
         foreach (var mutation in mutations)

@@ -7,6 +7,7 @@ using CompanionDesktopPet.Services;
 
 namespace CompanionDesktopPet.Tests;
 
+[Collection(PerformanceTestCollection.Name)]
 public sealed class PersonaCorpusTests
 {
     private static readonly string[] RequiredMetadataProperties =
@@ -90,12 +91,12 @@ public sealed class PersonaCorpusTests
     }
 
     [Fact]
+    [Trait("Category", "Performance")]
     public void Corpus_ParsesExpandedRuntimeInventoryWithinDesktopStartupBudget()
     {
         using var stream = typeof(PersonaCorpus).Assembly.GetManifestResourceStream(PersonaCorpus.EmbeddedResourceName);
         Assert.NotNull(stream);
-        GC.Collect();
-        var before = GC.GetTotalMemory(true);
+        var before = RetainedMemoryMeasurement.Snapshot();
         var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
         var stopwatch = Stopwatch.StartNew();
 
@@ -103,13 +104,17 @@ public sealed class PersonaCorpusTests
 
         stopwatch.Stop();
         var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
-        var retainedBytes = Math.Max(0, GC.GetTotalMemory(true) - before);
+        var retainedBytes = RetainedMemoryMeasurement.Snapshot() - before;
         Console.WriteLine(
             $"corpus parse: elapsed={stopwatch.Elapsed} allocated={allocatedBytes:N0} retained={retainedBytes:N0}");
         Assert.Equal(PersonaContractGenerated.ExpandedRuntimeRows, lines.Count);
         Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(5), stopwatch.Elapsed.ToString());
         Assert.True(allocatedBytes < 256L * 1024 * 1024, $"allocated bytes: {allocatedBytes:N0}");
+        Assert.True(
+            retainedBytes >= 0,
+            $"retained-memory measurement was invalid: {retainedBytes:N0} bytes");
         Assert.True(retainedBytes < 128L * 1024 * 1024, $"retained bytes: {retainedBytes:N0}");
+        GC.KeepAlive(lines);
     }
 
     [Fact]

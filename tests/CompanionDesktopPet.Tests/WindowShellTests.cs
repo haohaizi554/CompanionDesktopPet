@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
@@ -400,6 +401,47 @@ public sealed class WindowShellTests
     }
 
     [Fact]
+    public void MainWindow_TrayHideDuringLandingResumesAndCompletesTheActionLifecycle()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var window = CreateWindowWithScheduler(
+                settingsDirectory,
+                new AmbientActionScheduler(() => 0.5));
+            try
+            {
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                window.SetTrayAvailability(true);
+                var coordinator = GetPrivateField<PetActionCoordinator>(window, "_actionCoordinator");
+                var ambientTimer = GetPrivateField<DispatcherTimer>(window, "_ambientTimer");
+
+                InvokePrivate(window, "BeginDragAction");
+                InvokePrivate(window, "BeginLandingAction");
+                Assert.Equal(PetActionState.Landing, coordinator.State);
+
+                window.HideToTray();
+                Assert.Equal(PetActionState.Landing, coordinator.State);
+
+                window.ToggleVisibilityFromTray();
+                WaitForCondition(
+                    () => coordinator.State == PetActionState.Idle,
+                    TimeSpan.FromSeconds(3),
+                    () => $"Landing did not complete after tray restore; current state: {coordinator.State}.");
+
+                Assert.Equal(PetActionState.Idle, coordinator.State);
+                Assert.True(ambientTimer.IsEnabled);
+            }
+            finally
+            {
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
     public async Task MainWindow_CloseDuringDragDoesNotStartLandingOrPostDragWork()
     {
         await RunOnStaThreadAsync(async () =>
@@ -468,6 +510,7 @@ public sealed class WindowShellTests
     }
 
     [Fact]
+    [Trait("Category", "Performance")]
     public async Task MainWindow_SmokeActionProbeCompletesRealActionsAndRestoresNeutralState()
     {
         await RunOnStaThreadAsync(async () =>
@@ -632,6 +675,7 @@ public sealed class WindowShellTests
     }
 
     [Fact]
+    [Trait("Category", "Performance")]
     public async Task MainWindow_SmokeReadinessTimesOutWithoutCancellingBlockedSingleFlightWarmup()
     {
         await RunOnStaThreadAsync(async () =>
@@ -665,6 +709,7 @@ public sealed class WindowShellTests
     }
 
     [Fact]
+    [Trait("Category", "Performance")]
     public void MainWindow_BlockedDialogueWarmupDoesNotBlockLoadedOrClickActions()
     {
         RunOnStaThread(() =>
@@ -771,7 +816,7 @@ public sealed class WindowShellTests
             var window = CreateWindowWithDialogue(settingsDirectory, dialogue, TimeProvider.System);
             try
             {
-                InvokePrivate(window, "Window_Loaded", null, new RoutedEventArgs());
+                window.RaiseEvent(new RoutedEventArgs(FrameworkElement.LoadedEvent));
                 var startupRevision = GetPrivateField<long>(window, "_dialogueReplyRevision");
                 Assert.StartsWith("fallback:", GetLastReply(window).SceneId, StringComparison.Ordinal);
 
@@ -793,7 +838,7 @@ public sealed class WindowShellTests
             }
             finally
             {
-                InvokePrivate(window, "Window_Closed", null, EventArgs.Empty);
+                window.Close();
                 DeleteSettingsDirectory(settingsDirectory);
             }
         });
@@ -1015,81 +1060,57 @@ public sealed class WindowShellTests
     }
 
     [Fact]
-    public void MainWindow_ConstructorAcceptsAnInjectableIdleTimeProvider()
+    public void MainWindow_DependencyBoundaryAcceptsTestOverridesWithoutSignatureReflection()
     {
-        var providerType = typeof(MainWindow).Assembly.GetType(
-            "CompanionDesktopPet.Services.IIdleTimeProvider",
-            throwOnError: false);
-        Assert.NotNull(providerType);
-        Assert.Contains(
-            typeof(MainWindow).GetConstructors().SelectMany(constructor => constructor.GetParameters()),
-            parameter => parameter.ParameterType == providerType
-                         && parameter.Name == "idleTimeProvider"
-                         && parameter.HasDefaultValue);
-    }
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var idleTimeProvider = new FixedIdleTimeProvider(TimeSpan.FromMinutes(7));
+            var autoStartService = new FakeAutoStartService { Enabled = true };
+            var dependencies = new MainWindowDependencies(
+                PetSettings.Default,
+                new SettingsService(settingsDirectory))
+            {
+                IdleTimeProvider = idleTimeProvider,
+                AmbientScheduler = new AmbientActionScheduler(() => 0.5),
+                AutoStartService = autoStartService,
+                SuppressApplicationShutdownOnClose = true
+            };
+            MainWindow? window = null;
+            ContextMenu? menu = null;
+            try
+            {
+                window = new MainWindow(dependencies);
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                menu = Assert.IsType<ContextMenu>(window.FindName("ControlMenu"));
+                menu.IsOpen = true;
 
-    [Fact]
-    public void MainWindow_PreservesLegacyConstructorAndExposesSchedulerInjection()
-    {
-        var publicConstructors = typeof(MainWindow).GetConstructors();
-        var publicConstructor = Assert.Single(publicConstructors);
-        Assert.Equal(
-        [
-            typeof(PetSettings),
-            typeof(SettingsService),
-            typeof(AgentMemoryService),
-            typeof(AgentMemorySnapshot),
-            typeof(IIdleTimeProvider),
-            typeof(bool),
-            typeof(Action)
-        ], publicConstructor.GetParameters().Select(parameter => parameter.ParameterType));
-
-        var internalConstructors = typeof(MainWindow)
-            .GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic);
-        var injectionConstructor = Assert.Single(
-            internalConstructors,
-            constructor => constructor.GetParameters().Length == 8);
-        Assert.Equal(
-        [
-            typeof(PetSettings),
-            typeof(SettingsService),
-            typeof(AgentMemoryService),
-            typeof(AgentMemorySnapshot),
-            typeof(IIdleTimeProvider),
-            typeof(bool),
-            typeof(Action),
-            typeof(AmbientActionScheduler)
-        ], injectionConstructor.GetParameters().Select(parameter => parameter.ParameterType));
-        Assert.DoesNotContain(
-            injectionConstructor.GetParameters(),
-            parameter => parameter.HasDefaultValue);
-
-        Assert.Contains(
-            internalConstructors,
-            constructor => constructor.GetParameters().Select(parameter => parameter.ParameterType)
-                .SequenceEqual(
-                [
-                    typeof(PetSettings),
-                    typeof(SettingsService),
-                    typeof(AgentMemoryService),
-                    typeof(AgentMemorySnapshot),
-                    typeof(IAutoStartService)
-                ]));
-        Assert.Contains(
-            internalConstructors,
-            constructor => constructor.GetParameters().Select(parameter => parameter.ParameterType)
-                .SequenceEqual(
-                [
-                    typeof(PetSettings),
-                    typeof(SettingsService),
-                    typeof(AgentMemoryService),
-                    typeof(AgentMemorySnapshot),
-                    typeof(IIdleTimeProvider),
-                    typeof(bool),
-                    typeof(Action),
-                    typeof(AmbientActionScheduler),
-                    typeof(IAutoStartService)
-                ]));
+                Assert.True(Assert.IsType<MenuItem>(window.FindName("AutoStartMenuItem")).IsChecked);
+                Assert.Equal(TimeSpan.FromMinutes(7), idleTimeProvider.LastReturnedValue);
+            }
+            finally
+            {
+                try
+                {
+                    if (menu is not null)
+                    {
+                        menu.IsOpen = false;
+                    }
+                }
+                finally
+                {
+                    try
+                    {
+                        window?.Close();
+                    }
+                    finally
+                    {
+                        DeleteSettingsDirectory(settingsDirectory);
+                    }
+                }
+            }
+        });
     }
 
     [Fact]
@@ -1098,13 +1119,28 @@ public sealed class WindowShellTests
         RunOnStaThread(() =>
         {
             var settingsDirectory = CreateSettingsDirectory();
-            var window = new MainWindow(
-                PetSettings.Default,
-                new SettingsService(settingsDirectory),
-                null);
+            MainWindow? window = null;
+            try
+            {
+                window = new MainWindow(
+                    PetSettings.Default,
+                    new SettingsService(settingsDirectory),
+                    null,
+                    suppressApplicationShutdownOnClose: true);
 
-            Assert.NotNull(window);
-            DeleteSettingsDirectory(settingsDirectory);
+                Assert.NotNull(window);
+            }
+            finally
+            {
+                try
+                {
+                    window?.Close();
+                }
+                finally
+                {
+                    DeleteSettingsDirectory(settingsDirectory);
+                }
+            }
         });
     }
 
@@ -1509,11 +1545,8 @@ public sealed class WindowShellTests
                 Assert.False(ambientTimer.IsEnabled);
                 Assert.False(bubbleTimer.IsEnabled);
                 Assert.Equal(BubbleCountdownState.Hidden, bubbleCountdown.State);
-                var countdownClosed = typeof(BubbleCountdownController).GetField(
-                    "_closed",
-                    BindingFlags.Instance | BindingFlags.NonPublic);
-                Assert.NotNull(countdownClosed);
-                Assert.True(Assert.IsType<bool>(countdownClosed!.GetValue(bubbleCountdown)));
+                bubbleCountdown.Show();
+                Assert.Equal(BubbleCountdownState.Hidden, bubbleCountdown.State);
                 Assert.False(exit.IsCompleted);
                 Assert.True(duplicateExit.IsCompletedSuccessfully);
 
@@ -2023,15 +2056,122 @@ public sealed class WindowShellTests
             window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
             window.SetTrayAvailability(true);
             var popup = Assert.IsType<Popup>(window.FindName("BubblePopup"));
+            var countdown = GetPrivateField<BubbleCountdownController>(window, "_bubbleCountdown");
+            var animation = GetPrivateField<AnimationController>(window, "_animation");
+            var bubbleTimer = GetPrivateField<DispatcherTimer>(window, "_bubbleTimer");
             Assert.True(popup.IsOpen);
+            Assert.False(animation.IsSuspended);
+            Assert.Equal(BubbleCountdownState.CountingDown, countdown.State);
+            Assert.True(bubbleTimer.IsEnabled);
 
             window.HideToTray();
             Assert.False(popup.IsOpen);
+            Assert.True(animation.IsSuspended);
+            Assert.Equal(BubbleCountdownState.Suspended, countdown.State);
+            Assert.False(bubbleTimer.IsEnabled);
 
             window.ToggleVisibilityFromTray();
             Assert.True(popup.IsOpen);
+            Assert.False(animation.IsSuspended);
+            Assert.Equal(BubbleCountdownState.CountingDown, countdown.State);
+            Assert.True(bubbleTimer.IsEnabled);
             window.Close();
             DeleteSettingsDirectory(settingsDirectory);
+        });
+    }
+
+    [Fact]
+    public void MainWindow_TrayHideSuspendsPresentationSchedulersAndQueuesHiddenSpeech()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var window = CreateWindowWithScheduler(
+                settingsDirectory,
+                new AmbientActionScheduler(() => 0.5));
+            try
+            {
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                window.SetTrayAvailability(true);
+                var popup = Assert.IsType<Popup>(window.FindName("BubblePopup"));
+                var speech = Assert.IsType<TextBlock>(window.FindName("SpeechText"));
+                var countdown = GetPrivateField<BubbleCountdownController>(window, "_bubbleCountdown");
+                var automaticTimer = GetPrivateField<DispatcherTimer>(window, "_automaticTimer");
+                var eventTimer = GetPrivateField<DispatcherTimer>(window, "_eventTimer");
+                var ambientTimer = GetPrivateField<DispatcherTimer>(window, "_ambientTimer");
+
+                Assert.True(automaticTimer.IsEnabled);
+                Assert.True(eventTimer.IsEnabled);
+                Assert.True(ambientTimer.IsEnabled);
+
+                window.HideToTray();
+
+                Assert.False(automaticTimer.IsEnabled);
+                Assert.False(eventTimer.IsEnabled);
+                Assert.False(ambientTimer.IsEnabled);
+                Assert.False(popup.IsOpen);
+
+                InvokePrivate(window, "ShowBubble", "藏起来也别穿帮");
+
+                Assert.False(popup.IsOpen);
+                Assert.Equal("藏起来也别穿帮", speech.Text);
+                Assert.Equal(BubbleCountdownState.Suspended, countdown.State);
+                Assert.False(GetPrivateField<DispatcherTimer>(window, "_bubbleTimer").IsEnabled);
+
+                var hiddenReply = GetLastReply(window);
+                InvokePrivate(window, "AutomaticTimer_Tick", null, EventArgs.Empty);
+                InvokePrivate(window, "EventTimer_Tick", null, EventArgs.Empty);
+                InvokePrivate(window, "AmbientTimer_Tick", null, EventArgs.Empty);
+
+                Assert.Same(hiddenReply, GetLastReply(window));
+                Assert.False(popup.IsOpen);
+                Assert.False(automaticTimer.IsEnabled);
+                Assert.False(eventTimer.IsEnabled);
+                Assert.False(ambientTimer.IsEnabled);
+
+                window.ToggleVisibilityFromTray();
+
+                Assert.True(window.IsVisible);
+                Assert.True(popup.IsOpen);
+                Assert.Equal("藏起来也别穿帮", speech.Text);
+                Assert.Equal(BubbleCountdownState.CountingDown, countdown.State);
+                Assert.True(automaticTimer.IsEnabled);
+                Assert.True(eventTimer.IsEnabled);
+                Assert.True(ambientTimer.IsEnabled);
+            }
+            finally
+            {
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
+    public void MainWindow_TraySayRestoresTheWindowBeforeShowingSpeech()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var window = CreateWindow(settingsDirectory);
+            try
+            {
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                window.SetTrayAvailability(true);
+                window.HideToTray();
+
+                window.SaySomething();
+
+                Assert.True(window.IsVisible);
+                Assert.True(Assert.IsType<Popup>(window.FindName("BubblePopup")).IsOpen);
+            }
+            finally
+            {
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
         });
     }
 
@@ -2160,6 +2300,10 @@ public sealed class WindowShellTests
             Assert.Equal(oldBottom, newBottom, 3);
             window.Close();
         });
+        Assert.True(SpinWait.SpinUntil(
+            () => File.Exists(Path.Combine(settingsDirectory, "settings.json"))
+                  && !HasPendingSettingsWrite(settingsDirectory),
+            TimeSpan.FromSeconds(5)));
         DeleteSettingsDirectory(settingsDirectory);
     }
 
@@ -2231,6 +2375,160 @@ public sealed class WindowShellTests
     }
 
     [Fact]
+    public void MainWindow_ExposesAccessibleNamesAndLiveSpeechStatus()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var window = CreateWindow(settingsDirectory);
+            try
+            {
+                var stage = Assert.IsType<Grid>(window.FindName("CharacterStage"));
+                var speech = Assert.IsType<TextBlock>(window.FindName("SpeechText"));
+                var menu = Assert.IsType<ContextMenu>(window.FindName("ControlMenu"));
+                var say = Assert.IsType<MenuItem>(window.FindName("SayMenuItem"));
+                var hideToTray = Assert.IsType<MenuItem>(window.FindName("HideToTrayMenuItem"));
+
+                Assert.Equal("佳怡桌宠", AutomationProperties.GetName(window));
+                Assert.Equal("佳怡", AutomationProperties.GetName(stage));
+                Assert.True(stage.Focusable);
+                Assert.Contains("右键", AutomationProperties.GetHelpText(stage));
+                InvokePrivate(window, "ShowBubble", "读屏也要听见这句话");
+                Assert.Equal("佳怡说：读屏也要听见这句话", AutomationProperties.GetName(speech));
+                Assert.Equal(AutomationLiveSetting.Polite, AutomationProperties.GetLiveSetting(speech));
+                Assert.Equal("佳怡控制面板", AutomationProperties.GetName(menu));
+                Assert.Contains("佳怡", AutomationProperties.GetHelpText(say));
+                Assert.False(hideToTray.IsEnabled);
+                Assert.Contains("托盘暂时不可用", AutomationProperties.GetHelpText(hideToTray));
+            }
+            finally
+            {
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
+    public void MainWindow_NewVisibleSpeechRaisesTheLiveRegionAnnouncementHook()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var announcements = new List<FrameworkElement>();
+            var window = new MainWindow(new MainWindowDependencies(
+                PetSettings.Default,
+                new SettingsService(settingsDirectory))
+            {
+                SuppressApplicationShutdownOnClose = true,
+                AmbientScheduler = new AmbientActionScheduler(() => 0.5),
+                AutoStartService = DisabledAutoStartService.Instance,
+                DialogueService = new DialogueService(),
+                AnnounceLiveRegionChanged = element => announcements.Add(element)
+            });
+            try
+            {
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                announcements.Clear();
+                var speech = Assert.IsType<TextBlock>(window.FindName("SpeechText"));
+
+                InvokePrivate(window, "ShowBubble", "这句不是摆设");
+
+                Assert.Single(announcements, speech);
+                Assert.Equal("佳怡说：这句不是摆设", AutomationProperties.GetName(speech));
+            }
+            finally
+            {
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
+    public void MainWindow_KeyboardControlMenuRestoresFocusAfterPopupCloses()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var window = CreateWindow(settingsDirectory);
+            ContextMenu? menu = null;
+            try
+            {
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                var stage = Assert.IsType<Grid>(window.FindName("CharacterStage"));
+                menu = Assert.IsType<ContextMenu>(window.FindName("ControlMenu"));
+                var say = Assert.IsType<MenuItem>(window.FindName("SayMenuItem"));
+                var source = PresentationSource.FromVisual(window);
+                Assert.NotNull(source);
+                window.Activate();
+                Assert.True(stage.Focus());
+
+                window.RaiseEvent(new KeyEventArgs(
+                    Keyboard.PrimaryDevice,
+                    source!,
+                    Environment.TickCount,
+                    Key.Apps)
+                {
+                    RoutedEvent = Keyboard.PreviewKeyDownEvent
+                });
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+
+                Assert.True(menu.IsOpen);
+                Assert.True(say.IsKeyboardFocused);
+
+                menu.RaiseEvent(new KeyEventArgs(
+                    Keyboard.PrimaryDevice,
+                    PresentationSource.FromVisual(menu)!,
+                    Environment.TickCount,
+                    Key.Escape)
+                {
+                    RoutedEvent = Keyboard.PreviewKeyDownEvent
+                });
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                Assert.False(menu.IsOpen);
+                Assert.True(stage.IsKeyboardFocused);
+            }
+            finally
+            {
+                if (menu is not null)
+                {
+                    menu.IsOpen = false;
+                }
+
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
+    public void PetTheme_KeepsControlStylesKeyedUntilTheWindowScopesThem()
+    {
+        RunOnStaThread(() =>
+        {
+            var theme = new ResourceDictionary
+            {
+                Source = new Uri(
+                    "/CompanionDesktopPet;component/Themes/PetTheme.xaml",
+                    UriKind.Relative)
+            };
+
+            Assert.False(theme.Contains(typeof(ContextMenu)));
+            Assert.False(theme.Contains(typeof(MenuItem)));
+            Assert.False(theme.Contains(typeof(Separator)));
+            Assert.False(theme.Contains(MenuItem.SeparatorStyleKey));
+            Assert.True(theme.Contains("KawaiiContextMenuStyle"));
+            Assert.True(theme.Contains("KawaiiMenuItemStyle"));
+            Assert.True(theme.Contains("KawaiiSeparatorStyle"));
+            Assert.True(theme.Contains("Pet.Brush.BubbleSurface"));
+            Assert.True(theme.Contains("Pet.Brush.TextPrimary"));
+        });
+    }
+
+    [Fact]
     public void MainWindow_KawaiiContextMenu_PreservesShellAndSubmenuBehavior()
     {
         var settingsDirectory = CreateSettingsDirectory();
@@ -2251,7 +2549,7 @@ public sealed class WindowShellTests
                 Assert.Same(kawaiiStyle, menu.Style);
 
                 var surface = Assert.IsType<LinearGradientBrush>(
-                    window.FindResource("MenuSurfaceBrush"));
+                    window.FindResource("Pet.Brush.MenuSurface"));
                 Assert.Equal(2, surface.GradientStops.Count);
                 Assert.Equal(Color.FromArgb(0xFA, 0xFF, 0xFD, 0xF7), surface.GradientStops[0].Color);
                 Assert.Equal(0, surface.GradientStops[0].Offset);
@@ -2259,7 +2557,7 @@ public sealed class WindowShellTests
                 Assert.Equal(1, surface.GradientStops[1].Offset);
 
                 var separatorBrush = Assert.IsType<LinearGradientBrush>(
-                    window.FindResource("MenuSeparatorBrush"));
+                    window.FindResource("Pet.Brush.MenuSeparator"));
                 Assert.Equal(3, separatorBrush.GradientStops.Count);
                 Assert.Equal(
                     Color.FromArgb(0x00, 0xE9, 0x8F, 0xA4),
@@ -2307,9 +2605,9 @@ public sealed class WindowShellTests
                 Assert.Equal("☁", Assert.IsType<MenuItem>(window.FindName("ExitMenuItem")).Tag);
 
                 var hoverBrush = Assert.IsType<SolidColorBrush>(
-                    window.FindResource("MenuItemHoverBrush"));
+                    window.FindResource("Pet.Brush.MenuItemHover"));
                 var innerHighlightBrush = Assert.IsType<SolidColorBrush>(
-                    window.FindResource("MenuInnerHighlightBrush"));
+                    window.FindResource("Pet.Brush.MenuHighlight"));
                 var hoverTrigger = say.Template.Triggers
                     .OfType<Trigger>()
                     .Single(trigger =>
@@ -2478,89 +2776,63 @@ public sealed class WindowShellTests
     private static MainWindow CreateWindowWithScheduler(
         string settingsDirectory,
         AmbientActionScheduler ambientScheduler,
-        PetSettings? settings = null)
-    {
-        var constructor = typeof(MainWindow).GetConstructor(
-            BindingFlags.Instance | BindingFlags.NonPublic,
-            binder: null,
-            [
-                typeof(PetSettings),
-                typeof(SettingsService),
-                typeof(AgentMemoryService),
-                typeof(AgentMemorySnapshot),
-                typeof(IIdleTimeProvider),
-                typeof(bool),
-                typeof(Action),
-                typeof(AmbientActionScheduler)
-            ],
-            modifiers: null);
-        Assert.NotNull(constructor);
-        return Assert.IsType<MainWindow>(constructor!.Invoke(
-        [
+        PetSettings? settings = null) =>
+        new(new MainWindowDependencies(
             settings ?? PetSettings.Default,
-            new SettingsService(settingsDirectory),
-            null,
-            null,
-            null,
-            true,
-            null,
-            ambientScheduler
-        ]));
-    }
+            new SettingsService(settingsDirectory))
+        {
+            SuppressApplicationShutdownOnClose = true,
+            AmbientScheduler = ambientScheduler
+        });
 
     private static MainWindow CreateWindowWithAutoStart(
         string settingsDirectory,
         IAutoStartService autoStartService,
         bool suppressApplicationShutdownOnClose = true,
         Action? shutdownApplication = null) =>
-        new(
+        new(new MainWindowDependencies(
             PetSettings.Default,
-            new SettingsService(settingsDirectory),
-            null,
-            null,
-            null,
-            suppressApplicationShutdownOnClose,
-            shutdownApplication,
-            new AmbientActionScheduler(() => 0.5),
-            autoStartService);
+            new SettingsService(settingsDirectory))
+        {
+            SuppressApplicationShutdownOnClose = suppressApplicationShutdownOnClose,
+            ShutdownApplication = shutdownApplication,
+            AmbientScheduler = new AmbientActionScheduler(() => 0.5),
+            AutoStartService = autoStartService
+        });
 
     private static MainWindow CreateWindowWithMemoryWriter(
         string settingsDirectory,
         Func<AgentMemorySnapshot, Task> saveAgentMemoryAsync) =>
-        new(
+        new(new MainWindowDependencies(
             PetSettings.Default,
-            new SettingsService(settingsDirectory),
-            null,
-            null,
-            null,
-            suppressApplicationShutdownOnClose: true,
-            shutdownApplication: null,
-            new AmbientActionScheduler(() => 0.5),
-            DisabledAutoStartService.Instance,
-            saveAgentMemoryAsync,
-            saveSettingsAsync: null,
-            new DialogueService(),
-            TimeProvider.System);
+            new SettingsService(settingsDirectory))
+        {
+            SuppressApplicationShutdownOnClose = true,
+            AmbientScheduler = new AmbientActionScheduler(() => 0.5),
+            AutoStartService = DisabledAutoStartService.Instance,
+            SaveAgentMemoryAsync = saveAgentMemoryAsync,
+            DialogueService = new DialogueService(),
+            TimeProvider = TimeProvider.System
+        });
 
     private static MainWindow CreateWindowWithPersistenceWriters(
         string settingsDirectory,
         Func<PetSettings, Task> saveSettingsAsync,
         Func<AgentMemorySnapshot, Task> saveAgentMemoryAsync,
         Action shutdownApplication) =>
-        new(
+        new(new MainWindowDependencies(
             PetSettings.Default,
-            new SettingsService(settingsDirectory),
-            null,
-            null,
-            null,
-            suppressApplicationShutdownOnClose: false,
-            shutdownApplication,
-            new AmbientActionScheduler(() => 0.5),
-            DisabledAutoStartService.Instance,
-            saveAgentMemoryAsync,
-            saveSettingsAsync,
-            new DialogueService(),
-            TimeProvider.System);
+            new SettingsService(settingsDirectory))
+        {
+            SuppressApplicationShutdownOnClose = false,
+            ShutdownApplication = shutdownApplication,
+            AmbientScheduler = new AmbientActionScheduler(() => 0.5),
+            AutoStartService = DisabledAutoStartService.Instance,
+            SaveAgentMemoryAsync = saveAgentMemoryAsync,
+            SaveSettingsAsync = saveSettingsAsync,
+            DialogueService = new DialogueService(),
+            TimeProvider = TimeProvider.System
+        });
 
     private static MainWindow CreateWindowWithDialogue(
         string settingsDirectory,
@@ -2568,21 +2840,18 @@ public sealed class WindowShellTests
         TimeProvider timeProvider,
         Func<AgentMemorySnapshot, Task>? saveAgentMemoryAsync = null,
         DialogueWarmupCoordinator? warmupCoordinator = null) =>
-        new(
+        new(new MainWindowDependencies(
             PetSettings.Default,
-            new SettingsService(settingsDirectory),
-            null,
-            null,
-            null,
-            suppressApplicationShutdownOnClose: true,
-            shutdownApplication: null,
-            new AmbientActionScheduler(() => 0.5),
-            DisabledAutoStartService.Instance,
-            saveAgentMemoryAsync,
-            saveSettingsAsync: null,
-            dialogue,
-            timeProvider,
-            warmupCoordinator);
+            new SettingsService(settingsDirectory))
+        {
+            SuppressApplicationShutdownOnClose = true,
+            AmbientScheduler = new AmbientActionScheduler(() => 0.5),
+            AutoStartService = DisabledAutoStartService.Instance,
+            SaveAgentMemoryAsync = saveAgentMemoryAsync,
+            DialogueService = dialogue,
+            TimeProvider = timeProvider,
+            WarmupCoordinator = warmupCoordinator
+        });
 
     private static object GetPrivateFieldValue(MainWindow window, string fieldName)
     {
@@ -2608,9 +2877,7 @@ public sealed class WindowShellTests
         Func<double> sample,
         TimeProvider timeProvider)
     {
-        return Assert.IsType<AmbientActionScheduler>(Activator.CreateInstance(
-            typeof(AmbientActionScheduler),
-            [sample, timeProvider]));
+        return new AmbientActionScheduler(sample, timeProvider);
     }
 
     private static T GetPrivateField<T>(MainWindow window, string fieldName)
@@ -2854,6 +3121,17 @@ public sealed class WindowShellTests
         }
     }
 
+    private sealed class FixedIdleTimeProvider(TimeSpan value) : IIdleTimeProvider
+    {
+        public TimeSpan LastReturnedValue { get; private set; }
+
+        public TimeSpan? GetIdleTime()
+        {
+            LastReturnedValue = value;
+            return value;
+        }
+    }
+
     private sealed class ControlledMemoryWriter
     {
         private readonly TaskCompletionSource _firstSaveStarted = new(
@@ -2990,10 +3268,6 @@ public sealed class WindowShellTests
 
     private static AgentReply GetLastReply(MainWindow window)
     {
-        var property = typeof(MainWindow).GetProperty(
-            "LastReply",
-            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        Assert.NotNull(property);
-        return Assert.IsType<AgentReply>(property!.GetValue(window));
+        return Assert.IsType<AgentReply>(window.LastReply);
     }
 }

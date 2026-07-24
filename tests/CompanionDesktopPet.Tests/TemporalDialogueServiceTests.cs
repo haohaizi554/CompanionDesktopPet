@@ -129,6 +129,39 @@ public sealed class TemporalDialogueServiceTests
             TemporalDialogueService.GetContextualLines(dateTime));
     }
 
+    [Fact]
+    [Trait("Category", "Performance")]
+    public void GetContextualLines_ReusesAnImmutableBucketForEquivalentContexts()
+    {
+        var first = TemporalDialogueService.GetContextualLines(
+            new DateTime(2026, 7, 22, 20, 0, 0));
+        var second = TemporalDialogueService.GetContextualLines(
+            new DateTime(2026, 7, 29, 20, 45, 0));
+
+        Assert.Same(first, second);
+        var readOnly = Assert.IsAssignableFrom<IList<string>>(first);
+        Assert.True(readOnly.IsReadOnly);
+        Assert.Throws<NotSupportedException>(() => readOnly[0] = "mutated");
+    }
+
+    [Fact]
+    [Trait("Category", "Performance")]
+    public void GetContextualLines_AfterWarmupHasBoundedSteadyStateAllocations()
+    {
+        var dateTime = new DateTime(2026, 7, 22, 20, 0, 0);
+        _ = TemporalDialogueService.GetContextualLines(dateTime);
+        _ = TemporalDialogueService.GetContextualLines(dateTime);
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var iteration = 0; iteration < 64; iteration++)
+        {
+            _ = TemporalDialogueService.GetContextualLines(dateTime);
+        }
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.InRange(allocated, 0, 16 * 1024);
+    }
+
     [Theory]
     [InlineData(4)]
     [InlineData(5)]

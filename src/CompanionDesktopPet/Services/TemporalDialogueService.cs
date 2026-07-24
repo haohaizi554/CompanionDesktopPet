@@ -41,6 +41,11 @@ public static class TemporalDialogueService
             [(9, 9)] = "重阳节",
         };
 
+    private static readonly Lazy<IReadOnlyDictionary<ContextBucket, IReadOnlyList<string>>>
+        ContextualLinesByBucket = new(
+            BuildContextualLinesByBucket,
+            LazyThreadSafetyMode.ExecutionAndPublication);
+
     public static TimePeriod GetTimePeriod(DateTime dateTime) => dateTime.Hour switch
     {
         >= 4 and < 6 => TimePeriod.Dawn,
@@ -51,7 +56,10 @@ public static class TemporalDialogueService
         _ => TimePeriod.LateNight,
     };
 
-    internal static DialogueTrigger GetDialogueTrigger(DateTime dateTime) => GetTimePeriod(dateTime) switch
+    internal static DialogueTrigger GetDialogueTrigger(DateTime dateTime) =>
+        GetDialogueTrigger(GetTimePeriod(dateTime));
+
+    private static DialogueTrigger GetDialogueTrigger(TimePeriod period) => period switch
     {
         TimePeriod.Dawn => DialogueTrigger.LateNight,
         TimePeriod.Morning => DialogueTrigger.Morning,
@@ -61,7 +69,10 @@ public static class TemporalDialogueService
         _ => DialogueTrigger.LateNight
     };
 
-    internal static string GetTimeContextToken(DateTime dateTime) => GetTimePeriod(dateTime) switch
+    internal static string GetTimeContextToken(DateTime dateTime) =>
+        GetTimeContextToken(GetTimePeriod(dateTime));
+
+    private static string GetTimeContextToken(TimePeriod period) => period switch
     {
         TimePeriod.Dawn => "time:dawn",
         TimePeriod.Morning => "time:morning",
@@ -91,27 +102,57 @@ public static class TemporalDialogueService
 
     public static IReadOnlyList<string> GetContextualLines(DateTime dateTime)
     {
-        var periodTrigger = GetDialogueTrigger(dateTime);
+        var period = GetTimePeriod(dateTime);
         var isHoliday = GetFestivals(dateTime).Count > 0;
+        var bucket = new ContextBucket(
+            period,
+            dateTime.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday,
+            isHoliday);
+        return ContextualLinesByBucket.Value[bucket];
+    }
+
+    private static IReadOnlyDictionary<ContextBucket, IReadOnlyList<string>>
+        BuildContextualLinesByBucket()
+    {
+        var buckets = new Dictionary<ContextBucket, IReadOnlyList<string>>();
+        foreach (var period in Enum.GetValues<TimePeriod>())
+        {
+            foreach (var isWeekend in new[] { false, true })
+            {
+                foreach (var isHoliday in new[] { false, true })
+                {
+                    var bucket = new ContextBucket(period, isWeekend, isHoliday);
+                    buckets.Add(bucket, BuildContextualLines(bucket));
+                }
+            }
+        }
+
+        return buckets;
+    }
+
+    private static IReadOnlyList<string> BuildContextualLines(ContextBucket bucket)
+    {
+        var periodTrigger = GetDialogueTrigger(bucket.Period);
         var context = new HashSet<string>(StringComparer.Ordinal)
         {
-            dateTime.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday ? "day:weekend" : "day:weekday",
-            GetTimeContextToken(dateTime)
+            bucket.IsWeekend ? "day:weekend" : "day:weekday",
+            GetTimeContextToken(bucket.Period)
         };
-        if (isHoliday)
+        if (bucket.IsHoliday)
         {
             context.Add("holiday");
             context.Add("date:holiday");
         }
 
-        return PersonaCorpus.All
+        var lines = PersonaCorpus.All
             .Where(line => line.Trigger == DialogueTrigger.Any
                            || line.Trigger == periodTrigger
-                           || (isHoliday && line.Trigger == DialogueTrigger.Holiday))
+                           || (bucket.IsHoliday && line.Trigger == DialogueTrigger.Holiday))
             .Where(line => line.RequiredContext.Count == 1 && line.RequiredContext[0] == "none"
                            || line.RequiredContext.All(context.Contains))
             .Select(line => line.Text)
             .ToArray();
+        return Array.AsReadOnly(lines);
     }
 
     private static void AddLunarFestival(DateTime dateTime, ICollection<string> festivals)
@@ -142,4 +183,9 @@ public static class TemporalDialogueService
             festivals.Add(lunarFestival);
         }
     }
+
+    private readonly record struct ContextBucket(
+        TimePeriod Period,
+        bool IsWeekend,
+        bool IsHoliday);
 }

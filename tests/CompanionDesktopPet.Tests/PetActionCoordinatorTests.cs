@@ -43,4 +43,34 @@ public sealed class PetActionCoordinatorTests
         coordinator.Resume();
         Assert.Equal(PetActionState.Idle, coordinator.State);
     }
+
+    [Fact]
+    public void ResumeDuringDrag_ClearsThePausedLandingDestination()
+    {
+        var coordinator = new PetActionCoordinator();
+
+        coordinator.Pause();
+        coordinator.BeginDrag();
+        coordinator.Resume();
+
+        Assert.Equal(PetActionState.Dragging, coordinator.State);
+        coordinator.BeginLanding();
+        coordinator.Complete(PetActionState.Landing);
+
+        Assert.Equal(PetActionState.Idle, coordinator.State);
+    }
+
+    [Fact]
+    public void RepeatedBeginDrag_DoesNotLoseThePausedLandingDestination()
+    {
+        var coordinator = new PetActionCoordinator();
+
+        coordinator.Pause();
+        coordinator.BeginDrag();
+        coordinator.BeginDrag();
+        coordinator.BeginLanding();
+        coordinator.Complete(PetActionState.Landing);
+
+        Assert.Equal(PetActionState.Paused, coordinator.State);
+    }
 }

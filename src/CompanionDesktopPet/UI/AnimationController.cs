@@ -10,7 +10,7 @@ public enum ClickSide
     Right
 }
 
-public sealed class AnimationController
+public sealed class AnimationController : IDisposable
 {
     private readonly ScaleTransform breathingScale;
     private readonly RotateTransform swayRotation;
@@ -21,11 +21,12 @@ public sealed class AnimationController
     private readonly RotateTransform actionRotation;
     private readonly TranslateTransform actionOffset;
     private readonly IReadOnlyList<FrameworkElement> hearts;
-    private readonly List<AnimationClock> _idleClocks = [];
+    private readonly List<AppliedAnimation> _activeAnimations = [];
     private readonly FrameworkElement _blinkOverlay;
     private readonly FrameworkElement _greetingBadge;
     private readonly TranslateTransform _greetingBadgeOffset;
     private bool _started;
+    private bool _disposed;
     private int _ambientAnimationVersion;
 
     public AnimationController(
@@ -83,15 +84,19 @@ public sealed class AnimationController
     }
 
     public bool IsPaused { get; private set; }
+    public bool IsSuspended { get; private set; }
+    internal int ActiveClockCount => _activeAnimations.Count;
+    internal IReadOnlyList<AnimationClock> ActiveClocks =>
+        _activeAnimations.Select(animation => animation.Clock).ToArray();
 
     public void StartIdle()
     {
-        foreach (var clock in _idleClocks)
+        if (_disposed)
         {
-            clock.Controller?.Remove();
+            return;
         }
 
-        _idleClocks.Clear();
+        RemoveIdleAnimations();
         ApplyIdle(breathingScale, ScaleTransform.ScaleXProperty, 1.0, 1.015, 2.0);
         ApplyIdle(breathingScale, ScaleTransform.ScaleYProperty, 0.985, 1.015, 2.0);
         ApplyIdle(swayRotation, RotateTransform.AngleProperty, -1.2, 1.2, 3.0);
@@ -102,9 +107,14 @@ public sealed class AnimationController
 
     public void PauseIdle()
     {
-        foreach (var clock in _idleClocks)
+        if (_disposed)
         {
-            clock.Controller?.Pause();
+            return;
+        }
+
+        foreach (var animation in _activeAnimations.Where(animation => animation.IsIdle))
+        {
+            animation.Clock.Controller?.Pause();
         }
 
         IsPaused = true;
@@ -112,15 +122,23 @@ public sealed class AnimationController
 
     public void ResumeIdle()
     {
+        if (_disposed)
+        {
+            return;
+        }
+
         if (!_started)
         {
             StartIdle();
             return;
         }
 
-        foreach (var clock in _idleClocks)
+        foreach (var animation in _activeAnimations.Where(animation => animation.IsIdle))
         {
-            clock.Controller?.Resume();
+            if (!IsSuspended)
+            {
+                animation.Clock.Controller?.Resume();
+            }
         }
 
         IsPaused = false;
@@ -130,6 +148,11 @@ public sealed class AnimationController
 
     public void PlayClickReaction(ClickSide clickSide)
     {
+        if (_disposed)
+        {
+            return;
+        }
+
         ApplyReaction(reactionScale, ScaleTransform.ScaleXProperty, 1.0, 1.06);
         ApplyReaction(reactionScale, ScaleTransform.ScaleYProperty, 1.0, 0.94);
         var targetAngle = clickSide switch
@@ -138,7 +161,7 @@ public sealed class AnimationController
             ClickSide.Right => -2.2,
             _ => throw new ArgumentOutOfRangeException(nameof(clickSide))
         };
-        reactionRotation.BeginAnimation(RotateTransform.AngleProperty, null);
+        RemoveAnimation(reactionRotation, RotateTransform.AngleProperty);
         reactionRotation.Angle = 0;
         ApplyReaction(reactionRotation, RotateTransform.AngleProperty, 0.0, targetAngle);
         PlayHearts();
@@ -146,7 +169,12 @@ public sealed class AnimationController
 
     public void SetDragLean(double horizontalDelta)
     {
-        actionRotation.BeginAnimation(RotateTransform.AngleProperty, null);
+        if (_disposed)
+        {
+            return;
+        }
+
+        RemoveAnimation(actionRotation, RotateTransform.AngleProperty);
         actionRotation.Angle = Math.Clamp(horizontalDelta * 0.12, -8, 8);
     }
 
@@ -154,7 +182,12 @@ public sealed class AnimationController
 
     public void PlayLanding(Action? completed)
     {
-        actionRotation.BeginAnimation(RotateTransform.AngleProperty, null);
+        if (_disposed)
+        {
+            return;
+        }
+
+        RemoveAnimation(actionRotation, RotateTransform.AngleProperty);
         var initialAngle = actionRotation.Angle;
         CancelAmbientAction();
         var version = _ambientAnimationVersion;
@@ -174,11 +207,12 @@ public sealed class AnimationController
             (150, 6),
             (320, -2.5),
             (520, 0));
-        landingOffset.Completed += (_, _) => CompleteAction(version, completed);
-        actionOffset.BeginAnimation(
+        ApplyAnimation(
+            actionOffset,
             TranslateTransform.YProperty,
             landingOffset,
-            HandoffBehavior.SnapshotAndReplace);
+            isIdle: false,
+            () => CompleteAction(version, completed));
         BeginFrames(
             actionScale,
             ScaleTransform.ScaleYProperty,
@@ -192,6 +226,11 @@ public sealed class AnimationController
     public void PlayBlink(bool doubleBlink, Action completed)
     {
         ArgumentNullException.ThrowIfNull(completed);
+        if (_disposed)
+        {
+            return;
+        }
+
         CancelAmbientAction();
         var version = _ambientAnimationVersion;
         var frames = doubleBlink
@@ -205,16 +244,22 @@ public sealed class AnimationController
                 (0, 0), (95, 1), (150, 1), (300, 0)
             };
         var blink = CreateBoundedFrames(frames[^1].Milliseconds, frames);
-        blink.Completed += (_, _) => CompleteBlink(version, completed);
-        _blinkOverlay.BeginAnimation(
+        ApplyAnimation(
+            _blinkOverlay,
             UIElement.OpacityProperty,
             blink,
-            HandoffBehavior.SnapshotAndReplace);
+            isIdle: false,
+            () => CompleteBlink(version, completed));
     }
 
     public void PlayGreeting(Action completed)
     {
         ArgumentNullException.ThrowIfNull(completed);
+        if (_disposed)
+        {
+            return;
+        }
+
         CancelAmbientAction();
         var version = _ambientAnimationVersion;
 
@@ -233,11 +278,12 @@ public sealed class AnimationController
             (360, -4.0),
             (760, -2.0),
             (1100, 0));
-        greetingOffset.Completed += (_, _) => CompleteAction(version, completed);
-        actionOffset.BeginAnimation(
+        ApplyAnimation(
+            actionOffset,
             TranslateTransform.YProperty,
             greetingOffset,
-            HandoffBehavior.SnapshotAndReplace);
+            isIdle: false,
+            () => CompleteAction(version, completed));
         BeginBoundedFrames(
             actionScale,
             ScaleTransform.ScaleYProperty,
@@ -265,11 +311,21 @@ public sealed class AnimationController
 
     public void CancelAmbientAction()
     {
+        if (_disposed)
+        {
+            return;
+        }
+
+        CancelAmbientActionCore();
+    }
+
+    private void CancelAmbientActionCore()
+    {
         _ambientAnimationVersion++;
-        _blinkOverlay.BeginAnimation(UIElement.OpacityProperty, null);
-        _greetingBadge.BeginAnimation(UIElement.OpacityProperty, null);
-        _greetingBadgeOffset.BeginAnimation(TranslateTransform.XProperty, null);
-        _greetingBadgeOffset.BeginAnimation(TranslateTransform.YProperty, null);
+        RemoveAnimation(_blinkOverlay, UIElement.OpacityProperty);
+        RemoveAnimation(_greetingBadge, UIElement.OpacityProperty);
+        RemoveAnimation(_greetingBadgeOffset, TranslateTransform.XProperty);
+        RemoveAnimation(_greetingBadgeOffset, TranslateTransform.YProperty);
         _blinkOverlay.Opacity = 0;
         _greetingBadge.Opacity = 0;
         _greetingBadgeOffset.X = 0;
@@ -285,7 +341,7 @@ public sealed class AnimationController
         }
 
         _ambientAnimationVersion++;
-        _blinkOverlay.BeginAnimation(UIElement.OpacityProperty, null);
+        RemoveAnimation(_blinkOverlay, UIElement.OpacityProperty);
         _blinkOverlay.Opacity = 0;
         completed();
     }
@@ -299,9 +355,9 @@ public sealed class AnimationController
 
         _ambientAnimationVersion++;
         ResetActionBase();
-        _greetingBadge.BeginAnimation(UIElement.OpacityProperty, null);
-        _greetingBadgeOffset.BeginAnimation(TranslateTransform.XProperty, null);
-        _greetingBadgeOffset.BeginAnimation(TranslateTransform.YProperty, null);
+        RemoveAnimation(_greetingBadge, UIElement.OpacityProperty);
+        RemoveAnimation(_greetingBadgeOffset, TranslateTransform.XProperty);
+        RemoveAnimation(_greetingBadgeOffset, TranslateTransform.YProperty);
         _greetingBadge.Opacity = 0;
         _greetingBadgeOffset.X = 0;
         _greetingBadgeOffset.Y = 8;
@@ -313,7 +369,7 @@ public sealed class AnimationController
         for (var index = 0; index < hearts.Count; index++)
         {
             var heart = hearts[index];
-            heart.BeginAnimation(UIElement.OpacityProperty, null);
+            RemoveAnimation(heart, UIElement.OpacityProperty);
             heart.Opacity = 0;
             var translate = heart.RenderTransform as TranslateTransform;
             if (translate is null)
@@ -322,10 +378,11 @@ public sealed class AnimationController
                 heart.RenderTransform = translate;
             }
 
-            translate.BeginAnimation(TranslateTransform.YProperty, null);
+            RemoveAnimation(translate, TranslateTransform.YProperty);
             translate.Y = 0;
             var delay = TimeSpan.FromMilliseconds(index * 55);
-            heart.BeginAnimation(
+            ApplyAnimation(
+                heart,
                 UIElement.OpacityProperty,
                 new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(120))
                 {
@@ -335,8 +392,9 @@ public sealed class AnimationController
                     FillBehavior = FillBehavior.Stop,
                     EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
                 },
-                HandoffBehavior.SnapshotAndReplace);
-            translate.BeginAnimation(
+                isIdle: false);
+            ApplyAnimation(
+                translate,
                 TranslateTransform.YProperty,
                 new DoubleAnimation(8, -45 - (index * 7), TimeSpan.FromMilliseconds(620))
                 {
@@ -344,22 +402,181 @@ public sealed class AnimationController
                     FillBehavior = FillBehavior.Stop,
                     EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
                 },
-                HandoffBehavior.SnapshotAndReplace);
+                isIdle: false);
         }
     }
 
     private void ResetActionBase()
     {
-        actionScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
-        actionScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
-        actionRotation.BeginAnimation(RotateTransform.AngleProperty, null);
-        actionOffset.BeginAnimation(TranslateTransform.XProperty, null);
-        actionOffset.BeginAnimation(TranslateTransform.YProperty, null);
+        RemoveAnimation(actionScale, ScaleTransform.ScaleXProperty);
+        RemoveAnimation(actionScale, ScaleTransform.ScaleYProperty);
+        RemoveAnimation(actionRotation, RotateTransform.AngleProperty);
+        RemoveAnimation(actionOffset, TranslateTransform.XProperty);
+        RemoveAnimation(actionOffset, TranslateTransform.YProperty);
         actionScale.ScaleX = 1;
         actionScale.ScaleY = 1;
         actionRotation.Angle = 0;
         actionOffset.X = 0;
         actionOffset.Y = 0;
+    }
+
+    public void Suspend()
+    {
+        if (_disposed || IsSuspended)
+        {
+            return;
+        }
+
+        IsSuspended = true;
+        foreach (var animation in _activeAnimations)
+        {
+            animation.Clock.Controller?.Pause();
+        }
+    }
+
+    public void Resume()
+    {
+        if (_disposed || !IsSuspended)
+        {
+            return;
+        }
+
+        IsSuspended = false;
+        foreach (var animation in _activeAnimations)
+        {
+            if (!animation.IsIdle || !IsPaused)
+            {
+                animation.Clock.Controller?.Resume();
+            }
+        }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _ambientAnimationVersion++;
+        foreach (var animation in _activeAnimations.ToArray())
+        {
+            RemoveAnimation(animation);
+        }
+
+        _started = false;
+        IsPaused = true;
+        IsSuspended = false;
+        _blinkOverlay.Opacity = 0;
+        _greetingBadge.Opacity = 0;
+        _greetingBadgeOffset.X = 0;
+        _greetingBadgeOffset.Y = 8;
+        actionScale.ScaleX = 1;
+        actionScale.ScaleY = 1;
+        actionRotation.Angle = 0;
+        actionOffset.X = 0;
+        actionOffset.Y = 0;
+        reactionScale.ScaleX = 1;
+        reactionScale.ScaleY = 1;
+        reactionRotation.Angle = 0;
+        foreach (var heart in hearts)
+        {
+            heart.Opacity = 0;
+            if (heart.RenderTransform is TranslateTransform translate)
+            {
+                translate.Y = 0;
+            }
+        }
+    }
+
+    private void ApplyAnimation(
+        IAnimatable target,
+        DependencyProperty property,
+        AnimationTimeline animation,
+        bool isIdle,
+        Action? completed = null)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        RemoveAnimation(target, property);
+        var clock = (AnimationClock)animation.CreateClock(true);
+        var applied = new AppliedAnimation(target, property, clock, isIdle);
+        if (!isIdle)
+        {
+            applied.CompletedHandler = (_, _) =>
+            {
+                if (!RemoveAnimation(applied) || _disposed)
+                {
+                    return;
+                }
+
+                completed?.Invoke();
+            };
+            clock.Completed += applied.CompletedHandler;
+        }
+
+        _activeAnimations.Add(applied);
+        try
+        {
+            target.ApplyAnimationClock(
+                property,
+                clock,
+                HandoffBehavior.SnapshotAndReplace);
+            if (IsSuspended || (isIdle && IsPaused))
+            {
+                clock.Controller?.Pause();
+            }
+        }
+        catch
+        {
+            RemoveAnimation(applied);
+            throw;
+        }
+    }
+
+    private void RemoveIdleAnimations()
+    {
+        foreach (var animation in _activeAnimations
+                     .Where(animation => animation.IsIdle)
+                     .ToArray())
+        {
+            RemoveAnimation(animation);
+        }
+    }
+
+    private void RemoveAnimation(IAnimatable target, DependencyProperty property)
+    {
+        var animation = _activeAnimations.LastOrDefault(candidate =>
+            ReferenceEquals(candidate.Target, target)
+            && candidate.Property == property);
+        if (animation is not null)
+        {
+            RemoveAnimation(animation);
+            return;
+        }
+
+        target.BeginAnimation(property, null);
+    }
+
+    private bool RemoveAnimation(AppliedAnimation animation)
+    {
+        if (!_activeAnimations.Remove(animation))
+        {
+            return false;
+        }
+
+        if (animation.CompletedHandler is not null)
+        {
+            animation.Clock.Completed -= animation.CompletedHandler;
+        }
+
+        animation.Clock.Controller?.Remove();
+        animation.Target.BeginAnimation(animation.Property, null);
+        return true;
     }
 
     private void ApplyIdle(
@@ -375,12 +592,10 @@ public sealed class AnimationController
             RepeatBehavior = RepeatBehavior.Forever,
             EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseInOut }
         };
-        var clock = animation.CreateClock();
-        target.ApplyAnimationClock(property, clock, HandoffBehavior.SnapshotAndReplace);
-        _idleClocks.Add(clock);
+        ApplyAnimation(target, property, animation, isIdle: true);
     }
 
-    private static void ApplyReaction(
+    private void ApplyReaction(
         Animatable target,
         DependencyProperty property,
         double from,
@@ -392,39 +607,41 @@ public sealed class AnimationController
             FillBehavior = FillBehavior.Stop,
             EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
         };
-        target.BeginAnimation(property, animation, HandoffBehavior.SnapshotAndReplace);
+        ApplyAnimation(target, property, animation, isIdle: false);
     }
 
-    private static void BeginFrames(
+    private void BeginFrames(
         IAnimatable target,
         DependencyProperty property,
         int durationMilliseconds,
         params (int Milliseconds, double Value)[] frames) =>
         BeginFrames(target, property, durationMilliseconds, frames, false);
 
-    private static void BeginFrames(
+    private void BeginFrames(
         IAnimatable target,
         DependencyProperty property,
         int durationMilliseconds,
         (int Milliseconds, double Value)[] frames,
         bool discrete)
     {
-        target.BeginAnimation(
+        ApplyAnimation(
+            target,
             property,
             CreateFrames(durationMilliseconds, discrete, frames),
-            HandoffBehavior.SnapshotAndReplace);
+            isIdle: false);
     }
 
-    private static void BeginBoundedFrames(
+    private void BeginBoundedFrames(
         IAnimatable target,
         DependencyProperty property,
         int durationMilliseconds,
         params (int Milliseconds, double Value)[] frames)
     {
-        target.BeginAnimation(
+        ApplyAnimation(
+            target,
             property,
             CreateBoundedFrames(durationMilliseconds, frames),
-            HandoffBehavior.SnapshotAndReplace);
+            isIdle: false);
     }
 
     private static DoubleAnimationUsingKeyFrames CreateBoundedFrames(
@@ -470,6 +687,19 @@ public sealed class AnimationController
         }
 
         return animation;
+    }
+
+    private sealed class AppliedAnimation(
+        IAnimatable target,
+        DependencyProperty property,
+        AnimationClock clock,
+        bool isIdle)
+    {
+        public IAnimatable Target { get; } = target;
+        public DependencyProperty Property { get; } = property;
+        public AnimationClock Clock { get; } = clock;
+        public bool IsIdle { get; } = isIdle;
+        public EventHandler? CompletedHandler { get; set; }
     }
 
 }

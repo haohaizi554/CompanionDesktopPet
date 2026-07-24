@@ -754,7 +754,7 @@ public sealed class SceneScheduler
         return scene.RequiredContext.All(tokens.Contains);
     }
 
-    private static HashSet<string> ContextTokens(SceneContext context)
+    internal static HashSet<string> ContextTokens(SceneContext context)
     {
         var now = context.Now;
         var tokens = new HashSet<string>(StringComparer.Ordinal)

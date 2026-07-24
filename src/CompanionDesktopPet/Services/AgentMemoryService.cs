@@ -31,6 +31,10 @@ public sealed class AgentMemoryService
         }
     };
 
+    private static readonly Lazy<RuntimeCatalogIndex> CatalogIndex = new(
+        BuildCatalogIndex,
+        LazyThreadSafetyMode.ExecutionAndPublication);
+
     private readonly string _directory;
 
     private string MemoryPath => Path.Combine(_directory, "agent-memory.json");
@@ -97,18 +101,11 @@ public sealed class AgentMemoryService
 
         try
         {
-            var scenes = SceneCatalog.All.ToDictionary(scene => scene.Id, StringComparer.Ordinal);
-            var knownLines = scenes.Values
-                .SelectMany(scene => scene.Lines)
-                .GroupBy(line => line.Id, StringComparer.Ordinal)
-                .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
-            var knownTexts = knownLines.Values
-                .Select(line => line.Text)
-                .ToHashSet(StringComparer.Ordinal);
+            var index = CatalogIndex.Value;
 
-            return HasValidStoryCatalogReferences(snapshot!.State)
-                   && snapshot.History.All(entry => IsValidHistory(entry, scenes))
-                   && snapshot.RecentLines.All(knownTexts.Contains);
+            return HasValidStoryCatalogReferences(snapshot!.State, index.StoryNodeCounts)
+                   && snapshot.History.All(entry => IsValidHistory(entry, index.Scenes))
+                   && snapshot.RecentLines.All(index.KnownTexts.Contains);
         }
         catch (Exception exception) when (
             exception is InvalidOperationException
@@ -126,22 +123,17 @@ public sealed class AgentMemoryService
             return null;
         }
 
-        var scenes = SceneCatalog.All.ToDictionary(scene => scene.Id, StringComparer.Ordinal);
-        var knownTexts = scenes.Values
-            .SelectMany(scene => scene.Lines)
-            .Select(line => line.Text)
-            .ToHashSet(StringComparer.Ordinal);
-        var arcs = StoryArcCatalog.All.ToDictionary(arc => arc.Id, StringComparer.Ordinal);
+        var index = CatalogIndex.Value;
         var history = snapshot!.History
-            .Where(entry => IsValidHistory(entry, scenes))
+            .Where(entry => IsValidHistory(entry, index.Scenes))
             .ToArray();
         var recentLines = history.Length == 0
             ? []
-            : snapshot.RecentLines.Where(knownTexts.Contains).ToArray();
+            : snapshot.RecentLines.Where(index.KnownTexts.Contains).ToArray();
         var state = snapshot.State.Clone();
         state.ActiveStories = snapshot.State.ActiveStories
-            .Where(story => arcs.TryGetValue(story.ArcId, out var arc)
-                            && story.NodeIndex < arc.Nodes.Count)
+            .Where(story => index.StoryNodeCounts.TryGetValue(story.ArcId, out var nodeCount)
+                            && story.NodeIndex < nodeCount)
             .ToList();
         return new AgentMemorySnapshot(
             state,
@@ -208,17 +200,18 @@ public sealed class AgentMemoryService
         return true;
     }
 
-    private static bool HasValidStoryCatalogReferences(CharacterState state)
+    private static bool HasValidStoryCatalogReferences(
+        CharacterState state,
+        IReadOnlyDictionary<string, int> storyNodeCounts)
     {
-        var arcs = StoryArcCatalog.All.ToDictionary(arc => arc.Id, StringComparer.Ordinal);
-        if (state.ActiveStories.Count > arcs.Count)
+        if (state.ActiveStories.Count > storyNodeCounts.Count)
         {
             return false;
         }
 
         return state.ActiveStories.All(story =>
-            arcs.TryGetValue(story.ArcId, out var arc)
-            && story.NodeIndex < arc.Nodes.Count);
+            storyNodeCounts.TryGetValue(story.ArcId, out var nodeCount)
+            && story.NodeIndex < nodeCount);
     }
 
     private static bool IsStructurallyValidHistory(SceneHistoryEntry? entry) =>
@@ -238,17 +231,16 @@ public sealed class AgentMemoryService
 
     private static bool IsValidHistory(
         SceneHistoryEntry? entry,
-        IReadOnlyDictionary<string, SceneDefinition> scenes)
+        IReadOnlyDictionary<string, IndexedScene> scenes)
     {
-        if (entry is null || !scenes.TryGetValue(entry.SceneId, out var scene))
+        if (entry is null
+            || !scenes.TryGetValue(entry.SceneId, out var scene)
+            || !scene.Lines.TryGetValue(entry.DialogueLineId, out var line))
         {
             return false;
         }
 
-        var line = scene.Lines.FirstOrDefault(
-            candidate => candidate.Id == entry.DialogueLineId);
-        return line is not null
-               && entry.SemanticGroup == scene.SemanticGroup
+        return entry.SemanticGroup == scene.SemanticGroup
                && entry.SemanticGroup == line.SemanticGroup
                && entry.Variant == line.Text
                && entry.Category == line.Category
@@ -257,6 +249,37 @@ public sealed class AgentMemoryService
                && entry.DialogueTrigger == line.Trigger
                && entry.InterruptionCost == line.InterruptionCost;
     }
+
+    private static RuntimeCatalogIndex BuildCatalogIndex()
+    {
+        var scenes = SceneCatalog.All.ToDictionary(
+            scene => scene.Id,
+            scene => new IndexedScene(
+                scene.SemanticGroup,
+                scene.Lines.ToDictionary(line => line.Id, StringComparer.Ordinal)),
+            StringComparer.Ordinal);
+        var knownLines = scenes.Values
+            .SelectMany(scene => scene.Lines.Values)
+            .GroupBy(line => line.Id, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+        var knownTexts = knownLines.Values
+            .Select(line => line.Text)
+            .ToHashSet(StringComparer.Ordinal);
+        var storyNodeCounts = StoryArcCatalog.All.ToDictionary(
+            arc => arc.Id,
+            arc => arc.Nodes.Count,
+            StringComparer.Ordinal);
+        return new RuntimeCatalogIndex(scenes, knownTexts, storyNodeCounts);
+    }
+
+    private sealed record IndexedScene(
+        string SemanticGroup,
+        IReadOnlyDictionary<string, DialogueLine> Lines);
+
+    private sealed record RuntimeCatalogIndex(
+        IReadOnlyDictionary<string, IndexedScene> Scenes,
+        IReadOnlySet<string> KnownTexts,
+        IReadOnlyDictionary<string, int> StoryNodeCounts);
 
     private static bool IsUnitInterval(double value) =>
         double.IsFinite(value) && value is >= 0 and <= 1;

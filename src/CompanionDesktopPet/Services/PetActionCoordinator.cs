@@ -23,6 +23,11 @@ public sealed class PetActionCoordinator
 
     public void BeginDrag()
     {
+        if (State == PetActionState.Dragging)
+        {
+            return;
+        }
+
         _returnToPaused = State == PetActionState.Paused;
         State = PetActionState.Dragging;
     }
@@ -42,6 +47,11 @@ public sealed class PetActionCoordinator
         if (State == PetActionState.Paused)
         {
             State = PetActionState.Idle;
+        }
+
+        if (State is PetActionState.Dragging or PetActionState.Landing)
+        {
+            _returnToPaused = false;
         }
     }
 

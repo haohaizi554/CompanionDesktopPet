@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Threading;
 using CompanionDesktopPet.Models;
 using CompanionDesktopPet.Services;
+using CompanionDesktopPet.UI;
 
 namespace CompanionDesktopPet.Tests;
 
@@ -73,16 +74,14 @@ public sealed class AppLifecycleTests
             using var primary = new SingleInstanceGuard(name);
             using var duplicate = new SingleInstanceGuard(name);
             var exiting = false;
-            var window = new MainWindow(
+            var window = new MainWindow(new MainWindowDependencies(
                 PetSettings.Default,
-                new SettingsService(directory),
-                null,
-                null,
-                idleTimeProvider: null,
-                suppressApplicationShutdownOnClose: true,
-                shutdownApplication: null,
-                new AmbientActionScheduler(() => 0.5),
-                DisabledAutoStartService.Instance);
+                new SettingsService(directory))
+            {
+                SuppressApplicationShutdownOnClose = true,
+                AmbientScheduler = new AmbientActionScheduler(() => 0.5),
+                AutoStartService = DisabledAutoStartService.Instance
+            });
             try
             {
                 window.Show();
@@ -123,16 +122,14 @@ public sealed class AppLifecycleTests
         RunOnStaThread(() =>
         {
             var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
-            var window = new MainWindow(
+            var window = new MainWindow(new MainWindowDependencies(
                 PetSettings.Default,
-                new SettingsService(directory),
-                null,
-                null,
-                idleTimeProvider: null,
-                suppressApplicationShutdownOnClose: true,
-                shutdownApplication: null,
-                new AmbientActionScheduler(() => 0.5),
-                DisabledAutoStartService.Instance);
+                new SettingsService(directory))
+            {
+                SuppressApplicationShutdownOnClose = true,
+                AmbientScheduler = new AmbientActionScheduler(() => 0.5),
+                AutoStartService = DisabledAutoStartService.Instance
+            });
             var trayFactoryCalls = 0;
             try
             {
@@ -180,16 +177,14 @@ public sealed class AppLifecycleTests
         RunOnStaThread(() =>
         {
             var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
-            var window = new MainWindow(
+            var window = new MainWindow(new MainWindowDependencies(
                 PetSettings.Default,
-                new SettingsService(directory),
-                null,
-                null,
-                idleTimeProvider: null,
-                suppressApplicationShutdownOnClose: true,
-                shutdownApplication: null,
-                new AmbientActionScheduler(() => 0.5),
-                DisabledAutoStartService.Instance);
+                new SettingsService(directory))
+            {
+                SuppressApplicationShutdownOnClose = true,
+                AmbientScheduler = new AmbientActionScheduler(() => 0.5),
+                AutoStartService = DisabledAutoStartService.Instance
+            });
             var trayFactoryCalls = 0;
             try
             {
@@ -228,16 +223,14 @@ public sealed class AppLifecycleTests
         RunOnStaThread(() =>
         {
             var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
-            var window = new MainWindow(
+            var window = new MainWindow(new MainWindowDependencies(
                 PetSettings.Default,
-                new SettingsService(directory),
-                null,
-                null,
-                idleTimeProvider: null,
-                suppressApplicationShutdownOnClose: true,
-                shutdownApplication: null,
-                new AmbientActionScheduler(() => 0.5),
-                DisabledAutoStartService.Instance);
+                new SettingsService(directory))
+            {
+                SuppressApplicationShutdownOnClose = true,
+                AmbientScheduler = new AmbientActionScheduler(() => 0.5),
+                AutoStartService = DisabledAutoStartService.Instance
+            });
             try
             {
                 window.Show();

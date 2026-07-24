@@ -4,6 +4,7 @@ using System.IO;
 
 namespace CompanionDesktopPet.Tests;
 
+[Collection(PerformanceTestCollection.Name)]
 public sealed class OfflineCompanionAgentTests
 {
     [Fact]
@@ -219,6 +220,7 @@ public sealed class OfflineCompanionAgentTests
     }
 
     [Fact]
+    [Trait("Category", "Performance")]
     public void Respond_RepeatedClicksDoNotBecomePermanentlySilent()
     {
         // Startup owns corpus/catalog materialization; this gate measures the

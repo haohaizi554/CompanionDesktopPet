@@ -68,7 +68,9 @@ public sealed class TrayIconService : IDisposable
     private readonly ITrayShellIcon _notifyIcon;
     private readonly Forms.ContextMenuStrip _contextMenu;
     private readonly Icon _ownedIcon;
+    private readonly List<Action> _unsubscribeActions = [];
     private bool _disposed;
+    private bool _nativeResourcesDisposed;
     private bool _exitRequested;
     private bool _iconPublished;
 
@@ -179,19 +181,33 @@ public sealed class TrayIconService : IDisposable
                 ExitMenuItem
             ]);
 
-            ShowHideMenuItem.Click += (_, _) => Dispatch(toggleVisibility);
-            SayMenuItem.Click += (_, _) => Dispatch(say);
-            PauseMenuItem.Click += (_, _) => Dispatch(togglePause);
-            AutoStartMenuItem.Click += (_, _) => Dispatch(toggleAutoStart);
-            ExitMenuItem.Click += (_, _) => DispatchExit(exit);
-            contextMenu.Opening += (_, _) => RefreshMenu();
+            EventHandler showHideClick = (_, _) => Dispatch(toggleVisibility);
+            ShowHideMenuItem.Click += showHideClick;
+            _unsubscribeActions.Add(() => ShowHideMenuItem.Click -= showHideClick);
+            EventHandler sayClick = (_, _) => Dispatch(say);
+            SayMenuItem.Click += sayClick;
+            _unsubscribeActions.Add(() => SayMenuItem.Click -= sayClick);
+            EventHandler pauseClick = (_, _) => Dispatch(togglePause);
+            PauseMenuItem.Click += pauseClick;
+            _unsubscribeActions.Add(() => PauseMenuItem.Click -= pauseClick);
+            EventHandler autoStartClick = (_, _) => Dispatch(toggleAutoStart);
+            AutoStartMenuItem.Click += autoStartClick;
+            _unsubscribeActions.Add(() => AutoStartMenuItem.Click -= autoStartClick);
+            EventHandler exitClick = (_, _) => DispatchExit(exit);
+            ExitMenuItem.Click += exitClick;
+            _unsubscribeActions.Add(() => ExitMenuItem.Click -= exitClick);
+            System.ComponentModel.CancelEventHandler menuOpening = (_, _) => RefreshMenu();
+            contextMenu.Opening += menuOpening;
+            _unsubscribeActions.Add(() => contextMenu.Opening -= menuOpening);
 
             notifyIcon = createNotifyIcon()
                 ?? throw new InvalidOperationException("The tray icon factory returned null.");
             notifyIcon.Icon = ownedIcon;
             notifyIcon.Text = "佳怡桌宠";
             notifyIcon.ContextMenuStrip = contextMenu;
-            notifyIcon.DoubleClick += (_, _) => Dispatch(toggleVisibility);
+            EventHandler doubleClick = (_, _) => Dispatch(toggleVisibility);
+            notifyIcon.DoubleClick += doubleClick;
+            _unsubscribeActions.Add(() => notifyIcon.DoubleClick -= doubleClick);
 
             _ownedIcon = ownedIcon;
             _contextMenu = contextMenu;
@@ -206,6 +222,7 @@ public sealed class TrayIconService : IDisposable
         }
         catch
         {
+            DetachEventHandlers();
             CleanupNativeResources(
                 notifyIcon,
                 contextMenu,
@@ -332,11 +349,56 @@ public sealed class TrayIconService : IDisposable
             _disposed = true;
         }
 
+        if (_dispatcher.CheckAccess())
+        {
+            DisposeNativeResources();
+            return;
+        }
+
+        if (!_dispatcher.HasShutdownStarted && !_dispatcher.HasShutdownFinished)
+        {
+            try
+            {
+                _dispatcher.Invoke(DisposeNativeResources);
+                return;
+            }
+            catch (InvalidOperationException) when (
+                _dispatcher.HasShutdownStarted || _dispatcher.HasShutdownFinished)
+            {
+            }
+        }
+
+        DisposeNativeResources();
+    }
+
+    private void DisposeNativeResources()
+    {
+        lock (_lifetimeGate)
+        {
+            if (_nativeResourcesDisposed)
+            {
+                return;
+            }
+
+            _nativeResourcesDisposed = true;
+        }
+
+        DetachEventHandlers();
         CleanupNativeResources(
             _notifyIcon,
             _contextMenu,
             _ownedIcon,
             hideNotifyIcon: _iconPublished);
+    }
+
+    private void DetachEventHandlers()
+    {
+        foreach (var unsubscribe in _unsubscribeActions)
+        {
+            TryCleanup(unsubscribe);
+        }
+
+        _unsubscribeActions.Clear();
     }
 
     private static void CleanupNativeResources(

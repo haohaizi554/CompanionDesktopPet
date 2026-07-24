@@ -103,6 +103,31 @@ public sealed class TrayIconServiceTests
     }
 
     [Fact]
+    public async Task NotifyIconCallbackRaisedOnAWorker_RunsTheCommandOnTheDispatcher()
+    {
+        await RunOnStaThreadAsync(async () =>
+        {
+            using var source = LoadTestIcon();
+            var shell = new FakeTrayShellIcon();
+            var dispatcherThreadId = Environment.CurrentManagedThreadId;
+            var observedThread = new TaskCompletionSource<int>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            using var service = CreateService(
+                source,
+                shell,
+                () => new TrayMenuState(true, false, false, true),
+                toggleVisibility: () =>
+                    observedThread.TrySetResult(Environment.CurrentManagedThreadId));
+
+            await Task.Run(shell.RaiseDoubleClick);
+
+            Assert.Equal(
+                dispatcherThreadId,
+                await observedThread.Task.WaitAsync(TimeSpan.FromSeconds(2)));
+        });
+    }
+
+    [Fact]
     public async Task DefaultAsyncFailureReporter_ObservesWithoutCrashingTheDispatcher()
     {
         await RunOnStaThreadAsync(async () =>
@@ -162,6 +187,48 @@ public sealed class TrayIconServiceTests
             Assert.Equal(1, shell.DisposeCount);
             Assert.True(shell.ContextMenuWasAliveWhenDisposed);
             Assert.True(shell.IconWasAliveWhenDisposed);
+        });
+    }
+
+    [Fact]
+    public void Dispose_DetachesNotifyIconCallbacks()
+    {
+        RunOnStaThread(() =>
+        {
+            using var source = LoadTestIcon();
+            var shell = new FakeTrayShellIcon();
+            var toggles = 0;
+            var service = CreateService(
+                source,
+                shell,
+                () => new TrayMenuState(true, false, false, true),
+                toggleVisibility: () => toggles++);
+
+            Assert.Equal(1, shell.DoubleClickSubscriberCount);
+            service.Dispose();
+
+            Assert.Equal(0, shell.DoubleClickSubscriberCount);
+            shell.RaiseDoubleClick();
+            Assert.Equal(0, toggles);
+        });
+    }
+
+    [Fact]
+    public async Task DisposeFromWorker_MarshalsNativeCleanupToTheDispatcher()
+    {
+        await RunOnStaThreadAsync(async () =>
+        {
+            using var source = LoadTestIcon();
+            var shell = new FakeTrayShellIcon();
+            var dispatcherThreadId = Environment.CurrentManagedThreadId;
+            var service = CreateService(
+                source,
+                shell,
+                () => new TrayMenuState(true, false, false, true));
+
+            await Task.Run(service.Dispose);
+
+            Assert.Equal(dispatcherThreadId, shell.DisposeThreadId);
         });
     }
 
@@ -306,6 +373,8 @@ public sealed class TrayIconServiceTests
         public int VisibleTrueCount { get; private set; }
         public int VisibleFalseCount { get; private set; }
         public int DisposeCount { get; private set; }
+        public int DisposeThreadId { get; private set; }
+        public int DoubleClickSubscriberCount => _doubleClick?.GetInvocationList().Length ?? 0;
         public bool ContextMenuWasAliveWhenDisposed { get; private set; }
         public bool IconWasAliveWhenDisposed { get; private set; }
         public Icon? Icon { get; set; }
@@ -336,11 +405,18 @@ public sealed class TrayIconServiceTests
             }
         }
 
-        public event EventHandler? DoubleClick;
+        private EventHandler? _doubleClick;
+
+        public event EventHandler? DoubleClick
+        {
+            add => _doubleClick += value;
+            remove => _doubleClick -= value;
+        }
 
         public void Dispose()
         {
             DisposeCount++;
+            DisposeThreadId = Environment.CurrentManagedThreadId;
             ContextMenuWasAliveWhenDisposed = ContextMenuStrip is { IsDisposed: false };
             try
             {
@@ -352,7 +428,7 @@ public sealed class TrayIconServiceTests
             }
         }
 
-        public void RaiseDoubleClick() => DoubleClick?.Invoke(this, EventArgs.Empty);
+        public void RaiseDoubleClick() => _doubleClick?.Invoke(this, EventArgs.Empty);
     }
 
     private sealed class RecordingTraceListener : TraceListener

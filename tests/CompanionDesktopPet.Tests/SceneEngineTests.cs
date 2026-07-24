@@ -3,6 +3,7 @@ using CompanionDesktopPet.Services;
 
 namespace CompanionDesktopPet.Tests;
 
+[Collection(PerformanceTestCollection.Name)]
 public sealed class SceneEngineTests
 {
     [Fact]
@@ -385,24 +386,30 @@ public sealed class SceneEngineTests
     }
 
     [Fact]
+    [Trait("Category", "Performance")]
     public void Catalog_RebuildsExpandedRuntimeInventoryWithinDesktopStartupBudget()
     {
-        GC.Collect();
-        var before = GC.GetTotalMemory(true);
+        var corpus = PersonaCorpus.All;
+        var before = RetainedMemoryMeasurement.Snapshot();
         var stopwatch = Stopwatch.StartNew();
 
-        var scenes = SceneCatalog.BuildPersonaScenes(PersonaCorpus.All);
+        var scenes = SceneCatalog.BuildPersonaScenes(corpus);
 
         stopwatch.Stop();
-        var retainedBytes = Math.Max(0, GC.GetTotalMemory(true) - before);
-        Assert.Equal(PersonaCorpus.All.Select(line => line.SemanticGroup).Distinct().Count(), scenes.Count);
-        Assert.Equal(PersonaCorpus.All.Count, scenes.Sum(scene => scene.Lines.Count));
+        var retainedBytes = RetainedMemoryMeasurement.Snapshot() - before;
+        Assert.Equal(corpus.Select(line => line.SemanticGroup).Distinct().Count(), scenes.Count);
+        Assert.Equal(corpus.Count, scenes.Sum(scene => scene.Lines.Count));
         Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(5), stopwatch.Elapsed.ToString());
+        Assert.True(
+            retainedBytes >= 0,
+            $"retained-memory measurement was invalid: {retainedBytes:N0} bytes");
         Assert.True(retainedBytes < 128L * 1024 * 1024, $"retained bytes: {retainedBytes:N0}");
+        GC.KeepAlive(corpus);
         GC.KeepAlive(scenes);
     }
 
     [Fact]
+    [Trait("Category", "Performance")]
     public void ClickSelection_WithMaximumRetainedHistoryStaysWithinInteractiveBudget()
     {
         var scenes = SceneCatalog.PersonaScenes
@@ -573,20 +580,8 @@ public sealed class SceneEngineTests
     }
 
     private static IReadOnlySet<string> ContextTokens(SceneContext context)
-    {
-        var method = typeof(SceneScheduler).GetMethod(
-            "ContextTokens",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-        Assert.NotNull(method);
-        return Assert.IsAssignableFrom<IReadOnlySet<string>>(method!.Invoke(null, [context]));
-    }
+        => SceneScheduler.ContextTokens(context);
 
     private static DialogueTrigger DayPart(DateTime now)
-    {
-        var method = typeof(InterruptionBudget).GetMethod(
-            "DayPart",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-        Assert.NotNull(method);
-        return Assert.IsType<DialogueTrigger>(method!.Invoke(null, [now]));
-    }
+        => InterruptionBudget.DayPart(now);
 }

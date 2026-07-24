@@ -11,7 +11,8 @@
         ResizeMode="NoResize"
         Topmost="True"
         SnapsToDevicePixels="True"
-        UseLayoutRounding="True">
+        UseLayoutRounding="True"
+        AutomationProperties.Name="佳怡桌宠">
   <Grid x:Name="InteractionSurface">
     <Popup x:Name="BubblePopup"
            AllowsTransparency="True"
@@ -29,36 +30,37 @@
                 Width="20"
                 Height="12"
                 HorizontalAlignment="Left"
-                Fill="{StaticResource BlushBrush}"
-                Stroke="{StaticResource RoseBrush}"
+                Fill="{StaticResource Pet.Brush.BubbleArrow}"
+                Stroke="{StaticResource Pet.Brush.AccentBorder}"
                 StrokeThickness="2"
                 Visibility="Collapsed"
                 Data="M 0,12 L 20,12 L 10,0 Z" />
           <Border Padding="18,13"
                   CornerRadius="25"
-                  Background="{StaticResource CreamBrush}"
-                  BorderBrush="{StaticResource RoseBrush}"
+                  Background="{StaticResource Pet.Brush.BubbleSurface}"
+                  BorderBrush="{StaticResource Pet.Brush.AccentBorder}"
                   BorderThickness="2">
             <Border.Effect>
-              <DropShadowEffect Color="#663A2026"
+              <DropShadowEffect Color="{StaticResource Pet.Color.Shadow.Bubble}"
                                 BlurRadius="14"
                                 ShadowDepth="3"
                                 Opacity="0.32" />
             </Border.Effect>
             <TextBlock x:Name="SpeechText"
-                       Foreground="{StaticResource CocoaBrush}"
-                       FontFamily="Microsoft YaHei UI"
+                       Foreground="{StaticResource Pet.Brush.TextPrimary}"
+                       FontFamily="{StaticResource Pet.FontFamily.Ui}"
                        FontSize="15"
                        FontWeight="SemiBold"
                        TextWrapping="Wrap"
-                       TextAlignment="Center" />
+                       TextAlignment="Center"
+                       AutomationProperties.LiveSetting="Polite" />
           </Border>
           <Path x:Name="BubbleArrowDown"
                 Width="20"
                 Height="12"
                 HorizontalAlignment="Left"
-                Fill="{StaticResource BlushBrush}"
-                Stroke="{StaticResource RoseBrush}"
+                Fill="{StaticResource Pet.Brush.BubbleArrow}"
+                Stroke="{StaticResource Pet.Brush.AccentBorder}"
                 StrokeThickness="2"
                 Data="M 0,0 L 20,0 L 10,12 Z" />
         </StackPanel>
@@ -71,7 +73,10 @@
             HorizontalAlignment="Center"
             VerticalAlignment="Bottom"
             Background="Transparent"
-            RenderTransformOrigin="0.5,0.92">
+            RenderTransformOrigin="0.5,0.92"
+            Focusable="True"
+            AutomationProperties.Name="佳怡"
+            AutomationProperties.HelpText="右键或按菜单键打开控制面板；拖动佳怡可以移动位置。">
       <Grid.RenderTransform>
         <TransformGroup>
           <ScaleTransform x:Name="BreathingScale" ScaleX="1" ScaleY="1" />
@@ -86,8 +91,21 @@
       </Grid.RenderTransform>
       <Grid.ContextMenu>
         <ContextMenu x:Name="ControlMenu"
-                     Style="{StaticResource KawaiiContextMenuStyle}">
-          <MenuItem x:Name="SayMenuItem" Header="说句话 ♡" Tag="✦" />
+                     Style="{StaticResource KawaiiContextMenuStyle}"
+                     AutomationProperties.Name="佳怡控制面板">
+          <ContextMenu.Resources>
+            <Style TargetType="MenuItem"
+                   BasedOn="{StaticResource KawaiiMenuItemStyle}" />
+            <Style TargetType="Separator"
+                   BasedOn="{StaticResource KawaiiSeparatorStyle}" />
+            <Style x:Key="{x:Static MenuItem.SeparatorStyleKey}"
+                   TargetType="Separator"
+                   BasedOn="{StaticResource KawaiiSeparatorStyle}" />
+          </ContextMenu.Resources>
+          <MenuItem x:Name="SayMenuItem"
+                    Header="说句话 ♡"
+                    Tag="✦"
+                    AutomationProperties.HelpText="让佳怡说一句话。" />
           <MenuItem x:Name="GreetingMenuItem" Header="打个招呼♡" Tag="♡" />
           <MenuItem x:Name="PauseMenuItem" Header="暂停动画" Tag="☾" />
           <Separator />
@@ -133,8 +151,8 @@
               Padding="12,7"
               HorizontalAlignment="Right"
               VerticalAlignment="Top"
-              Background="{StaticResource CreamBrush}"
-              BorderBrush="{StaticResource RoseBrush}"
+              Background="{StaticResource Pet.Brush.BubbleSurface}"
+              BorderBrush="{StaticResource Pet.Brush.AccentBorder}"
               BorderThickness="2"
               CornerRadius="18"
               Opacity="0"
@@ -143,8 +161,8 @@
           <TranslateTransform x:Name="GreetingBadgeOffset" Y="8" />
         </Border.RenderTransform>
         <TextBlock Text="嗨♡"
-                   Foreground="{StaticResource CocoaBrush}"
-                   FontFamily="Microsoft YaHei UI"
+                   Foreground="{StaticResource Pet.Brush.TextPrimary}"
+                   FontFamily="{StaticResource Pet.FontFamily.Ui}"
                    FontSize="16"
                    FontWeight="SemiBold" />
       </Border>
@@ -157,7 +175,7 @@
                    Canvas.Left="229"
                    Canvas.Top="124"
                    Text="♥"
-                   Foreground="#FFFF6F91"
+                   Foreground="{StaticResource Pet.Brush.HeartPrimary}"
                    FontSize="25"
                    FontWeight="Bold"
                    Opacity="0"
@@ -170,7 +188,7 @@
                    Canvas.Left="257"
                    Canvas.Top="159"
                    Text="♥"
-                   Foreground="#FFFF9BB2"
+                   Foreground="{StaticResource Pet.Brush.HeartSecondary}"
                    FontSize="20"
                    FontWeight="Bold"
                    Opacity="0"
@@ -183,7 +201,7 @@
                    Canvas.Left="214"
                    Canvas.Top="184"
                    Text="♥"
-                   Foreground="#FFFFB3C6"
+                   Foreground="{StaticResource Pet.Brush.HeartTertiary}"
                    FontSize="17"
                    FontWeight="Bold"
                    Opacity="0"

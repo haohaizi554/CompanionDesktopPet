@@ -1,7 +1,10 @@
 using System.Diagnostics;
 using System.IO;
 using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Automation.Peers;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Threading;
 using CompanionDesktopPet.Models;
@@ -33,6 +36,7 @@ public partial class MainWindow : Window
     private readonly IAutoStartService _autoStartService;
     private readonly TimeProvider _timeProvider;
     private readonly DialogueWarmupCoordinator _dialogueWarmup;
+    private readonly Action<FrameworkElement> _announceLiveRegionChanged;
     private readonly CancellationTokenSource _dialogueWarmupLifetime = new();
     private readonly bool _suppressApplicationShutdownOnClose;
     private readonly Action _shutdownApplication;
@@ -68,223 +72,44 @@ public partial class MainWindow : Window
     private bool _replayStartupAfterWarmupRequested;
     private bool _replayUserClickAfterWarmupRequested;
     private DialogueWarmupViewState _dialogueWarmupViewState = DialogueWarmupViewState.Pending;
+    private IInputElement? _controlMenuFocusReturnTarget;
+    private bool _controlMenuOpenedFromKeyboard;
+    private bool _isHiddenToTray;
 
     internal AgentReply? LastReply { get; private set; }
 
     private bool InteractionFrozen => _exitCommandRunning || _isClosed;
+    private bool PresentationSuspended => InteractionFrozen || _isHiddenToTray;
 
-    public MainWindow(
-        PetSettings settings,
-        SettingsService settingsService,
-        AgentMemoryService? agentMemoryService = null,
-        AgentMemorySnapshot? agentMemory = null,
-        IIdleTimeProvider? idleTimeProvider = null,
-        bool suppressApplicationShutdownOnClose = false,
-        Action? shutdownApplication = null)
-        : this(
-            settings,
-            settingsService,
-            agentMemoryService,
-            agentMemory,
-            idleTimeProvider,
-            suppressApplicationShutdownOnClose,
-            shutdownApplication,
-            new AmbientActionScheduler(),
-            suppressApplicationShutdownOnClose
-                ? DisabledAutoStartService.Instance
-                : new WindowsAutoStartService())
+    internal MainWindow(MainWindowDependencies dependencies)
     {
-    }
-
-    internal MainWindow(
-        PetSettings settings,
-        SettingsService settingsService,
-        AgentMemoryService? agentMemoryService,
-        AgentMemorySnapshot? agentMemory,
-        IAutoStartService autoStartService)
-        : this(
-            settings,
-            settingsService,
-            agentMemoryService,
-            agentMemory,
-            idleTimeProvider: null,
-            suppressApplicationShutdownOnClose: false,
-            shutdownApplication: null,
-            new AmbientActionScheduler(),
-            autoStartService)
-    {
-    }
-
-    internal MainWindow(
-        PetSettings settings,
-        SettingsService settingsService,
-        AgentMemoryService? agentMemoryService,
-        AgentMemorySnapshot? agentMemory,
-        IIdleTimeProvider? idleTimeProvider,
-        bool suppressApplicationShutdownOnClose,
-        Action? shutdownApplication,
-        AmbientActionScheduler ambientScheduler)
-        : this(
-            settings,
-            settingsService,
-            agentMemoryService,
-            agentMemory,
-            idleTimeProvider,
-            suppressApplicationShutdownOnClose,
-            shutdownApplication,
-            ambientScheduler,
-            suppressApplicationShutdownOnClose
-                ? DisabledAutoStartService.Instance
-                : new WindowsAutoStartService())
-    {
-    }
-
-    internal MainWindow(
-        PetSettings settings,
-        SettingsService settingsService,
-        AgentMemoryService? agentMemoryService,
-        AgentMemorySnapshot? agentMemory,
-        IIdleTimeProvider? idleTimeProvider,
-        bool suppressApplicationShutdownOnClose,
-        Action? shutdownApplication,
-        AmbientActionScheduler ambientScheduler,
-        IAutoStartService autoStartService)
-        : this(
-            settings,
-            settingsService,
-            agentMemoryService,
-            agentMemory,
-            idleTimeProvider,
-            suppressApplicationShutdownOnClose,
-            shutdownApplication,
-            ambientScheduler,
-            autoStartService,
-            agentMemoryService is null ? null : agentMemoryService.SaveAsync)
-    {
-    }
-
-    internal MainWindow(
-        PetSettings settings,
-        SettingsService settingsService,
-        AgentMemoryService? agentMemoryService,
-        AgentMemorySnapshot? agentMemory,
-        IIdleTimeProvider? idleTimeProvider,
-        bool suppressApplicationShutdownOnClose,
-        Action? shutdownApplication,
-        AmbientActionScheduler ambientScheduler,
-        IAutoStartService autoStartService,
-        Func<AgentMemorySnapshot, Task>? saveAgentMemoryAsync)
-        : this(
-            settings,
-            settingsService,
-            agentMemoryService,
-            agentMemory,
-            idleTimeProvider,
-            suppressApplicationShutdownOnClose,
-            shutdownApplication,
-            ambientScheduler,
-            autoStartService,
-            saveAgentMemoryAsync,
-            saveSettingsAsync: null)
-    {
-    }
-
-    internal MainWindow(
-        PetSettings settings,
-        SettingsService settingsService,
-        AgentMemoryService? agentMemoryService,
-        AgentMemorySnapshot? agentMemory,
-        IIdleTimeProvider? idleTimeProvider,
-        bool suppressApplicationShutdownOnClose,
-        Action? shutdownApplication,
-        AmbientActionScheduler ambientScheduler,
-        IAutoStartService autoStartService,
-        Func<AgentMemorySnapshot, Task>? saveAgentMemoryAsync,
-        Func<PetSettings, Task>? saveSettingsAsync)
-        : this(
-            settings,
-            settingsService,
-            agentMemoryService,
-            agentMemory,
-            idleTimeProvider,
-            suppressApplicationShutdownOnClose,
-            shutdownApplication,
-            ambientScheduler,
-            autoStartService,
-            saveAgentMemoryAsync,
-            saveSettingsAsync,
-            dialogueService: null,
-            timeProvider: null)
-    {
-    }
-
-    internal MainWindow(
-        PetSettings settings,
-        SettingsService settingsService,
-        AgentMemoryService? agentMemoryService,
-        AgentMemorySnapshot? agentMemory,
-        IIdleTimeProvider? idleTimeProvider,
-        bool suppressApplicationShutdownOnClose,
-        Action? shutdownApplication,
-        AmbientActionScheduler ambientScheduler,
-        IAutoStartService autoStartService,
-        Func<AgentMemorySnapshot, Task>? saveAgentMemoryAsync,
-        Func<PetSettings, Task>? saveSettingsAsync,
-        DialogueService? dialogueService,
-        TimeProvider? timeProvider)
-        : this(
-            settings,
-            settingsService,
-            agentMemoryService,
-            agentMemory,
-            idleTimeProvider,
-            suppressApplicationShutdownOnClose,
-            shutdownApplication,
-            ambientScheduler,
-            autoStartService,
-            saveAgentMemoryAsync,
-            saveSettingsAsync,
-            dialogueService,
-            timeProvider,
-            warmupCoordinator: null)
-    {
-    }
-
-    internal MainWindow(
-        PetSettings settings,
-        SettingsService settingsService,
-        AgentMemoryService? agentMemoryService,
-        AgentMemorySnapshot? agentMemory,
-        IIdleTimeProvider? idleTimeProvider,
-        bool suppressApplicationShutdownOnClose,
-        Action? shutdownApplication,
-        AmbientActionScheduler ambientScheduler,
-        IAutoStartService autoStartService,
-        Func<AgentMemorySnapshot, Task>? saveAgentMemoryAsync,
-        Func<PetSettings, Task>? saveSettingsAsync,
-        DialogueService? dialogueService,
-        TimeProvider? timeProvider,
-        DialogueWarmupCoordinator? warmupCoordinator)
-    {
+        ArgumentNullException.ThrowIfNull(dependencies);
         InitializeComponent();
-        _settings = settings;
-        _settingsService = settingsService
-            ?? throw new ArgumentNullException(nameof(settingsService));
-        _saveAgentMemoryAsync = saveAgentMemoryAsync;
-        _saveSettingsAsync = saveSettingsAsync ?? _settingsService.SaveAsync;
-        _idleTimeProvider = idleTimeProvider ?? new WindowsIdleTimeProvider();
-        _ambientScheduler = ambientScheduler
-            ?? throw new ArgumentNullException(nameof(ambientScheduler));
-        _autoStartService = autoStartService
-            ?? throw new ArgumentNullException(nameof(autoStartService));
-        _timeProvider = timeProvider ?? TimeProvider.System;
-        _suppressApplicationShutdownOnClose = suppressApplicationShutdownOnClose;
-        _shutdownApplication = shutdownApplication
+        _settings = dependencies.Settings;
+        _settingsService = dependencies.SettingsService;
+        _saveAgentMemoryAsync = dependencies.SaveAgentMemoryAsync
+            ?? (dependencies.AgentMemoryService is null
+                ? null
+                : dependencies.AgentMemoryService.SaveAsync);
+        _saveSettingsAsync = dependencies.SaveSettingsAsync ?? _settingsService.SaveAsync;
+        _idleTimeProvider = dependencies.IdleTimeProvider ?? new WindowsIdleTimeProvider();
+        _ambientScheduler = dependencies.AmbientScheduler ?? new AmbientActionScheduler();
+        _autoStartService = dependencies.AutoStartService
+            ?? (dependencies.SuppressApplicationShutdownOnClose
+                ? DisabledAutoStartService.Instance
+                : new WindowsAutoStartService());
+        _timeProvider = dependencies.TimeProvider ?? TimeProvider.System;
+        _suppressApplicationShutdownOnClose = dependencies.SuppressApplicationShutdownOnClose;
+        _shutdownApplication = dependencies.ShutdownApplication
             ?? (() => System.Windows.Application.Current?.Shutdown());
-        _dialogue = dialogueService
-            ?? DialogueService.CreateDeferred(agentMemory, timeProvider: _timeProvider);
-        _dialogueWarmup = warmupCoordinator
+        _dialogue = dependencies.DialogueService
+            ?? DialogueService.CreateDeferred(
+                dependencies.AgentMemory,
+                timeProvider: _timeProvider);
+        _dialogueWarmup = dependencies.WarmupCoordinator
             ?? new DialogueWarmupCoordinator(_dialogue, _timeProvider);
+        _announceLiveRegionChanged = dependencies.AnnounceLiveRegionChanged
+            ?? RaiseLiveRegionChanged;
         _scheduler = new DialogueScheduler(_random);
         _animation = new AnimationController(
             BreathingScale,
@@ -308,6 +133,7 @@ public partial class MainWindow : Window
         PetImage.PreviewMouseMove += PetImage_MouseMove;
         PetImage.PreviewMouseLeftButtonUp += PetImage_MouseLeftButtonUp;
         PetImage.LostMouseCapture += PetImage_LostMouseCapture;
+        PreviewKeyDown += CharacterStage_PreviewKeyDown;
         CharacterStage.MouseEnter += BubbleHover_MouseEnter;
         CharacterStage.MouseLeave += BubbleHover_MouseLeave;
         SpeechBubble.MouseEnter += BubbleHover_MouseEnter;
@@ -320,6 +146,8 @@ public partial class MainWindow : Window
         LargeSizeMenuItem.Click += SetSize_Click;
         TopmostMenuItem.Click += ToggleTopmost_Click;
         ControlMenu.Opened += ControlMenu_Opened;
+        ControlMenu.Closed += ControlMenu_Closed;
+        ControlMenu.PreviewKeyDown += ControlMenu_PreviewKeyDown;
         AutoStartMenuItem.Click += ToggleAutoStart_Click;
         RestorePositionMenuItem.Click += RestorePosition_Click;
         HideToTrayMenuItem.Click += HideToTray_Click;
@@ -330,6 +158,40 @@ public partial class MainWindow : Window
         _memoryTimer.Tick += MemoryTimer_Tick;
         _eventTimer.Tick += EventTimer_Tick;
         _ambientTimer.Tick += AmbientTimer_Tick;
+    }
+
+    public MainWindow(
+        PetSettings settings,
+        SettingsService settingsService,
+        AgentMemoryService? agentMemoryService = null,
+        AgentMemorySnapshot? agentMemory = null,
+        IIdleTimeProvider? idleTimeProvider = null,
+        bool suppressApplicationShutdownOnClose = false,
+        Action? shutdownApplication = null)
+        : this(new MainWindowDependencies(settings, settingsService)
+        {
+            AgentMemoryService = agentMemoryService,
+            AgentMemory = agentMemory,
+            IdleTimeProvider = idleTimeProvider,
+            SuppressApplicationShutdownOnClose = suppressApplicationShutdownOnClose,
+            ShutdownApplication = shutdownApplication
+        })
+    {
+    }
+
+    internal MainWindow(
+        PetSettings settings,
+        SettingsService settingsService,
+        AgentMemoryService? agentMemoryService,
+        AgentMemorySnapshot? agentMemory,
+        IAutoStartService autoStartService)
+        : this(new MainWindowDependencies(settings, settingsService)
+        {
+            AgentMemoryService = agentMemoryService,
+            AgentMemory = agentMemory,
+            AutoStartService = autoStartService
+        })
+    {
     }
 
     private void Window_Loaded(object sender, RoutedEventArgs e)
@@ -374,7 +236,7 @@ public partial class MainWindow : Window
 
     private void AmbientTimer_Tick(object? sender, EventArgs e)
     {
-        if (InteractionFrozen)
+        if (PresentationSuspended)
         {
             _ambientTimer.Stop();
             return;
@@ -472,7 +334,7 @@ public partial class MainWindow : Window
 
     private void ScheduleNextAmbientAction()
     {
-        if (InteractionFrozen
+        if (PresentationSuspended
             || _runningSmokeProbe
             || _paused
             || _actionCoordinator.State != PetActionState.Idle)
@@ -498,7 +360,7 @@ public partial class MainWindow : Window
     private void ScheduleAmbientAction(PetAmbientAction action, TimeSpan delay)
     {
         InvalidateAmbientSchedule();
-        if (InteractionFrozen
+        if (PresentationSuspended
             || _runningSmokeProbe
             || _paused
             || _actionCoordinator.State != PetActionState.Idle)
@@ -833,6 +695,7 @@ public partial class MainWindow : Window
             return;
         }
 
+        CharacterStage.Focus();
         _mouseDown = e.GetPosition(this);
         var grab = e.GetPosition(CharacterStage);
         _dragGrabOffset = new ScreenPoint(grab.X, grab.Y);
@@ -1022,13 +885,23 @@ public partial class MainWindow : Window
         }
 
         SpeechText.Text = text;
+        AutomationProperties.SetName(SpeechText, $"佳怡说：{text}");
         SpeechBubble.Visibility = Visibility.Visible;
+        _bubbleCountdown.Show();
+        if (_isHiddenToTray)
+        {
+            _bubbleSuspendedForWindowHide = true;
+            BubblePopup.IsOpen = false;
+            _bubbleTimer.Stop();
+            return;
+        }
+
         BubblePopup.IsOpen = true;
         _bubbleSuspendedForWindowHide = false;
         SpeechBubble.UpdateLayout();
         PositionBubble();
         Dispatcher.BeginInvoke(PositionBubble, DispatcherPriority.Loaded);
-        _bubbleCountdown.Show();
+        _announceLiveRegionChanged(SpeechText);
         SynchronizeBubbleTimer();
     }
 
@@ -1085,6 +958,7 @@ public partial class MainWindow : Window
     {
         _bubbleTimer.Stop();
         SpeechText.Text = string.Empty;
+        AutomationProperties.SetName(SpeechText, string.Empty);
         SpeechBubble.Visibility = Visibility.Collapsed;
         BubblePopup.IsOpen = false;
         _bubbleSuspendedForWindowHide = false;
@@ -1155,7 +1029,7 @@ public partial class MainWindow : Window
     private void SynchronizeBubbleTimer()
     {
         _bubbleTimer.Stop();
-        if (InteractionFrozen)
+        if (PresentationSuspended)
         {
             return;
         }
@@ -1175,7 +1049,7 @@ public partial class MainWindow : Window
     private void ScheduleNextPhrase()
     {
         _automaticTimer.Stop();
-        if (InteractionFrozen)
+        if (PresentationSuspended)
         {
             return;
         }
@@ -1186,7 +1060,7 @@ public partial class MainWindow : Window
 
     private void AutomaticTimer_Tick(object? sender, EventArgs e)
     {
-        if (InteractionFrozen)
+        if (PresentationSuspended)
         {
             _automaticTimer.Stop();
             return;
@@ -1198,7 +1072,7 @@ public partial class MainWindow : Window
 
     private void EventTimer_Tick(object? sender, EventArgs e)
     {
-        if (InteractionFrozen)
+        if (PresentationSuspended)
         {
             _eventTimer.Stop();
             return;
@@ -1286,6 +1160,9 @@ public partial class MainWindow : Window
         _userRetryFallbackReplyRevision = _dialogueReplyRevision;
         SayMenuItem.Header = "文库正在醒…";
         SayMenuItem.IsEnabled = false;
+        AutomationProperties.SetHelpText(
+            SayMenuItem,
+            "文库正在重试，准备好后就能继续说话。");
         ObserveDialogueWarmup(
             replayStartupWhenReady: false,
             retryAfterFailure: true);
@@ -1356,6 +1233,7 @@ public partial class MainWindow : Window
             _dialogueWarmupViewState = DialogueWarmupViewState.Ready;
             SayMenuItem.Header = "说句话 ♡";
             SayMenuItem.IsEnabled = true;
+            AutomationProperties.SetHelpText(SayMenuItem, "让佳怡说一句话。");
             var replayUserClick = _replayUserClickAfterWarmupRequested
                 && _userRetryFallbackReplyRevision == _dialogueReplyRevision;
             var replayStartup = _replayStartupAfterWarmupRequested
@@ -1378,6 +1256,7 @@ public partial class MainWindow : Window
         _replayUserClickAfterWarmupRequested = false;
         SayMenuItem.Header = "重试文库 ♡";
         SayMenuItem.IsEnabled = true;
+        AutomationProperties.SetHelpText(SayMenuItem, "重新加载佳怡的文库。");
         ShowBubble(DialogueWarmupFailureMessage);
     }
 
@@ -1404,7 +1283,15 @@ public partial class MainWindow : Window
         await SaveAgentMemoryAsync(skipWhenExiting: true);
     }
 
-    internal void SaySomething() => ReactAndSpeak();
+    internal void SaySomething()
+    {
+        if (_isHiddenToTray)
+        {
+            RestoreVisibleWindow();
+        }
+
+        ReactAndSpeak();
+    }
 
     private void SaySomething_Click(object sender, RoutedEventArgs e) => SaySomething();
 
@@ -1540,8 +1427,17 @@ public partial class MainWindow : Window
 
     internal void HideToTray()
     {
-        if (!InteractionFrozen && _trayAvailable)
+        if (!InteractionFrozen && _trayAvailable && !_isHiddenToTray)
         {
+            _isHiddenToTray = true;
+            ControlMenu.IsOpen = false;
+            _automaticTimer.Stop();
+            _eventTimer.Stop();
+            PreserveScheduledStartupGreeting();
+            InvalidateAmbientSchedule();
+            _animation.Suspend();
+            _bubbleCountdown.Suspend();
+            _bubbleTimer.Stop();
             _bubbleSuspendedForWindowHide = BubblePopup.IsOpen;
             BubblePopup.IsOpen = false;
             Hide();
@@ -1572,9 +1468,13 @@ public partial class MainWindow : Window
     private void UpdateTrayAvailabilityControls()
     {
         HideToTrayMenuItem.IsEnabled = _trayAvailable;
+        var unavailableReason = "托盘暂时不可用，桌宠会保持显示。";
         HideToTrayMenuItem.ToolTip = _trayAvailable
             ? null
-            : "托盘暂时不可用，桌宠会保持显示。";
+            : unavailableReason;
+        AutomationProperties.SetHelpText(
+            HideToTrayMenuItem,
+            _trayAvailable ? "把佳怡藏到系统托盘。" : unavailableReason);
     }
 
     internal void ToggleVisibilityFromTray()
@@ -1615,6 +1515,8 @@ public partial class MainWindow : Window
 
     private void RestoreVisibleWindow()
     {
+        var resumingFromTray = _isHiddenToTray;
+        _isHiddenToTray = false;
         Show();
         WindowState = WindowState.Normal;
         UpdateLayout();
@@ -1623,11 +1525,25 @@ public partial class MainWindow : Window
             && SpeechBubble.Visibility == Visibility.Visible)
         {
             BubblePopup.IsOpen = true;
+            _announceLiveRegionChanged(SpeechText);
         }
 
         _bubbleSuspendedForWindowHide = false;
+        _animation.Resume();
+        _bubbleCountdown.Resume();
+        SynchronizeBubbleTimer();
         PositionBubble();
+        if (resumingFromTray)
+        {
+            _eventTimer.Start();
+            ScheduleNextPhrase();
+            ScheduleNextAmbientAction();
+        }
+
         Activate();
+        Dispatcher.BeginInvoke(
+            () => CharacterStage.Focus(),
+            DispatcherPriority.Input);
     }
 
     internal TrayMenuState GetTrayMenuState()
@@ -1663,12 +1579,102 @@ public partial class MainWindow : Window
         ApplyAutoStart(!current);
     }
 
+    private void CharacterStage_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (InteractionFrozen
+            || (e.Key != Key.Apps
+                && (e.Key != Key.F10 || !Keyboard.Modifiers.HasFlag(ModifierKeys.Shift))))
+        {
+            return;
+        }
+
+        _controlMenuFocusReturnTarget = GetControlMenuFocusReturnTarget();
+        _controlMenuOpenedFromKeyboard = true;
+        ControlMenu.PlacementTarget = CharacterStage;
+        ControlMenu.Placement = PlacementMode.Center;
+        ControlMenu.IsOpen = true;
+        e.Handled = true;
+    }
+
     private void ControlMenu_Opened(object sender, RoutedEventArgs e)
     {
-        if (!InteractionFrozen)
+        if (InteractionFrozen)
         {
-            RefreshAutoStartState();
+            ControlMenu.IsOpen = false;
+            return;
         }
+
+        _controlMenuFocusReturnTarget ??= GetControlMenuFocusReturnTarget();
+        RefreshAutoStartState();
+        Dispatcher.BeginInvoke(
+            () =>
+            {
+                if (ControlMenu.IsOpen)
+                {
+                    SayMenuItem.Focus();
+                }
+            },
+            DispatcherPriority.Input);
+    }
+
+    private static void RaiseLiveRegionChanged(FrameworkElement element)
+    {
+        var peer = UIElementAutomationPeer.FromElement(element)
+            ?? UIElementAutomationPeer.CreatePeerForElement(element);
+        peer?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
+    }
+
+    private void ControlMenu_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape)
+        {
+            return;
+        }
+
+        ControlMenu.IsOpen = false;
+        e.Handled = true;
+    }
+
+    private IInputElement GetControlMenuFocusReturnTarget() =>
+        Keyboard.FocusedElement is DependencyObject focusedElement
+        && ReferenceEquals(GetWindow(focusedElement), this)
+            ? (IInputElement)focusedElement
+            : CharacterStage;
+
+    private void ControlMenu_Closed(object sender, RoutedEventArgs e)
+    {
+        if (_controlMenuOpenedFromKeyboard)
+        {
+            ControlMenu.ClearValue(ContextMenu.PlacementProperty);
+            ControlMenu.ClearValue(ContextMenu.PlacementTargetProperty);
+            _controlMenuOpenedFromKeyboard = false;
+        }
+
+        var focusTarget = _controlMenuFocusReturnTarget;
+        _controlMenuFocusReturnTarget = null;
+        if (InteractionFrozen || !IsVisible)
+        {
+            return;
+        }
+
+        Dispatcher.BeginInvoke(
+            () =>
+            {
+                if (InteractionFrozen || !IsVisible)
+                {
+                    return;
+                }
+
+                Activate();
+                if (focusTarget is UIElement { IsEnabled: true, IsVisible: true } element
+                    && element.Focus())
+                {
+                    return;
+                }
+
+                CharacterStage.Focus();
+            },
+            DispatcherPriority.Input);
     }
 
     private void ToggleAutoStart_Click(object sender, RoutedEventArgs e) =>
@@ -1693,13 +1699,18 @@ public partial class MainWindow : Window
         AutoStartMenuItem.IsChecked = enabled;
         AutoStartMenuItem.IsEnabled = true;
         AutoStartMenuItem.ToolTip = null;
+        AutomationProperties.SetHelpText(
+            AutoStartMenuItem,
+            "切换是否跟随 Windows 开机启动。");
     }
 
     private void MarkAutoStartUnavailable()
     {
+        const string unavailableReason = "Windows 暂时不允许读取开机启动设置。";
         AutoStartMenuItem.IsChecked = _lastKnownAutoStart;
         AutoStartMenuItem.IsEnabled = false;
-        AutoStartMenuItem.ToolTip = "Windows 暂时不允许读取开机启动设置。";
+        AutoStartMenuItem.ToolTip = unavailableReason;
+        AutomationProperties.SetHelpText(AutoStartMenuItem, unavailableReason);
     }
 
     private void ApplyAutoStart(bool requested)
@@ -1849,6 +1860,7 @@ public partial class MainWindow : Window
         _ambientTimer.Tick -= AmbientTimer_Tick;
         InvalidateAmbientSchedule();
         CancelActiveAmbientAction();
+        _animation.Dispose();
         _automaticTimer.Stop();
         _bubbleCountdown.Close();
         _bubbleTimer.Stop();
