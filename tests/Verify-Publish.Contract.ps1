@@ -39,10 +39,11 @@ function Reset-Scratch {
     New-Item -ItemType Directory -Path $delivery | Out-Null
     New-Item -ItemType Directory -Path $publish | Out-Null
     Copy-Item -LiteralPath $source -Destination (Join-Path $delivery 'candidate.exe')
-    Copy-Item -LiteralPath $source -Destination (Join-Path $publish 'candidate.exe')
+    Copy-Item -LiteralPath $source -Destination (Join-Path $publish 'CompanionDesktopPet.exe')
     return [pscustomobject]@{
         Delivery = $delivery
-        PublishExe = Join-Path $publish 'candidate.exe'
+        Publish = $publish
+        PublishExe = Join-Path $publish 'CompanionDesktopPet.exe'
     }
 }
 
@@ -90,10 +91,69 @@ function Assert-Rejected {
     }
 }
 
+function Assert-Accepted {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Case,
+
+        [Parameter(Mandatory = $true)]
+        [scriptblock]$Arrange
+    )
+
+    $paths = Reset-Scratch
+    & $Arrange $paths
+
+    try {
+        & $verifier `
+            -ExePath (Join-Path $paths.Delivery 'candidate.exe') `
+            -PublishExePath $paths.PublishExe `
+            -SmokeTimeoutSeconds 20 | Out-Null
+    }
+    catch {
+        throw "Expected Verify-Publish.ps1 to accept case '$Case': $($_.Exception.Message)"
+    }
+}
+
 try {
+    Assert-Accepted -Case 'the documented delivery readme' -Arrange {
+        param($paths)
+        $readmeName = (-join ([char[]](0x4F7F, 0x7528, 0x8BF4, 0x660E))) + '.txt'
+        Set-Content -LiteralPath (Join-Path $paths.Delivery $readmeName) -Value 'contract test'
+    }
+
+    Assert-Rejected -Case 'publish DLL sidecar' -Arrange {
+        param($paths)
+        Set-Content -LiteralPath (Join-Path $paths.Publish 'CompanionDesktopPet.dll') -Value 'contract test'
+    } -ExpectedMessage 'Publish directory'
+
+    Assert-Rejected -Case 'publish JSON sidecar' -Arrange {
+        param($paths)
+        Set-Content -LiteralPath (Join-Path $paths.Publish 'CompanionDesktopPet.runtimeconfig.json') -Value '{}'
+    } -ExpectedMessage 'Publish directory'
+
+    Assert-Rejected -Case 'publish PDB sidecar' -Arrange {
+        param($paths)
+        Set-Content -LiteralPath (Join-Path $paths.Publish 'CompanionDesktopPet.pdb') -Value 'contract test'
+    } -ExpectedMessage 'Publish directory'
+
+    Assert-Rejected -Case 'publish arbitrary extra file' -Arrange {
+        param($paths)
+        Set-Content -LiteralPath (Join-Path $paths.Publish 'notes.txt') -Value 'contract test'
+    } -ExpectedMessage 'Publish directory'
+
+    Assert-Rejected -Case 'publish nested directory' -Arrange {
+        param($paths)
+        New-Item -ItemType Directory -Path (Join-Path $paths.Publish 'runtimes') | Out-Null
+    } -ExpectedMessage 'Publish directory'
+
     Assert-Rejected -Case 'adjacent runtime sidecar' -Arrange {
         param($paths)
         Set-Content -LiteralPath (Join-Path $paths.Delivery 'unexpected.pdb') -Value 'contract test'
+    } -ExpectedMessage 'forbidden sidecars'
+
+    Assert-Rejected -Case 'unapproved delivery text file' -Arrange {
+        param($paths)
+        Set-Content -LiteralPath (Join-Path $paths.Delivery 'notes.txt') -Value 'contract test'
     } -ExpectedMessage 'forbidden sidecars'
 
     Assert-Rejected -Case 'extra executable' -Arrange {
@@ -180,4 +240,4 @@ finally {
     }
 }
 
-Write-Output 'PASS: publish verifier rejects sidecars, extra EXEs, nested dependencies, reviewed PII bytes, forced smoke termination, and non-zero smoke exit.'
+Write-Output 'PASS: publish verifier rejects publish sidecars, delivery sidecars, extra EXEs, nested dependencies, reviewed PII bytes, forced smoke termination, and non-zero smoke exit.'

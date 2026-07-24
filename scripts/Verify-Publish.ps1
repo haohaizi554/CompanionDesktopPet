@@ -30,9 +30,34 @@ if ($deliveryExecutables.Count -ne 1 -or $deliveryExecutables[0].FullName -ne $r
     throw "Delivery directory must contain exactly one EXE: $directory"
 }
 
-$unexpectedFiles = @($deliveryFiles | Where-Object { $_.Extension -notin @('.exe', '.txt') })
+$allowedDeliveryTextFiles = @(
+    (-join ([char[]](0x4F7F, 0x7528, 0x8BF4, 0x660E))) + '.txt'
+)
+$unexpectedFiles = @($deliveryFiles | Where-Object {
+    $_.FullName -ne $resolved -and $_.Name -notin $allowedDeliveryTextFiles
+})
 if ($unexpectedFiles.Count -ne 0) {
     throw "Delivery directory contains forbidden sidecars: $($unexpectedFiles.Name -join ', ')"
+}
+
+if ([string]::IsNullOrWhiteSpace($PublishExePath)) {
+    $PublishExePath = Join-Path $repoRoot 'publish\CompanionDesktopPet.exe'
+}
+$resolvedPublish = (Resolve-Path -LiteralPath $PublishExePath).Path
+$publishItem = Get-Item -LiteralPath $resolvedPublish
+if ($publishItem.Extension -ne '.exe' -or $publishItem.Length -le 0) {
+    throw 'Publish artifact is not a non-empty EXE.'
+}
+
+$publishDirectory = Split-Path -Parent $resolvedPublish
+$publishFiles = @(Get-ChildItem -LiteralPath $publishDirectory -File)
+$publishDirectories = @(Get-ChildItem -LiteralPath $publishDirectory -Directory)
+if ($publishDirectories.Count -ne 0 -or
+    $publishFiles.Count -ne 1 -or
+    $publishFiles[0].FullName -ne $resolvedPublish -or
+    $publishItem.Name -ne 'CompanionDesktopPet.exe') {
+    $publishContents = @($publishFiles.Name) + @($publishDirectories.Name | ForEach-Object { "$_\" })
+    throw "Publish directory must contain only CompanionDesktopPet.exe: $($publishContents -join ', ')"
 }
 
 $forbiddenIdentityMarkers = @(
@@ -58,15 +83,6 @@ foreach ($marker in $forbiddenIdentityMarkers) {
 }
 $binaryBytes = $null
 $binaryText = $null
-
-if ([string]::IsNullOrWhiteSpace($PublishExePath)) {
-    $PublishExePath = Join-Path $repoRoot 'publish\CompanionDesktopPet.exe'
-}
-$resolvedPublish = (Resolve-Path -LiteralPath $PublishExePath).Path
-$publishItem = Get-Item -LiteralPath $resolvedPublish
-if ($publishItem.Extension -ne '.exe' -or $publishItem.Length -le 0) {
-    throw 'Publish artifact is not a non-empty EXE.'
-}
 
 $deliveredHash = (Get-FileHash -LiteralPath $resolved -Algorithm SHA256).Hash
 $publishHash = (Get-FileHash -LiteralPath $resolvedPublish -Algorithm SHA256).Hash
