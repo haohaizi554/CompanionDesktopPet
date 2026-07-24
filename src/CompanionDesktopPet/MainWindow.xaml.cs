@@ -725,6 +725,11 @@ public partial class MainWindow : Window
 
     private void BubbleHover_MouseEnter(object sender, MouseEventArgs? e)
     {
+        if (InteractionFrozen)
+        {
+            return;
+        }
+
         _bubbleCountdown.Enter(sender == SpeechBubble
             ? BubbleHoverTarget.Bubble
             : BubbleHoverTarget.Character);
@@ -733,6 +738,11 @@ public partial class MainWindow : Window
 
     private void BubbleHover_MouseLeave(object sender, MouseEventArgs? e)
     {
+        if (InteractionFrozen)
+        {
+            return;
+        }
+
         _bubbleCountdown.Leave(sender == SpeechBubble
             ? BubbleHoverTarget.Bubble
             : BubbleHoverTarget.Character);
@@ -741,6 +751,12 @@ public partial class MainWindow : Window
 
     private void BubbleTimer_Tick(object? sender, EventArgs e)
     {
+        if (InteractionFrozen)
+        {
+            _bubbleTimer.Stop();
+            return;
+        }
+
         if (_bubbleCountdown.TryExpire())
         {
             CollapseBubble();
@@ -766,6 +782,11 @@ public partial class MainWindow : Window
     private void SynchronizeBubbleTimer()
     {
         _bubbleTimer.Stop();
+        if (InteractionFrozen)
+        {
+            return;
+        }
+
         if (_bubbleCountdown.State != BubbleCountdownState.CountingDown)
         {
             return;
@@ -1030,8 +1051,13 @@ public partial class MainWindow : Window
         ApplyAutoStart(!current);
     }
 
-    private void ControlMenu_Opened(object sender, RoutedEventArgs e) =>
-        RefreshAutoStartState();
+    private void ControlMenu_Opened(object sender, RoutedEventArgs e)
+    {
+        if (!InteractionFrozen)
+        {
+            RefreshAutoStartState();
+        }
+    }
 
     private void ToggleAutoStart_Click(object sender, RoutedEventArgs e) =>
         ApplyAutoStart(AutoStartMenuItem.IsChecked);
@@ -1113,6 +1139,7 @@ public partial class MainWindow : Window
         _eventTimer.Stop();
         _memoryTimer.Stop();
         _bubbleTimer.Stop();
+        _bubbleCountdown.Close();
         PreserveScheduledStartupGreeting();
         InvalidateAmbientSchedule();
         CancelActiveAmbientAction();

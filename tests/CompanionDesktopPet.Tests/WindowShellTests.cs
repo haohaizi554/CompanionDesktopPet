@@ -12,6 +12,7 @@ using System.Windows.Media.Effects;
 using System.Windows.Threading;
 using CompanionDesktopPet.Models;
 using CompanionDesktopPet.Services;
+using CompanionDesktopPet.UI;
 
 namespace CompanionDesktopPet.Tests;
 
@@ -947,7 +948,16 @@ public sealed class WindowShellTests
                 var automaticTimer = GetPrivateField<DispatcherTimer>(window, "_automaticTimer");
                 var eventTimer = GetPrivateField<DispatcherTimer>(window, "_eventTimer");
                 var ambientTimer = GetPrivateField<DispatcherTimer>(window, "_ambientTimer");
+                var bubbleTimer = GetPrivateField<DispatcherTimer>(window, "_bubbleTimer");
+                var bubbleCountdown = GetPrivateField<BubbleCountdownController>(
+                    window,
+                    "_bubbleCountdown");
                 var dialogue = GetPrivateField<DialogueService>(window, "_dialogue");
+                var character = Assert.IsType<Grid>(window.FindName("CharacterStage"));
+                var bubble = Assert.IsType<StackPanel>(window.FindName("SpeechBubble"));
+                var speech = Assert.IsType<TextBlock>(window.FindName("SpeechText"));
+                var controlMenu = Assert.IsType<ContextMenu>(window.FindName("ControlMenu"));
+                var autoStartItem = Assert.IsType<MenuItem>(window.FindName("AutoStartMenuItem"));
                 Assert.True(memoryTimer.IsEnabled);
 
                 InvokePrivate(window, "MemoryTimer_Tick", null, EventArgs.Empty);
@@ -960,6 +970,11 @@ public sealed class WindowShellTests
                 var frozenReply = GetLastReply(window);
                 var frozenSnapshot = dialogue.CreateSnapshot();
                 var frozenPaused = GetPrivateField<bool>(window, "_paused");
+                var frozenBubbleVisibility = bubble.Visibility;
+                var frozenSpeech = speech.Text;
+                autoStartItem.IsChecked = true;
+                autoStartItem.IsEnabled = false;
+                autoStartItem.ToolTip = "frozen";
 
                 exit = window.RequestExitAsync();
                 duplicateExit = window.RequestExitAsync();
@@ -968,6 +983,13 @@ public sealed class WindowShellTests
                 Assert.False(automaticTimer.IsEnabled);
                 Assert.False(eventTimer.IsEnabled);
                 Assert.False(ambientTimer.IsEnabled);
+                Assert.False(bubbleTimer.IsEnabled);
+                Assert.Equal(BubbleCountdownState.Hidden, bubbleCountdown.State);
+                var countdownClosed = typeof(BubbleCountdownController).GetField(
+                    "_closed",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.NotNull(countdownClosed);
+                Assert.True(Assert.IsType<bool>(countdownClosed!.GetValue(bubbleCountdown)));
                 Assert.False(exit.IsCompleted);
                 Assert.True(duplicateExit.IsCompletedSuccessfully);
 
@@ -976,11 +998,25 @@ public sealed class WindowShellTests
                 InvokePrivate(window, "AutomaticTimer_Tick", null, EventArgs.Empty);
                 InvokePrivate(window, "EventTimer_Tick", null, EventArgs.Empty);
                 InvokePrivate(window, "AmbientTimer_Tick", null, EventArgs.Empty);
+                InvokePrivate(window, "BubbleHover_MouseEnter", character, null);
+                InvokePrivate(window, "BubbleHover_MouseLeave", character, null);
+                InvokePrivate(window, "BubbleHover_MouseEnter", bubble, null);
+                InvokePrivate(window, "BubbleHover_MouseLeave", bubble, null);
+                InvokePrivate(window, "BubbleTimer_Tick", null, EventArgs.Empty);
+                InvokePrivate(window, "SynchronizeBubbleTimer");
+                controlMenu.RaiseEvent(new RoutedEventArgs(ContextMenu.OpenedEvent));
 
                 Assert.False(memoryTimer.IsEnabled);
                 Assert.False(automaticTimer.IsEnabled);
                 Assert.False(eventTimer.IsEnabled);
                 Assert.False(ambientTimer.IsEnabled);
+                Assert.False(bubbleTimer.IsEnabled);
+                Assert.Equal(BubbleCountdownState.Hidden, bubbleCountdown.State);
+                Assert.Equal(frozenBubbleVisibility, bubble.Visibility);
+                Assert.Equal(frozenSpeech, speech.Text);
+                Assert.True(autoStartItem.IsChecked);
+                Assert.False(autoStartItem.IsEnabled);
+                Assert.Equal("frozen", autoStartItem.ToolTip);
                 Assert.Equal(frozenPaused, GetPrivateField<bool>(window, "_paused"));
                 Assert.Same(frozenReply, GetLastReply(window));
                 Assert.Equal(frozenSnapshot.TurnCount, dialogue.CreateSnapshot().TurnCount);
