@@ -148,6 +148,8 @@ if (($isTestProject | Out-String).Trim() -ne 'true') {
 dotnet test CompanionDesktopPet.sln -c Release --no-restore
 ```
 
+`simulation-events.json` 必须使用 schema v2，并同时绑定 corpus SHA-256、scheduler config SHA-256、subseed derivation version 与 derivation SHA-256；任一字段漂移都必须产生 `simulation_replay_binding_mismatch` 硬错误。校验器必须为 `0 hard errors`，并且 warning 只能精确等于一条 `surface_inventory_observation`，其他 warning 一律阻断发布。
+
 测试全绿后，只删除已验证位于仓库内的 scratch/publish 目录，并只覆盖明确的交付 EXE：
 
 ```powershell

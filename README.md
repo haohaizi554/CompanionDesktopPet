@@ -112,7 +112,7 @@ if (($isTestProject | Out-String).Trim() -ne 'true') {
 dotnet test CompanionDesktopPet.sln -c Release --no-restore
 ```
 
-校验器合格输出是 `Validation: 0 hard errors, 0 warnings`；模拟必须为零硬约束违规；.NET 门禁必须显示实际执行的非零测试数，不能只检查 `dotnet test` 的退出码。
+校验器合格输出必须是 `Validation: 0 hard errors`。扩展运行时当前只允许一条描述原始库存结构的 `surface_inventory_observation` warning；出现任何其他 warning 都阻断发布。模拟必须为零硬约束违规；.NET 门禁必须显示实际执行的非零测试数，不能只检查 `dotnet test` 的退出码。
 
 ## 干净发布与隔离烟测
 

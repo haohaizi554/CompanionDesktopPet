@@ -109,7 +109,7 @@ python tools/validate_corpus_v2.py `
   --simulation reports/simulation-events.json
 ```
 
-合格输出是 `Validation: 0 hard errors, 0 warnings`。白名单只允许精确匹配并附理由，不能用宽泛正则掩盖新问题。
+合格输出必须是 `Validation: 0 hard errors`。扩展运行时只允许一条描述原始库存结构的 `surface_inventory_observation` warning；任何其他 warning 都阻断发布。白名单只允许精确匹配并附理由，不能用宽泛正则掩盖新问题。
 
 ## 8. 30 天、多种子模拟
 

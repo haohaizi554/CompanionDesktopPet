@@ -1,5 +1,8 @@
 **/bin/
 **/obj/
+**/__pycache__/
+.pytest_cache/
+*.py[cod]
 .vs/
 publish/
 outputs/verify/
