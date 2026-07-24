@@ -521,6 +521,12 @@ def run_adversarial_suite(config: SchedulerConfig) -> AdversarialSuiteResult:
         required=("hourly_budget_violation",),
         selector_expected_selected=False,
     )
+    evaluate(
+        "rolling_hour:max:allow",
+        hourly[:-1],
+        forbidden=("hourly_budget_violation",),
+        selector_expected_selected=True,
+    )
 
     late_start = _FIXTURE_START.replace(hour=1)
     late = tuple(
@@ -537,6 +543,12 @@ def run_adversarial_suite(config: SchedulerConfig) -> AdversarialSuiteResult:
         late,
         required=("late_night_budget_violation",),
         selector_expected_selected=False,
+    )
+    evaluate(
+        "late_night:max:allow",
+        late[:-1],
+        forbidden=("late_night_budget_violation",),
+        selector_expected_selected=True,
     )
 
     for index, group in enumerate(sorted(config.block_adjacent_category_groups)):
@@ -559,6 +571,31 @@ def run_adversarial_suite(config: SchedulerConfig) -> AdversarialSuiteResult:
             adjacent,
             required=(f"adjacent_group_violation:{group}",),
             selector_expected_selected=False,
+        )
+        previous_group = next(
+            candidate_group
+            for candidate_group in groups
+            if candidate_group != group
+        )
+        allowed = (
+            _fixture_attempt(
+                550 + index * 2,
+                _FIXTURE_START,
+                1440,
+                category_group=previous_group,
+            ),
+            _fixture_attempt(
+                551 + index * 2,
+                _FIXTURE_START + timedelta(minutes=gap),
+                gap,
+                category_group=group,
+            ),
+        )
+        evaluate(
+            f"adjacent_group:{group}:allow_different_previous",
+            allowed,
+            forbidden=(f"adjacent_group_violation:{group}",),
+            selector_expected_selected=True,
         )
 
     daily_first, daily_second = _pair(

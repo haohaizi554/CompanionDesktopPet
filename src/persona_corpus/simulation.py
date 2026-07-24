@@ -15,7 +15,12 @@ from .loader import CorpusFormatError, load_legacy
 from .models import CorpusLine, LegacyLine
 from .normalization import normalize_text
 from .schema import ARCHIVE_HEADER, PII_REVIEW_HEADER, REVIEW_HEADER
-from .selector import SchedulerConfig, SelectorConfigError, select_line
+from .selector import (
+    SchedulerConfig,
+    SelectorConfigError,
+    prepare_corpus,
+    select_line,
+)
 from .simulation_core.constraints import analyze_constraints, run_adversarial_suite
 from .simulation_core.metrics import (
     DistributionTolerance,
@@ -31,11 +36,15 @@ from .simulation_core.report import (
     render_simulation_report,
 )
 from .simulation_core.scenarios import (
+    NULLABLE_SIGNAL_COMBINATIONS,
+    SUBSEED_DERIVATION_SHA256,
+    SUBSEED_DERIVATION_SPEC,
     SUBSEED_DERIVATION_VERSION,
     CandidateIndex,
     build_scenario_coverage,
     derive_subseed,
     probe_inventory_coverage,
+    summarize_scenario_coverage,
 )
 from .validation import (
     CATCHPHRASES,
@@ -60,9 +69,14 @@ LENGTH_BUCKETS = ("<8", "8-16", "17-24", "25-36", ">36")
 PREFIX_WIDTHS = (2, 3, 4, 5, 6)
 SUFFIX_WIDTHS = (4, 6, 8, 10)
 SIMULATION_SCHEMA_VERSION = 1
-SIMULATION_START = datetime(2026, 1, 1, tzinfo=timezone(timedelta(hours=8)))
+SIMULATION_STARTS = (
+    datetime(2026, 1, 1, tzinfo=timezone(timedelta(hours=8))),
+    datetime(2026, 3, 1, tzinfo=timezone(timedelta(hours=8))),
+    datetime(2026, 6, 1, tzinfo=timezone(timedelta(hours=8))),
+    datetime(2026, 9, 1, tzinfo=timezone(timedelta(hours=8))),
+)
 ATTEMPT_SLOTS = (
-    (1, 20, "day_changed"),
+    (5, 0, "day_changed"),
     (7, 20, "app_start"),
     (11, 40, "tick"),
     (15, 15, "tick"),
@@ -200,18 +214,18 @@ def simulate(
     except (TypeError, ValueError) as error:
         raise SimulationError(f"inputs cannot be hashed deterministically: {error}") from error
 
-    candidate_index = CandidateIndex.build(rows)
-    scenario_coverage = build_scenario_coverage()
+    prepared_corpus = prepare_corpus(rows)
     inventory_coverage = probe_inventory_coverage(rows, scheduler)
     adversarial_result = run_adversarial_suite(scheduler)
 
     attempts: list[SimulationAttempt] = []
     for seed in canonical_seeds:
+        simulation_start = SIMULATION_STARTS[seed % len(SIMULATION_STARTS)]
         history = SelectionHistory()
         last_output_at: datetime | None = None
         for day_index in range(days):
             for slot_index, (hour, minute, event) in enumerate(ATTEMPT_SLOTS):
-                now = SIMULATION_START + timedelta(
+                now = simulation_start + timedelta(
                     days=day_index, hours=hour, minutes=minute
                 )
                 elapsed = (
@@ -223,19 +237,25 @@ def simulate(
                 anniversary_days = (
                     ANNIVERSARY_DAYS if day_index == ANNIVERSARY_DAY_INDEX else 0
                 )
+                signal_index = (
+                    day_index * len(ATTEMPT_SLOTS) + slot_index
+                ) % len(NULLABLE_SIGNAL_COMBINATIONS)
+                ide_foreground, active_minutes, idle_return, fullscreen = (
+                    NULLABLE_SIGNAL_COMBINATIONS[signal_index]
+                )
                 context = PersonaContext.from_datetime(
                     now,
                     event=event,
                     holiday=holiday,
                     anniversary_days=anniversary_days,
                     minutes_since_last_output=elapsed,
-                    ide_foreground=None,
-                    active_minutes=None,
-                    idle_return=None,
-                    fullscreen=None,
+                    ide_foreground=ide_foreground,
+                    active_minutes=active_minutes,
+                    idle_return=idle_return,
+                    fullscreen=fullscreen,
                 )
                 selected = select_line(
-                    candidate_index.candidates_for(context, now, scheduler),
+                    prepared_corpus,
                     context,
                     history,
                     now,
@@ -261,6 +281,7 @@ def simulate(
                     )
                 )
 
+    scenario_coverage = summarize_scenario_coverage(attempts)
     return analyze_simulation(
         corpus_sha256=corpus_digest,
         enabled_corpus_count=sum(row.enabled for row in rows),
@@ -884,6 +905,8 @@ def write_editorial_reports(
 
 
 __all__ = [
+    "SUBSEED_DERIVATION_SHA256",
+    "SUBSEED_DERIVATION_SPEC",
     "SUBSEED_DERIVATION_VERSION",
     "CandidateIndex",
     "DistributionTolerance",

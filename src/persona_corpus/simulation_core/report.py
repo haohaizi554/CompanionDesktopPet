@@ -21,6 +21,7 @@ from .metrics import (
     derive_dry_sharp_policy,
 )
 from .scenarios import (
+    SUBSEED_DERIVATION_SHA256,
     SUBSEED_DERIVATION_VERSION,
     InventoryCoverage,
     ScenarioCoverage,
@@ -112,6 +113,7 @@ class SimulationReport:
     corpus_sha256: str
     scheduler_config_sha256: str
     subseed_derivation_version: str
+    subseed_derivation_sha256: str
     distribution_policy: DistributionPolicy
     dry_sharp_policy: DrySharpPolicy
     scenario_coverage: ScenarioCoverage
@@ -124,7 +126,10 @@ class SimulationReport:
     output_count: int
     none_count: int
     average_outputs_per_day: float
+    minimum_output_interval_minutes: float
     max_outputs_per_hour: int
+    max_late_night_outputs_per_hour: int
+    blocked_adjacent_counts: dict[str, int]
     group_counts: dict[str, int]
     group_ratio: dict[str, float]
     mode_counts: dict[str, int]
@@ -344,6 +349,9 @@ def analyze_simulation(
     question_count = 0
     unmet_context_count = 0
     max_outputs_per_hour = 0
+    max_late_night_outputs_per_hour = 0
+    minimum_output_interval_minutes: float | None = None
+    blocked_adjacent_counts: Counter[str] = Counter()
     per_seed: dict[int, SeedMetrics] = {}
 
     for seed in seeds:
@@ -356,6 +364,7 @@ def analyze_simulation(
         last_id: dict[str, datetime] = {}
         last_semantic: dict[str, datetime] = {}
         rolling_hour: list[datetime] = []
+        rolling_late_night: list[datetime] = []
 
         if not outputs:
             _add_hard(hard, anomalies, seed, "zero_outputs")
@@ -374,6 +383,11 @@ def analyze_simulation(
 
             if previous is not None and previous.row is not None:
                 elapsed_minutes = (now - previous.attempted_at).total_seconds() / 60
+                minimum_output_interval_minutes = (
+                    elapsed_minutes
+                    if minimum_output_interval_minutes is None
+                    else min(minimum_output_interval_minutes, elapsed_minutes)
+                )
                 if abs(elapsed_minutes - float(attempt.context.minutes_since_last_output)) > _EPSILON:
                     unmet_context_count += 1
                 if (
@@ -384,6 +398,8 @@ def analyze_simulation(
                     adjacent_care += 1
                 if row.category_group == previous.row.category_group:
                     adjacent_same_group += 1
+                    if row.category_group in config.block_adjacent_category_groups:
+                        blocked_adjacent_counts[row.category_group] += 1
                     if row.category_group == "technical":
                         adjacent_technical += 1
                     elif row.category_group == "daily_care":
@@ -412,6 +428,17 @@ def analyze_simulation(
             ]
             rolling_hour.append(now)
             max_outputs_per_hour = max(max_outputs_per_hour, len(rolling_hour))
+            if attempt.context.daypart == "late_night":
+                rolling_late_night = [
+                    played_at
+                    for played_at in rolling_late_night
+                    if now - played_at < timedelta(hours=1)
+                ]
+                rolling_late_night.append(now)
+                max_late_night_outputs_per_hour = max(
+                    max_late_night_outputs_per_hour,
+                    len(rolling_late_night),
+                )
             last_id[row.id] = now
             last_semantic[row.semantic_group] = now
             previous = attempt
@@ -539,6 +566,7 @@ def analyze_simulation(
         corpus_sha256=corpus_sha256,
         scheduler_config_sha256=config_sha256,
         subseed_derivation_version=SUBSEED_DERIVATION_VERSION,
+        subseed_derivation_sha256=SUBSEED_DERIVATION_SHA256,
         distribution_policy=distribution_policy,
         dry_sharp_policy=dry_sharp_policy,
         scenario_coverage=scenario_coverage,
@@ -551,7 +579,13 @@ def analyze_simulation(
         output_count=output_count,
         none_count=len(attempts) - output_count,
         average_outputs_per_day=(output_count / (days * len(seeds))),
+        minimum_output_interval_minutes=minimum_output_interval_minutes or 0.0,
         max_outputs_per_hour=max_outputs_per_hour,
+        max_late_night_outputs_per_hour=max_late_night_outputs_per_hour,
+        blocked_adjacent_counts={
+            group: blocked_adjacent_counts[group]
+            for group in sorted(config.block_adjacent_category_groups)
+        },
         group_counts=group_counts,
         group_ratio=group_ratio,
         mode_counts=mode_counts,
@@ -638,6 +672,7 @@ def render_simulation_report(report: SimulationReport) -> str:
                 ("Corpus SHA-256", f"`{report.corpus_sha256}`"),
                 ("Scheduler SHA-256", f"`{report.scheduler_config_sha256}`"),
                 ("Subseed derivation", report.subseed_derivation_version),
+                ("Subseed derivation SHA-256", f"`{report.subseed_derivation_sha256}`"),
                 (
                     "Distribution tolerance",
                     _percent(report.distribution_policy.tolerance.absolute),
@@ -654,7 +689,23 @@ def render_simulation_report(report: SimulationReport) -> str:
                 ("2. Actual outputs", report.output_count),
                 ("3. Returned None", report.none_count),
                 ("4. Average outputs per day per seed", f"{report.average_outputs_per_day:.3f}"),
+                (
+                    "Natural minimum output interval (minutes)",
+                    f"{report.minimum_output_interval_minutes:.3f}",
+                ),
                 ("5. Maximum outputs in rolling (now-60m, now]", report.max_outputs_per_hour),
+                (
+                    "Natural late-night maximum in rolling (now-60m, now]",
+                    report.max_late_night_outputs_per_hour,
+                ),
+                (
+                    "Natural blocked adjacent groups",
+                    ", ".join(
+                        f"{group}={count}"
+                        for group, count in report.blocked_adjacent_counts.items()
+                    )
+                    or "none",
+                ),
                 ("8. Technical playback ratio", _percent(report.technical_ratio)),
                 ("9. EasterEgg playback ratio", _percent(report.easter_egg_ratio)),
                 ("10. user_direct playback ratio", _percent(report.user_direct_ratio)),

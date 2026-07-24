@@ -3,8 +3,9 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
+from itertools import product
 from types import MappingProxyType
-from typing import Iterable, Mapping
+from typing import Iterable, Mapping, Protocol
 
 from ..context import PersonaContext
 from ..history import SelectionHistory
@@ -13,8 +14,24 @@ from ..selector import SchedulerConfig, select_line
 
 
 SUBSEED_DERIVATION_VERSION = "persona-simulation-v2"
+SUBSEED_DERIVATION_SPEC = (
+    "encoding=utf-8;separator=U+001F;"
+    "fields=derivation_version,corpus_sha256,scheduler_config_sha256,scenario,"
+    "seed,day_index,slot_index;digest=sha256;result=first-8-bytes-big-endian-unsigned"
+)
+SUBSEED_DERIVATION_SHA256 = hashlib.sha256(
+    SUBSEED_DERIVATION_SPEC.encode("utf-8")
+).hexdigest()
 _LOCAL_TIMEZONE = timezone(timedelta(hours=8))
 _SEARCH_START = datetime(2026, 1, 1, tzinfo=_LOCAL_TIMEZONE)
+NULLABLE_SIGNAL_COMBINATIONS = tuple(
+    product(
+        (None, False, True),
+        (None, 89, 90, 91),
+        (None, False, True),
+        (None, False, True),
+    )
+)
 
 
 def derive_subseed(
@@ -156,6 +173,94 @@ class ScenarioCoverage:
     nullable_signal_combinations: int
 
 
+class ScenarioAttemptLike(Protocol):
+    attempted_at: datetime
+    context: PersonaContext
+
+
+def summarize_scenario_coverage(
+    attempts: Iterable[ScenarioAttemptLike],
+) -> ScenarioCoverage:
+    """Summarize contexts that actually traversed the natural selector run."""
+
+    seasons: set[str] = set()
+    dayparts: set[str] = set()
+    events: set[str] = set()
+    weekends: set[bool] = set()
+    ide_values: set[bool | None] = set()
+    active_values: set[int | None] = set()
+    idle_values: set[bool | None] = set()
+    fullscreen_values: set[bool | None] = set()
+    nullable_combinations: set[tuple[bool | None, int | None, bool | None, bool | None]] = set()
+    dawn = False
+    holiday = False
+    anniversary = False
+    month_boundary = False
+
+    for attempt in attempts:
+        now = attempt.attempted_at
+        context = attempt.context
+        tokens = context.controlled_tokens(now)
+        seasons.update(
+            token.removeprefix("season:")
+            for token in tokens
+            if token.startswith("season:")
+        )
+        dayparts.add(context.daypart)
+        events.add(context.event)
+        weekends.add(context.is_weekend)
+        ide_values.add(context.ide_foreground)
+        active_values.add(context.active_minutes)
+        idle_values.add(context.idle_return)
+        fullscreen_values.add(context.fullscreen)
+        nullable_combinations.add(
+            (
+                context.ide_foreground,
+                context.active_minutes,
+                context.idle_return,
+                context.fullscreen,
+            )
+        )
+        dawn = dawn or "time:dawn" in tokens
+        holiday = holiday or "date:holiday" in tokens
+        anniversary = anniversary or "anniversary" in tokens
+        month_boundary = month_boundary or "date:month_boundary" in tokens
+
+    return ScenarioCoverage(
+        seasons=tuple(
+            name
+            for name in ("spring", "summer", "autumn", "winter")
+            if name in seasons
+        ),
+        dayparts=tuple(
+            name
+            for name in ("late_night", "morning", "noon", "afternoon", "evening")
+            if name in dayparts
+        ),
+        dawn=dawn,
+        events=tuple(
+            name for name in ("tick", "app_start", "day_changed") if name in events
+        ),
+        weekend_values=tuple(value for value in (False, True) if value in weekends),
+        holiday=holiday,
+        anniversary=anniversary,
+        month_boundary=month_boundary,
+        ide_foreground_values=tuple(
+            value for value in (None, False, True) if value in ide_values
+        ),
+        active_minutes_values=tuple(
+            value for value in (None, 89, 90, 91) if value in active_values
+        ),
+        idle_return_values=tuple(
+            value for value in (None, False, True) if value in idle_values
+        ),
+        fullscreen_values=tuple(
+            value for value in (None, False, True) if value in fullscreen_values
+        ),
+        nullable_signal_combinations=len(nullable_combinations),
+    )
+
+
 def build_scenario_coverage() -> ScenarioCoverage:
     """Build and summarize the deterministic context scenario matrix."""
 
@@ -201,20 +306,15 @@ def build_scenario_coverage() -> ScenarioCoverage:
     active_values = (None, 89, 90, 91)
     idle_values = (None, False, True)
     fullscreen_values = (None, False, True)
-    combinations = 0
     signal_now = _SEARCH_START.replace(month=7, day=1, hour=8)
-    for ide in ide_values:
-        for active in active_values:
-            for idle in idle_values:
-                for fullscreen in fullscreen_values:
-                    PersonaContext.from_datetime(
-                        signal_now,
-                        ide_foreground=ide,
-                        active_minutes=active,
-                        idle_return=idle,
-                        fullscreen=fullscreen,
-                    ).controlled_tokens(signal_now)
-                    combinations += 1
+    for ide, active, idle, fullscreen in NULLABLE_SIGNAL_COMBINATIONS:
+        PersonaContext.from_datetime(
+            signal_now,
+            ide_foreground=ide,
+            active_minutes=active,
+            idle_return=idle,
+            fullscreen=fullscreen,
+        ).controlled_tokens(signal_now)
 
     return ScenarioCoverage(
         seasons=tuple(name for name in ("spring", "summer", "autumn", "winter") if name in seasons),
@@ -233,7 +333,7 @@ def build_scenario_coverage() -> ScenarioCoverage:
         active_minutes_values=active_values,
         idle_return_values=idle_values,
         fullscreen_values=fullscreen_values,
-        nullable_signal_combinations=combinations,
+        nullable_signal_combinations=len(NULLABLE_SIGNAL_COMBINATIONS),
     )
 
 

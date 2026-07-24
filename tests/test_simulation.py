@@ -9,6 +9,7 @@ from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from src.persona_corpus.builder import serialize_v2
 from src.persona_corpus.context import PersonaContext
@@ -16,6 +17,8 @@ from src.persona_corpus.contract import PERSONA_CONTRACT
 from src.persona_corpus.loader import load_v2
 from src.persona_corpus.simulation import (
     SUBSEED_DERIVATION_VERSION,
+    SUBSEED_DERIVATION_SHA256,
+    SUBSEED_DERIVATION_SPEC,
     CandidateIndex,
     DistributionTolerance,
     SimulationAttempt,
@@ -32,7 +35,12 @@ from src.persona_corpus.simulation import (
     simulate,
     write_editorial_reports,
 )
-from src.persona_corpus.selector import SchedulerConfig
+from src.persona_corpus.selector import (
+    PreparedCorpus,
+    SchedulerConfig,
+    prepare_corpus,
+    select_line,
+)
 from src.persona_corpus.simulation_core.report import analyze_simulation
 from src.persona_corpus.validation import (
     CATCHPHRASES,
@@ -56,7 +64,10 @@ METRIC_ATTRIBUTES = (
     "output_count",
     "none_count",
     "average_outputs_per_day",
+    "minimum_output_interval_minutes",
     "max_outputs_per_hour",
+    "max_late_night_outputs_per_hour",
+    "blocked_adjacent_counts",
     "group_ratio",
     "mode_ratio",
     "technical_ratio",
@@ -88,6 +99,7 @@ METRIC_ATTRIBUTES = (
     "unmet_context_count",
     "per_seed_anomalies",
     "subseed_derivation_version",
+    "subseed_derivation_sha256",
     "distribution_policy",
     "scenario_coverage",
     "inventory_coverage",
@@ -154,11 +166,30 @@ class SimulationIntegrationTests(unittest.TestCase):
         self.assertEqual(10, len(self.report.per_seed_anomalies))
         self.assertEqual(set(range(10)), set(self.report.per_seed_anomalies))
         self.assertEqual(SUBSEED_DERIVATION_VERSION, self.report.subseed_derivation_version)
+        self.assertEqual(SUBSEED_DERIVATION_SHA256, self.report.subseed_derivation_sha256)
+        self.assertRegex(self.report.subseed_derivation_sha256, r"^[0-9a-f]{64}$")
         self.assertEqual(108, self.report.scenario_coverage.nullable_signal_combinations)
         self.assertTrue(self.report.inventory_coverage.trigger_hits)
         self.assertEqual((), self.report.inventory_coverage.trigger_misses)
         self.assertEqual((), self.report.inventory_coverage.context_misses)
         self.assertEqual((), self.report.inventory_coverage.unreachable_pairs)
+        scheduler = SchedulerConfig.from_mapping(self.config)
+        self.assertGreaterEqual(
+            self.report.minimum_output_interval_minutes,
+            scheduler.minimum_interval_minutes,
+        )
+        self.assertLessEqual(
+            self.report.max_outputs_per_hour,
+            scheduler.max_outputs_per_hour,
+        )
+        self.assertLessEqual(
+            self.report.max_late_night_outputs_per_hour,
+            scheduler.late_night_max_outputs_per_hour,
+        )
+        self.assertEqual(
+            {group: 0 for group in sorted(scheduler.block_adjacent_category_groups)},
+            self.report.blocked_adjacent_counts,
+        )
 
     def test_combined_hard_status_requires_natural_and_adversarial_success(self) -> None:
         self.assertEqual([], combine_hard_violations((), ()))
@@ -223,6 +254,7 @@ class SimulationIntegrationTests(unittest.TestCase):
         self.assertTrue(all(set(attempt) == ATTEMPT_KEYS for attempt in attempts))
         self.assertTrue(all(set(attempt["context"]) == CONTEXT_KEYS for attempt in attempts))
         contexts = [attempt["context"] for attempt in attempts]
+        timestamps = [datetime.fromisoformat(attempt["attempted_at"]) for attempt in attempts]
         self.assertEqual(
             {"morning", "noon", "afternoon", "evening", "late_night"},
             {context["daypart"] for context in contexts},
@@ -233,15 +265,45 @@ class SimulationIntegrationTests(unittest.TestCase):
         self.assertTrue(any(not context["is_weekend"] for context in contexts))
         self.assertTrue(any(context["holiday"] is not None for context in contexts))
         self.assertTrue(any(context["anniversary_days"] > 0 for context in contexts))
+        self.assertTrue(any(4 <= timestamp.hour < 6 for timestamp in timestamps))
+        seasons = {
+            "spring" if timestamp.month in {3, 4, 5}
+            else "summer" if timestamp.month in {6, 7, 8}
+            else "autumn" if timestamp.month in {9, 10, 11}
+            else "winter"
+            for timestamp in timestamps
+        }
+        self.assertEqual({"spring", "summer", "autumn", "winter"}, seasons)
         long_silence = self.config["runtime_limits"]["long_silence_minutes"]
         self.assertTrue(
             any(context["minutes_since_last_output"] >= long_silence for context in contexts)
         )
-        for context in contexts:
-            self.assertIsNone(context["ide_foreground"])
-            self.assertIsNone(context["active_minutes"])
-            self.assertIsNone(context["idle_return"])
-            self.assertIsNone(context["fullscreen"])
+        self.assertEqual(
+            {None, False, True},
+            {context["ide_foreground"] for context in contexts},
+        )
+        self.assertEqual(
+            {None, 89, 90, 91},
+            {context["active_minutes"] for context in contexts},
+        )
+        self.assertEqual(
+            {None, False, True},
+            {context["idle_return"] for context in contexts},
+        )
+        self.assertEqual(
+            {None, False, True},
+            {context["fullscreen"] for context in contexts},
+        )
+        nullable_combinations = {
+            (
+                context["ide_foreground"],
+                context["active_minutes"],
+                context["idle_return"],
+                context["fullscreen"],
+            )
+            for context in contexts
+        }
+        self.assertEqual(108, len(nullable_combinations))
 
     def test_markdown_and_event_json_are_stable_lf_artifacts(self) -> None:
         first_markdown = render_simulation_report(self.report)
@@ -250,6 +312,7 @@ class SimulationIntegrationTests(unittest.TestCase):
         self.assertTrue(first_markdown.endswith("\n"))
         self.assertNotIn("\r", first_markdown)
         self.assertIn("Subseed derivation", first_markdown)
+        self.assertIn(SUBSEED_DERIVATION_SHA256, first_markdown)
         self.assertIn("Natural hard violations", first_markdown)
         self.assertIn("Adversarial hard violations", first_markdown)
         self.assertIn("Selector decision", first_markdown)
@@ -352,6 +415,31 @@ class SimulationUnitTests(unittest.TestCase):
         self.assertEqual(first.to_validation_json(), second.to_validation_json())
         self.assertEqual(render_simulation_report(first), render_simulation_report(second))
 
+    def test_simulation_builds_one_prepared_corpus_for_every_natural_slot(self) -> None:
+        selected_inputs: list[object] = []
+
+        def observed_select(corpus, *args, **kwargs):
+            selected_inputs.append(corpus)
+            return select_line(corpus, *args, **kwargs)
+
+        with (
+            patch(
+                "src.persona_corpus.simulation.prepare_corpus",
+                wraps=prepare_corpus,
+            ) as prepare_mock,
+            patch(
+                "src.persona_corpus.simulation.select_line",
+                side_effect=observed_select,
+            ),
+        ):
+            report = simulate(self.corpus, self.config, days=2, seeds=(7,))
+
+        self.assertEqual(1, prepare_mock.call_count)
+        self.assertEqual(report.total_attempts, len(selected_inputs))
+        self.assertTrue(selected_inputs)
+        self.assertTrue(all(isinstance(item, PreparedCorpus) for item in selected_inputs))
+        self.assertEqual(1, len({id(item) for item in selected_inputs}))
+
     def test_subseed_v2_is_bound_to_corpus_config_version_and_scenario(self) -> None:
         corpus_sha = "1" * 64
         config_sha = "2" * 64
@@ -413,6 +501,10 @@ class SimulationUnitTests(unittest.TestCase):
         self.assertEqual(4, len(variants))
         self.assertNotIn(baseline, variants)
         self.assertEqual("persona-simulation-v2", SUBSEED_DERIVATION_VERSION)
+        self.assertEqual(
+            hashlib.sha256(SUBSEED_DERIVATION_SPEC.encode("utf-8")).hexdigest(),
+            SUBSEED_DERIVATION_SHA256,
+        )
 
     def _constraint_attempt(
         self,
@@ -757,13 +849,16 @@ class SimulationUnitTests(unittest.TestCase):
             self.assertIn(f"interrupt_cost:{cost}:{minutes}m:reject_below", by_name)
             self.assertIn(f"interrupt_cost:{cost}:{minutes}m:allow_exact", by_name)
         self.assertIn("rolling_hour:max:reject", by_name)
+        self.assertIn("rolling_hour:max:allow", by_name)
         self.assertIn("late_night:max:reject", by_name)
+        self.assertIn("late_night:max:allow", by_name)
         self.assertIn("max_per_day:reject", by_name)
         self.assertIn("recent:technical:reject", by_name)
         self.assertIn("recent:user_direct:reject", by_name)
         self.assertIn("recent:easter_egg:reject", by_name)
         for group in scheduler.block_adjacent_category_groups:
             self.assertIn(f"adjacent_group:{group}:reject", by_name)
+            self.assertIn(f"adjacent_group:{group}:allow_different_previous", by_name)
 
     def test_scenario_matrix_covers_calendar_dayparts_and_nullable_signals(self) -> None:
         coverage = build_scenario_coverage()
@@ -1002,6 +1097,22 @@ class SimulationUnitTests(unittest.TestCase):
         reverse_payload = reverse.to_validation_payload()
         self.assertEqual(forward_payload["attempts"], reverse_payload["attempts"])
         self.assertNotEqual(forward.corpus_sha256, reordered.corpus_sha256)
+
+    def test_seed_scenario_is_independent_of_other_requested_seeds(self) -> None:
+        alone = simulate(self.corpus, self.config, days=2, seeds=(7,))
+        combined = simulate(self.corpus, self.config, days=2, seeds=(3, 7))
+
+        alone_seed = [
+            attempt.validation_payload()
+            for attempt in alone.attempts
+            if attempt.seed == 7
+        ]
+        combined_seed = [
+            attempt.validation_payload()
+            for attempt in combined.attempts
+            if attempt.seed == 7
+        ]
+        self.assertEqual(alone_seed, combined_seed)
 
     def test_simulation_does_not_mutate_global_random_state(self) -> None:
         random.seed(20260723)
