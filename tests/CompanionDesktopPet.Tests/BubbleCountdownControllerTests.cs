@@ -45,6 +45,22 @@ public sealed class BubbleCountdownControllerTests
     }
 
     [Fact]
+    public void NewMessageRejectsThePriorCountdownsStaleExpiry()
+    {
+        var time = new ManualTimeProvider();
+        var countdown = new BubbleCountdownController(time);
+
+        countdown.Show();
+        time.Advance(TimeSpan.FromSeconds(4));
+        countdown.Show();
+        time.Advance(TimeSpan.FromMilliseconds(1100));
+
+        Assert.False(countdown.TryExpire());
+        Assert.Equal(BubbleCountdownState.CountingDown, countdown.State);
+        Assert.Equal(TimeSpan.FromMilliseconds(3900), countdown.Remaining);
+    }
+
+    [Fact]
     public void HideAndCloseCannotBeRevivedByLeaveOrShow()
     {
         var time = new ManualTimeProvider();
