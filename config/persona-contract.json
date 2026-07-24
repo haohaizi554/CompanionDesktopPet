@@ -10,6 +10,11 @@
       60000
     ]
   },
+  "release_inventory": {
+    "expanded_runtime_rows": 52132,
+    "semantic_scene_count": 533,
+    "legacy_surface_rows": 51326
+  },
   "category_groups": [
     "technical",
     "growth",

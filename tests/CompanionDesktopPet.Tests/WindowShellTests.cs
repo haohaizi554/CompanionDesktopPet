@@ -221,7 +221,7 @@ public sealed class WindowShellTests
         });
 
         Assert.True(SpinWait.SpinUntil(
-            () => !File.Exists(Path.Combine(settingsDirectory, "settings.json.tmp")),
+            () => !HasPendingSettingsWrite(settingsDirectory),
             TimeSpan.FromSeconds(5)));
         DeleteSettingsDirectory(settingsDirectory);
     }
@@ -344,7 +344,7 @@ public sealed class WindowShellTests
         });
 
         Assert.True(SpinWait.SpinUntil(
-            () => !File.Exists(Path.Combine(settingsDirectory, "settings.json.tmp")),
+            () => !HasPendingSettingsWrite(settingsDirectory),
             TimeSpan.FromSeconds(5)));
         DeleteSettingsDirectory(settingsDirectory);
     }
@@ -434,7 +434,7 @@ public sealed class WindowShellTests
             Assert.False(automaticTimer.IsEnabled);
             AssertNeutralAmbientVisuals(window);
             Assert.False(File.Exists(Path.Combine(settingsDirectory, "settings.json")));
-            Assert.False(File.Exists(Path.Combine(settingsDirectory, "settings.json.tmp")));
+            Assert.False(HasPendingSettingsWrite(settingsDirectory));
             DeleteSettingsDirectory(settingsDirectory);
         });
     }
@@ -2456,7 +2456,7 @@ public sealed class WindowShellTests
         });
 
         Assert.True(SpinWait.SpinUntil(
-            () => !File.Exists(Path.Combine(settingsDirectory, "settings.json.tmp")),
+            () => !HasPendingSettingsWrite(settingsDirectory),
             TimeSpan.FromSeconds(5)));
         if (Directory.Exists(settingsDirectory))
         {
@@ -2713,6 +2713,14 @@ public sealed class WindowShellTests
 
     private static string CreateSettingsDirectory() =>
         Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+
+    private static bool HasPendingSettingsWrite(string settingsDirectory) =>
+        Directory.Exists(settingsDirectory)
+        && Directory.EnumerateFiles(
+                settingsDirectory,
+                "settings.json.*.tmp",
+                SearchOption.TopDirectoryOnly)
+            .Any();
 
     private static void DeleteSettingsDirectory(string settingsDirectory)
     {

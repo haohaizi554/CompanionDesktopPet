@@ -37,7 +37,7 @@ public sealed class OfflineCompanionAgent : ICompanionDialogueAgent
     public OfflineCompanionAgent(AgentMemorySnapshot snapshot)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
-        _state = snapshot.State;
+        _state = snapshot.State.Clone();
         _lastCategory = snapshot.LastCategory;
         TurnCount = snapshot.TurnCount;
         _history.Restore(snapshot.History);
@@ -63,7 +63,7 @@ public sealed class OfflineCompanionAgent : ICompanionDialogueAgent
     {
         _state ??= CharacterState.Create(DateTime.Now);
         return new AgentMemorySnapshot(
-            _state,
+            _state.Clone(),
             _history.Entries.ToArray(),
             TurnCount,
             _lastCategory,

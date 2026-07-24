@@ -9,7 +9,15 @@ public sealed record AgentMemorySnapshot(
     [property: JsonRequired] IReadOnlyList<SceneHistoryEntry> History,
     [property: JsonRequired] int TurnCount,
     [property: JsonRequired] DialogueCategory? LastCategory,
-    [property: JsonRequired] IReadOnlyList<string> RecentLines);
+    [property: JsonRequired] IReadOnlyList<string> RecentLines)
+{
+    internal AgentMemorySnapshot DetachedCopy() => new(
+        State.Clone(),
+        History.ToArray(),
+        TurnCount,
+        LastCategory,
+        RecentLines.ToArray());
+}
 
 public sealed class AgentMemoryService
 {
@@ -77,25 +85,7 @@ public sealed class AgentMemoryService
                 nameof(snapshot));
         }
 
-        Directory.CreateDirectory(_directory);
-        var temporaryPath = MemoryPath + ".tmp";
-        try
-        {
-            await using (var stream = File.Create(temporaryPath))
-            {
-                await JsonSerializer.SerializeAsync(stream, snapshot, JsonOptions);
-                await stream.FlushAsync();
-            }
-
-            File.Move(temporaryPath, MemoryPath, true);
-        }
-        finally
-        {
-            if (File.Exists(temporaryPath))
-            {
-                File.Delete(temporaryPath);
-            }
-        }
+        await AtomicJsonFile.WriteAsync(MemoryPath, snapshot, JsonOptions);
     }
 
     public static bool IsValid(AgentMemorySnapshot? snapshot)
@@ -148,7 +138,7 @@ public sealed class AgentMemoryService
         var recentLines = history.Length == 0
             ? []
             : snapshot.RecentLines.Where(knownTexts.Contains).ToArray();
-        var state = CloneState(snapshot.State);
+        var state = snapshot.State.Clone();
         state.ActiveStories = snapshot.State.ActiveStories
             .Where(story => arcs.TryGetValue(story.ArcId, out var arc)
                             && story.NodeIndex < arc.Nodes.Count)
@@ -230,19 +220,6 @@ public sealed class AgentMemoryService
             arcs.TryGetValue(story.ArcId, out var arc)
             && story.NodeIndex < arc.Nodes.Count);
     }
-
-    private static CharacterState CloneState(CharacterState source) => new()
-    {
-        Energy = source.Energy,
-        Sociability = source.Sociability,
-        Boredom = source.Boredom,
-        Mood = source.Mood,
-        Activity = source.Activity,
-        InstalledAt = source.InstalledAt,
-        LastUpdatedAt = source.LastUpdatedAt,
-        AttachmentDays = source.AttachmentDays,
-        ActiveStories = []
-    };
 
     private static bool IsStructurallyValidHistory(SceneHistoryEntry? entry) =>
         entry is not null

@@ -37,6 +37,27 @@ public sealed class SettingsServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ConcurrentSaves_UseIndependentTemporaryFilesAndLeaveOneCompleteDocument()
+    {
+        var service = new SettingsService(_directory);
+        var candidates = Enumerable.Range(0, 24)
+            .Select(index => new PetSettings(index, -index, PetScale.Normal, index % 2 == 0, true))
+            .ToArray();
+        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var saves = candidates.Select(candidate => Task.Run(async () =>
+        {
+            await start.Task;
+            await service.SaveAsync(candidate);
+        })).ToArray();
+
+        start.SetResult();
+        await Task.WhenAll(saves);
+
+        Assert.Contains(await service.LoadAsync(), candidates);
+        Assert.Empty(Directory.EnumerateFiles(_directory, "*.tmp", SearchOption.TopDirectoryOnly));
+    }
+
+    [Fact]
     public async Task Load_MalformedJson_ReturnsDefaults()
     {
         await WriteSettingsAsync("{broken");

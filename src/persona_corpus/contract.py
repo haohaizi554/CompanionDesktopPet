@@ -16,6 +16,7 @@ _TOP_LEVEL_KEYS = frozenset(
     {
         "schema_version",
         "inventory",
+        "release_inventory",
         "category_groups",
         "categories",
         "controlled_values",
@@ -87,6 +88,7 @@ def _row_range(value: object, name: str) -> tuple[int, int]:
 class PersonaContract:
     schema_version: int
     inventory: Mapping[str, tuple[int, int]]
+    release_inventory: Mapping[str, int]
     category_groups: tuple[str, ...]
     categories: Mapping[str, str]
     output_modes: frozenset[str]
@@ -126,6 +128,22 @@ def load_persona_contract(path: Path = DEFAULT_CONTRACT_PATH) -> PersonaContract
     inventory = {
         name: _row_range(value, f"inventory.{name}")
         for name, value in inventory_raw.items()
+    }
+    release_inventory_raw = _mapping(raw.get("release_inventory"), "release_inventory")
+    expected_release_inventory = {
+        "expanded_runtime_rows",
+        "semantic_scene_count",
+        "legacy_surface_rows",
+    }
+    if (
+        set(release_inventory_raw) != expected_release_inventory
+        or any(type(value) is not int or value <= 0 for value in release_inventory_raw.values())
+    ):
+        raise PersonaContractError(
+            "release_inventory must contain exactly three positive integer counts"
+        )
+    release_inventory = {
+        str(name): int(value) for name, value in release_inventory_raw.items()
     }
 
     category_groups = _string_tuple(raw.get("category_groups"), "category_groups")
@@ -425,6 +443,7 @@ def load_persona_contract(path: Path = DEFAULT_CONTRACT_PATH) -> PersonaContract
     return PersonaContract(
         schema_version=1,
         inventory=MappingProxyType(inventory),
+        release_inventory=MappingProxyType(release_inventory),
         category_groups=category_groups,
         categories=MappingProxyType(
             {str(category): str(group) for category, group in categories_raw.items()}
@@ -447,6 +466,7 @@ def load_persona_contract(path: Path = DEFAULT_CONTRACT_PATH) -> PersonaContract
 PERSONA_CONTRACT = load_persona_contract()
 CURATED_CORE_ROWS = PERSONA_CONTRACT.inventory["curated_core"]
 EXPANDED_RUNTIME_ROWS = PERSONA_CONTRACT.inventory["expanded_runtime"]
+RELEASE_INVENTORY = PERSONA_CONTRACT.release_inventory
 CATEGORY_GROUPS = frozenset(PERSONA_CONTRACT.category_groups)
 CATEGORY_GROUP_BY_CATEGORY = PERSONA_CONTRACT.categories
 OUTPUT_MODES = PERSONA_CONTRACT.output_modes
@@ -479,6 +499,7 @@ __all__ = [
     "MVP_TRIGGERS",
     "OUTPUT_MODES",
     "PERSONA_CONTRACT",
+    "RELEASE_INVENTORY",
     "PersonaContract",
     "PersonaContractError",
     "SOURCE_KINDS",

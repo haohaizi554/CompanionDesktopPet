@@ -38,10 +38,11 @@ public sealed class PersonaCorpusTests
     {
         var lines = PersonaCorpus.All;
 
-        Assert.InRange(
-            lines.Count,
-            PersonaContractGenerated.ExpandedRuntimeMinimumRows,
-            PersonaContractGenerated.ExpandedRuntimeMaximumRows);
+        Assert.Equal(PersonaContractGenerated.ExpandedRuntimeRows, lines.Count);
+        Assert.Equal(
+            PersonaContractGenerated.LegacySurfaceRows,
+            lines.Count(line => line.SourceKind == "legacy_surface_variant"));
+        Assert.Equal(PersonaContractGenerated.SemanticSceneCount, SceneCatalog.PersonaScenes.Count);
         Assert.All(lines, line => Assert.False(string.IsNullOrWhiteSpace(line.Text)));
         Assert.Equal(lines.Count, lines.Select(line => Normalize(line.Text)).Distinct().Count());
         Assert.DoesNotContain(lines, line => line.Text.Contains('?') || line.Text.Contains('？'));
@@ -105,10 +106,7 @@ public sealed class PersonaCorpusTests
         var retainedBytes = Math.Max(0, GC.GetTotalMemory(true) - before);
         Console.WriteLine(
             $"corpus parse: elapsed={stopwatch.Elapsed} allocated={allocatedBytes:N0} retained={retainedBytes:N0}");
-        Assert.InRange(
-            lines.Count,
-            PersonaContractGenerated.ExpandedRuntimeMinimumRows,
-            PersonaContractGenerated.ExpandedRuntimeMaximumRows);
+        Assert.Equal(PersonaContractGenerated.ExpandedRuntimeRows, lines.Count);
         Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(5), stopwatch.Elapsed.ToString());
         Assert.True(allocatedBytes < 256L * 1024 * 1024, $"allocated bytes: {allocatedBytes:N0}");
         Assert.True(retainedBytes < 128L * 1024 * 1024, $"retained bytes: {retainedBytes:N0}");

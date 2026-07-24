@@ -34,6 +34,7 @@ def render_contract() -> str:
     expanded_runtime_minimum, expanded_runtime_maximum = PERSONA_CONTRACT.inventory[
         "expanded_runtime"
     ]
+    release_inventory = PERSONA_CONTRACT.release_inventory
     scheduler = PERSONA_CONTRACT.scheduler
     weights = scheduler["category_group_weights"]
     group_modes = scheduler["category_group_output_modes"]
@@ -115,6 +116,9 @@ internal static class PersonaContractGenerated
     public const int CuratedCoreMaximumRows = {curated_core_maximum};
     public const int ExpandedRuntimeMinimumRows = {expanded_runtime_minimum};
     public const int ExpandedRuntimeMaximumRows = {expanded_runtime_maximum};
+    public const int ExpandedRuntimeRows = {int(release_inventory['expanded_runtime_rows'])};
+    public const int SemanticSceneCount = {int(release_inventory['semantic_scene_count'])};
+    public const int LegacySurfaceRows = {int(release_inventory['legacy_surface_rows'])};
     public const string DrySharpSceneHashNamespace = {_quoted(str(dry_sharp['scene_hash_namespace']))};
     public const string DrySharpSceneAssignmentField = {_quoted(str(dry_sharp['scene_assignment_field']))};
     public const double DrySharpSceneHashThreshold = {float(dry_sharp['scene_hash_threshold']):.2f};

@@ -113,6 +113,66 @@ public sealed class DialogueWarmupTests
     }
 
     [Fact]
+    public async Task DeferredService_DetachesInitialReturnedAndFactorySnapshots()
+    {
+        var state = CharacterState.Create(LocalNow);
+        var dueAt = LocalNow.AddMinutes(20);
+        state.ActiveStories.Add(new StoryProgress("pending-story", 2, dueAt));
+        var history = new List<SceneHistoryEntry>
+        {
+            new("scene", "semantic", LocalNow, "line")
+        };
+        var recentLines = new List<string> { "previous line" };
+        var initial = new AgentMemorySnapshot(
+            state,
+            history,
+            23,
+            DialogueCategory.Python,
+            recentLines);
+        AgentMemorySnapshot? factorySnapshot = null;
+        var service = DialogueService.CreateDeferred(
+            initial,
+            restored =>
+            {
+                factorySnapshot = restored;
+                return new FixedAgent(restored, "ready");
+            });
+
+        initial.State.ActiveStories.Clear();
+        history.Clear();
+        recentLines.Clear();
+        var first = service.CreateSnapshot();
+        first.State.ActiveStories.Clear();
+        Assert.IsType<SceneHistoryEntry[]>(first.History)[0] = new(
+            "mutated", "mutated", LocalNow, "mutated");
+        Assert.IsType<string[]>(first.RecentLines)[0] = "mutated";
+
+        var second = service.CreateSnapshot();
+        Assert.Equal(dueAt, service.NextStoryDueAt);
+        Assert.Single(second.State.ActiveStories);
+        Assert.Single(second.History);
+        Assert.Single(second.RecentLines);
+
+        Assert.True(await service.WarmupAsync());
+        Assert.NotNull(factorySnapshot);
+        Assert.Single(factorySnapshot!.State.ActiveStories);
+        Assert.Single(factorySnapshot.History);
+        Assert.Single(factorySnapshot.RecentLines);
+        Assert.NotSame(second.State, factorySnapshot.State);
+
+        var readyFirst = service.CreateSnapshot();
+        readyFirst.State.ActiveStories.Clear();
+        Assert.IsType<SceneHistoryEntry[]>(readyFirst.History)[0] = new(
+            "ready-mutated", "ready-mutated", LocalNow, "ready-mutated");
+        Assert.IsType<string[]>(readyFirst.RecentLines)[0] = "ready-mutated";
+        var readySecond = service.CreateSnapshot();
+
+        Assert.Single(readySecond.State.ActiveStories);
+        Assert.Equal("scene", Assert.Single(readySecond.History).SceneId);
+        Assert.Equal("previous line", Assert.Single(readySecond.RecentLines));
+    }
+
+    [Fact]
     public async Task Warmup_DefaultFactoryDropsCatalogIncompatibleDeferredMemory()
     {
         var state = CharacterState.Create(LocalNow);
@@ -172,6 +232,31 @@ public sealed class DialogueWarmupTests
         Assert.Equal(compatible.State.ActiveStories, recovered.State.ActiveStories);
     }
 
+    [Fact]
+    public async Task GetReply_SerializesConcurrentCallsIntoTheMutableAgent()
+    {
+        var agent = new ConcurrentCallDetectingAgent();
+        var service = DialogueService.CreateDeferred(_ => agent);
+        Assert.True(await service.WarmupAsync());
+        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var callers = Enumerable.Range(0, 24)
+            .Select(index => Task.Run(async () =>
+            {
+                await start.Task;
+                return service.GetReply(
+                    CompanionEvent.Click,
+                    LocalNow.AddSeconds(index),
+                    new Random(index));
+            }))
+            .ToArray();
+
+        start.SetResult();
+        var replies = await Task.WhenAll(callers);
+
+        Assert.All(replies, reply => Assert.True(reply.ShouldDisplayText));
+        Assert.Equal(1, agent.MaximumConcurrentCalls);
+    }
+
     private sealed class FixedAgent : ICompanionDialogueAgent
     {
         private readonly AgentMemorySnapshot _snapshot;
@@ -202,5 +287,56 @@ public sealed class DialogueWarmupTests
                 trigger,
                 SceneId: "full:test",
                 SemanticGroup: "full.test");
+    }
+
+    private sealed class ConcurrentCallDetectingAgent : ICompanionDialogueAgent
+    {
+        private int _activeCalls;
+        private int _maximumConcurrentCalls;
+
+        public int MaximumConcurrentCalls => Volatile.Read(ref _maximumConcurrentCalls);
+
+        public DateTime? NextStoryDueAt => null;
+
+        public AgentMemorySnapshot CreateSnapshot() => new(
+            CharacterState.Create(LocalNow),
+            [],
+            0,
+            null,
+            []);
+
+        public AgentReply Respond(CompanionEvent trigger, DateTime localTime, Random random)
+        {
+            var active = Interlocked.Increment(ref _activeCalls);
+            UpdateMaximum(active);
+            try
+            {
+                Thread.Sleep(15);
+                return new AgentReply(
+                    "并发也要排好队。",
+                    DialogueCategory.CharacterLife,
+                    DialogueTreeKind.Companion,
+                    trigger,
+                    SceneId: "full:concurrency",
+                    SemanticGroup: "full.concurrency");
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _activeCalls);
+            }
+        }
+
+        private void UpdateMaximum(int active)
+        {
+            while (true)
+            {
+                var observed = Volatile.Read(ref _maximumConcurrentCalls);
+                if (active <= observed
+                    || Interlocked.CompareExchange(ref _maximumConcurrentCalls, active, observed) == observed)
+                {
+                    return;
+                }
+            }
+        }
     }
 }

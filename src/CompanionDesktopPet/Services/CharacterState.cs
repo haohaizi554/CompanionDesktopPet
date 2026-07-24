@@ -112,5 +112,18 @@ public sealed class CharacterState
         Boredom = Clamp(Boredom + scene.BoredomDelta);
     }
 
+    internal CharacterState Clone() => new()
+    {
+        Energy = Energy,
+        Sociability = Sociability,
+        Boredom = Boredom,
+        Mood = Mood,
+        Activity = Activity,
+        InstalledAt = InstalledAt,
+        LastUpdatedAt = LastUpdatedAt,
+        AttachmentDays = AttachmentDays,
+        ActiveStories = [.. ActiveStories]
+    };
+
     private static double Clamp(double value) => Math.Clamp(value, 0, 1);
 }

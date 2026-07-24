@@ -7,6 +7,26 @@ namespace CompanionDesktopPet.Tests;
 public sealed class OfflineCompanionAgentTests
 {
     [Fact]
+    public void CreateSnapshot_ReturnsDetachedCharacterStateAndStoryCollection()
+    {
+        var now = new DateTime(2026, 7, 25, 10, 0, 0, DateTimeKind.Local);
+        var agent = new OfflineCompanionAgent();
+        agent.Respond(CompanionEvent.Click, now, new Random(20260725));
+        var first = agent.CreateSnapshot();
+        var expectedEnergy = first.State.Energy;
+        var injectedStory = new StoryProgress("external-mutation", 0, now.AddHours(1));
+
+        first.State.Energy = 0;
+        first.State.ActiveStories.Add(injectedStory);
+        var second = agent.CreateSnapshot();
+
+        Assert.NotSame(first.State, second.State);
+        Assert.NotSame(first.State.ActiveStories, second.State.ActiveStories);
+        Assert.Equal(expectedEnergy, second.State.Energy);
+        Assert.DoesNotContain(injectedStory, second.State.ActiveStories);
+    }
+
+    [Fact]
     public void SceneCatalog_AllScenesDisableCorpusDrivenAnimationCues()
     {
         Assert.All(SceneCatalog.All, scene => Assert.Equal("none", scene.AnimationCue));

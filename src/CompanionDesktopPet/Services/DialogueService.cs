@@ -2,20 +2,6 @@ namespace CompanionDesktopPet.Services;
 
 public sealed class DialogueService
 {
-    private static readonly IReadOnlyList<DialogueLine> FallbackClickLines =
-    [
-        FallbackLine("fallback-click-01", "在呢，别戳啦。", "fallback.click.01"),
-        FallbackLine("fallback-click-02", "嗯嗯，我听见了。", "fallback.click.02"),
-        FallbackLine("fallback-click-03", "脑袋加载中，等下。", "fallback.click.03"),
-        FallbackLine("fallback-click-04", "先陪你一下，马上好。", "fallback.click.04")
-    ];
-
-    private static readonly DialogueLine FallbackStartupLine = FallbackLine(
-        "fallback-startup-01",
-        "我先醒醒，马上就好。",
-        "fallback.startup",
-        DialogueTrigger.AppStart);
-
     private readonly object _sync = new();
     private readonly AgentMemorySnapshot? _initialSnapshot;
     private readonly Func<AgentMemorySnapshot?, ICompanionDialogueAgent>? _agentFactory;
@@ -28,11 +14,11 @@ public sealed class DialogueService
 
     public DialogueService(AgentMemorySnapshot? snapshot = null)
     {
-        _initialSnapshot = snapshot;
+        _initialSnapshot = snapshot?.DetachedCopy();
         _timeProvider = TimeProvider.System;
-        _agent = snapshot is null
+        _agent = _initialSnapshot is null
             ? new OfflineCompanionAgent()
-            : new OfflineCompanionAgent(snapshot);
+            : new OfflineCompanionAgent(_initialSnapshot);
     }
 
     private DialogueService(
@@ -40,7 +26,7 @@ public sealed class DialogueService
         Func<AgentMemorySnapshot?, ICompanionDialogueAgent> agentFactory,
         TimeProvider? timeProvider)
     {
-        _initialSnapshot = snapshot;
+        _initialSnapshot = snapshot?.DetachedCopy();
         _agentFactory = agentFactory ?? throw new ArgumentNullException(nameof(agentFactory));
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
@@ -84,10 +70,10 @@ public sealed class DialogueService
         {
             if (_agent is { } agent)
             {
-                return agent.CreateSnapshot();
+                return agent.CreateSnapshot().DetachedCopy();
             }
 
-            return _initialSnapshot ?? CreateFallbackSnapshot();
+            return (_initialSnapshot ?? CreateFallbackSnapshot()).DetachedCopy();
         }
     }
 
@@ -132,22 +118,19 @@ public sealed class DialogueService
     public AgentReply GetReply(CompanionEvent trigger, DateTime localTime, Random random)
     {
         ArgumentNullException.ThrowIfNull(random);
-        ICompanionDialogueAgent? agent;
         lock (_sync)
         {
-            agent = _agent;
+            return _agent is { } agent
+                ? agent.Respond(trigger, localTime, random)
+                : GetFallbackReply(trigger);
         }
-
-        return agent is null
-            ? GetFallbackReply(trigger)
-            : agent.Respond(trigger, localTime, random);
     }
 
     private bool InitializeAgent()
     {
         try
         {
-            var agent = _agentFactory!(_initialSnapshot)
+            var agent = _agentFactory!(_initialSnapshot?.DetachedCopy())
                 ?? throw new InvalidOperationException("The dialogue factory returned no agent.");
             lock (_sync)
             {
@@ -172,10 +155,10 @@ public sealed class DialogueService
     {
         DialogueLine? line = trigger switch
         {
-            CompanionEvent.Startup => FallbackStartupLine,
-            CompanionEvent.Click => FallbackClickLines[
+            CompanionEvent.Startup => FallbackDialogueCatalog.StartupLine,
+            CompanionEvent.Click => FallbackDialogueCatalog.ClickLines[
                 (int)((uint)Interlocked.Increment(ref _fallbackClickIndex) - 1)
-                % FallbackClickLines.Count],
+                % FallbackDialogueCatalog.ClickLines.Count],
             _ => null
         };
         if (line is null)
@@ -225,33 +208,6 @@ public sealed class DialogueService
         agent.WarmUp();
         return agent;
     }
-
-    private static DialogueLine FallbackLine(
-        string id,
-        string text,
-        string semanticGroup,
-        DialogueTrigger trigger = DialogueTrigger.Any) =>
-        new(
-            id,
-            DialogueCategory.CharacterLife,
-            DialogueCategoryGroup.CharacterLife,
-            "fallback.local",
-            semanticGroup,
-            DialogueOutputMode.SelfTalk,
-            trigger,
-            ["none"],
-            "dry_warm",
-            0,
-            1,
-            1,
-            2,
-            1,
-            false,
-            true,
-            text,
-            "builtin_fallback",
-            "builtin:fallback",
-            "cold-start safety fallback");
 
     private static bool IsFatalException(Exception exception) =>
         exception is OutOfMemoryException

@@ -645,45 +645,25 @@ public sealed class SceneScheduler
                 WeightedLineChoice(history.PreferSurfaceExposure(unusedLines), random));
         }
 
-        var oldest = DateTime.MaxValue;
-        foreach (var scene in quotaEligibleScenes)
-        {
-            foreach (var line in scene.Lines)
-            {
-                if (!line.Enabled
-                    || !history.MeetsLineExposureQuota(line)
-                    || (hasNonRepeatingLine && line.Id == lastLineId))
-                {
-                    continue;
-                }
-
-                var playedAt = lastPlayedAt.GetValueOrDefault(line.Id, DateTime.MinValue);
-                if (playedAt < oldest)
-                {
-                    oldest = playedAt;
-                }
-            }
-        }
-
-        if (oldest == DateTime.MaxValue)
-        {
-            return null;
-        }
-
-        var oldestScenes = quotaEligibleScenes
+        var reusableScenes = quotaEligibleScenes
             .Where(scene => scene.Lines.Any(line =>
                 line.Enabled
                 && history.MeetsLineExposureQuota(line)
-                && (!hasNonRepeatingLine || line.Id != lastLineId)
-                && lastPlayedAt.GetValueOrDefault(line.Id, DateTime.MinValue) == oldest))
+                && (!hasNonRepeatingLine || line.Id != lastLineId)))
             .Select(scene => Score(scene, recent))
             .ToArray();
-        var selectedScene = ChooseBest(oldestScenes, random);
+        var selectedScene = ChooseBest(reusableScenes, random);
         if (selectedScene is null)
         {
             return null;
         }
 
+        var oldest = selectedScene.Lines
+            .Where(line =>
+                line.Enabled
+                && history.MeetsLineExposureQuota(line)
+                && (!hasNonRepeatingLine || line.Id != lastLineId))
+            .Min(line => lastPlayedAt.GetValueOrDefault(line.Id, DateTime.MinValue));
         var leastRecentlyUsed = selectedScene.Lines
             .Where(line =>
                 line.Enabled

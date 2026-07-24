@@ -138,6 +138,24 @@ class PersonaContractFileTests(unittest.TestCase):
             (50000, 60000), PERSONA_CONTRACT.inventory["expanded_runtime"]
         )
 
+    def test_release_inventory_uses_exact_published_counts(self) -> None:
+        contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            {
+                "expanded_runtime_rows": 52132,
+                "semantic_scene_count": 533,
+                "legacy_surface_rows": 51326,
+            },
+            contract["release_inventory"],
+        )
+
+        from src.persona_corpus.contract import PERSONA_CONTRACT
+
+        self.assertEqual(52132, PERSONA_CONTRACT.release_inventory["expanded_runtime_rows"])
+        self.assertEqual(533, PERSONA_CONTRACT.release_inventory["semantic_scene_count"])
+        self.assertEqual(51326, PERSONA_CONTRACT.release_inventory["legacy_surface_rows"])
+
     def test_topic_id_is_lineage_metadata_not_a_semantic_scene_dimension(self) -> None:
         contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
         lineage = contract["lineage"]

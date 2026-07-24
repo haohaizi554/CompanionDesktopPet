@@ -17,6 +17,9 @@ internal static class PersonaContractGenerated
     public const int CuratedCoreMaximumRows = 1200;
     public const int ExpandedRuntimeMinimumRows = 50000;
     public const int ExpandedRuntimeMaximumRows = 60000;
+    public const int ExpandedRuntimeRows = 52132;
+    public const int SemanticSceneCount = 533;
+    public const int LegacySurfaceRows = 51326;
     public const string DrySharpSceneHashNamespace = "persona-dry-sharp-scene-v1";
     public const string DrySharpSceneAssignmentField = "semantic_group";
     public const double DrySharpSceneHashThreshold = 0.07;

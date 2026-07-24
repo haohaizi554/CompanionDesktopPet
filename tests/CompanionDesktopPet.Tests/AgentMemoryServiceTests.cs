@@ -34,6 +34,28 @@ public sealed class AgentMemoryServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ConcurrentSaves_UseIndependentTemporaryFilesAndLeaveOneCompleteDocument()
+    {
+        var service = new AgentMemoryService(_directory);
+        var candidates = Enumerable.Range(0, 16)
+            .Select(index => CreateValidSnapshot() with { TurnCount = index + 1 })
+            .ToArray();
+        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var saves = candidates.Select(candidate => Task.Run(async () =>
+        {
+            await start.Task;
+            await service.SaveAsync(candidate);
+        })).ToArray();
+
+        start.SetResult();
+        await Task.WhenAll(saves);
+
+        var loaded = Assert.IsType<AgentMemorySnapshot>(await service.LoadAsync());
+        Assert.Contains(loaded.TurnCount, candidates.Select(candidate => candidate.TurnCount));
+        Assert.Empty(Directory.EnumerateFiles(_directory, "*.tmp", SearchOption.TopDirectoryOnly));
+    }
+
+    [Fact]
     public async Task SaveAndLoad_RoundTripsFreshSnapshot()
     {
         var now = new DateTime(2026, 7, 22, 15, 0, 0);

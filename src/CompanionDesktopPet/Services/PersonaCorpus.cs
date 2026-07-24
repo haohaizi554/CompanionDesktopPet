@@ -126,6 +126,8 @@ public static class PersonaCorpus
     public const string EmbeddedResourceName = "CompanionDesktopPet.Assets.persona-corpus-v2.tsv";
     public const int MinimumRuntimeRows = PersonaContractGenerated.ExpandedRuntimeMinimumRows;
     public const int MaximumRuntimeRows = PersonaContractGenerated.ExpandedRuntimeMaximumRows;
+    public const int ExpectedRuntimeRows = PersonaContractGenerated.ExpandedRuntimeRows;
+    public const int ExpectedLegacySurfaceRows = PersonaContractGenerated.LegacySurfaceRows;
 
     public static IReadOnlyList<string> V2Header { get; } =
     [
@@ -173,10 +175,17 @@ public static class PersonaCorpus
         using var stream = typeof(PersonaCorpus).Assembly.GetManifestResourceStream(EmbeddedResourceName)
             ?? throw new InvalidOperationException($"Embedded persona corpus '{EmbeddedResourceName}' was not found.");
         var all = Load(stream);
-        if (all.Count is < MinimumRuntimeRows or > MaximumRuntimeRows)
+        if (all.Count != ExpectedRuntimeRows)
         {
             throw new InvalidDataException(
-                $"Enabled v2 persona corpus must contain {MinimumRuntimeRows}-{MaximumRuntimeRows} rows, found {all.Count}.");
+                $"Enabled v2 persona corpus must contain exactly {ExpectedRuntimeRows} rows, found {all.Count}.");
+        }
+
+        var legacySurfaceRows = all.Count(line => line.SourceKind == "legacy_surface_variant");
+        if (legacySurfaceRows != ExpectedLegacySurfaceRows)
+        {
+            throw new InvalidDataException(
+                $"Enabled v2 persona corpus must contain exactly {ExpectedLegacySurfaceRows} legacy surface rows, found {legacySurfaceRows}.");
         }
 
         return new CorpusSnapshot(

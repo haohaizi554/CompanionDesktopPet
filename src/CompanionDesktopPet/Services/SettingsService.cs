@@ -65,25 +65,6 @@ public sealed class SettingsService
                 nameof(settings));
         }
 
-        Directory.CreateDirectory(_directory);
-        var temporaryPath = SettingsPath + ".tmp";
-
-        try
-        {
-            await using (var stream = File.Create(temporaryPath))
-            {
-                await JsonSerializer.SerializeAsync(stream, settings, JsonOptions);
-                await stream.FlushAsync();
-            }
-
-            File.Move(temporaryPath, SettingsPath, true);
-        }
-        finally
-        {
-            if (File.Exists(temporaryPath))
-            {
-                File.Delete(temporaryPath);
-            }
-        }
+        await AtomicJsonFile.WriteAsync(SettingsPath, settings, JsonOptions);
     }
 }

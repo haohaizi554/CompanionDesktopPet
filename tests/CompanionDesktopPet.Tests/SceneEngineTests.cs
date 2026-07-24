@@ -527,7 +527,7 @@ public sealed class SceneEngineTests
     }
 
     [Fact]
-    public void ClickFallback_ChoosesTheGlobalLeastRecentlyUsedEnabledLineBeforeScoringItsScene()
+    public void ClickFallback_SelectsTheSceneBeforeApplyingLineRecencyWithinThatScene()
     {
         var scenes = SceneCatalog.PersonaScenes
             .Where(scene => scene.Triggers.Contains(CompanionEvent.Click))
@@ -538,25 +538,38 @@ public sealed class SceneEngineTests
             .ToArray();
         Assert.Equal(2, scenes.Length);
 
-        var history = new SceneHistory();
+        var firstHistory = new SceneHistory();
+        var secondHistory = new SceneHistory();
         var now = new DateTime(2026, 7, 24, 15, 0, 0, DateTimeKind.Local);
         for (var index = 0; index < scenes[0].Lines.Count; index++)
         {
-            history.Record(scenes[0], now.AddHours(-8).AddSeconds(index), scenes[0].Lines[index]);
+            firstHistory.Record(scenes[0], now.AddHours(-8).AddSeconds(index), scenes[0].Lines[index]);
+            secondHistory.Record(scenes[0], now.AddHours(-1).AddSeconds(index), scenes[0].Lines[index]);
         }
         for (var index = 0; index < scenes[1].Lines.Count; index++)
         {
-            history.Record(scenes[1], now.AddHours(-1).AddSeconds(index), scenes[1].Lines[index]);
+            firstHistory.Record(scenes[1], now.AddHours(-1).AddSeconds(index), scenes[1].Lines[index]);
+            secondHistory.Record(scenes[1], now.AddHours(-8).AddSeconds(index), scenes[1].Lines[index]);
         }
 
-        var selection = new SceneScheduler().SelectReusableClickFallback(
+        var firstSelection = new SceneScheduler().SelectReusableClickFallback(
             scenes,
-            history,
+            firstHistory,
+            new Random(20260724));
+        var secondSelection = new SceneScheduler().SelectReusableClickFallback(
+            scenes,
+            secondHistory,
             new Random(20260724));
 
-        Assert.NotNull(selection);
-        Assert.Equal(scenes[0].Id, selection!.Scene.Id);
-        Assert.Equal(scenes[0].Lines[0].Id, selection.ReusedLine!.Id);
+        Assert.NotNull(firstSelection);
+        Assert.NotNull(secondSelection);
+        Assert.Equal(firstSelection!.Scene.Id, secondSelection!.Scene.Id);
+        Assert.Equal(
+            firstSelection.Scene.Lines[0].Id,
+            firstSelection.ReusedLine!.Id);
+        Assert.Equal(
+            secondSelection.Scene.Lines[0].Id,
+            secondSelection.ReusedLine!.Id);
     }
 
     private static IReadOnlySet<string> ContextTokens(SceneContext context)

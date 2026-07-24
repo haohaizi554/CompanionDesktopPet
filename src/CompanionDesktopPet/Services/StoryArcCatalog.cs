@@ -4,11 +4,17 @@ public sealed record StoryArcDefinition(string Id, string Name, IReadOnlyList<Sc
 
 public static class StoryArcCatalog
 {
-    public static IReadOnlyList<StoryArcDefinition> All { get; } = Build();
+    private static readonly Lazy<IReadOnlyList<StoryArcDefinition>> Arcs = new(
+        () => Build(SceneCatalog.PersonaScenes),
+        LazyThreadSafetyMode.ExecutionAndPublication);
 
-    private static IReadOnlyList<StoryArcDefinition> Build()
+    public static IReadOnlyList<StoryArcDefinition> All => Arcs.Value;
+
+    internal static IReadOnlyList<StoryArcDefinition> Build(
+        IReadOnlyList<SceneDefinition> personaScenes)
     {
-        var source = SceneCatalog.PersonaScenes
+        ArgumentNullException.ThrowIfNull(personaScenes);
+        var source = personaScenes
             .Where(scene => scene.CategoryGroup is DialogueCategoryGroup.CharacterLife
                 or DialogueCategoryGroup.Growth
                 or DialogueCategoryGroup.Career)
@@ -21,7 +27,7 @@ public static class StoryArcCatalog
             .ToArray();
         if (source.Length < 30)
         {
-            throw new InvalidOperationException("The enabled v2 corpus does not contain enough story-safe semantic groups.");
+            return [];
         }
 
         return source
