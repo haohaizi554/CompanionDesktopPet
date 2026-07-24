@@ -11,6 +11,7 @@ from typing import Iterable, Mapping, Sequence
 from .builder import serialize_v2
 from .context import PersonaContext
 from .history import SelectionHistory
+from .lexical import contains_seasoning_marker
 from .loader import CorpusFormatError, load_legacy
 from .models import CorpusLine, LegacyLine
 from .normalization import normalize_text
@@ -26,6 +27,7 @@ from .simulation_core.metrics import (
     DistributionTolerance,
     derive_distribution_policy,
     derive_dry_sharp_policy,
+    derive_lexical_exposure_policy,
 )
 from .simulation_core.report import (
     SeedMetrics,
@@ -47,7 +49,6 @@ from .simulation_core.scenarios import (
     summarize_scenario_coverage,
 )
 from .validation import (
-    CATCHPHRASES,
     DIRECT_STATE_PATTERNS,
     TECHNICAL_CURRENT_PATTERNS,
     scheduler_config_sha256,
@@ -282,11 +283,22 @@ def simulate(
                 )
 
     scenario_coverage = summarize_scenario_coverage(attempts)
+    enabled_rows = tuple(row for row in rows if row.enabled)
+    scene_tones = {
+        row.semantic_group: row.tone
+        for row in enabled_rows
+        if row.semantic_group
+    }
     return analyze_simulation(
         corpus_sha256=corpus_digest,
-        enabled_corpus_count=sum(row.enabled for row in rows),
-        dry_sharp_inventory_count=sum(
-            row.enabled and row.tone == "dry_sharp" for row in rows
+        enabled_corpus_count=len(enabled_rows),
+        enabled_scene_count=len(scene_tones),
+        dry_sharp_scene_count=sum(
+            tone == "dry_sharp" for tone in scene_tones.values()
+        ),
+        dry_sharp_row_count=sum(row.tone == "dry_sharp" for row in enabled_rows),
+        seasoning_inventory_count=sum(
+            contains_seasoning_marker(row.text) for row in enabled_rows
         ),
         config_sha256=config_digest,
         config=scheduler,
@@ -385,7 +397,7 @@ def _inventory_metrics(lines: Sequence[CorpusLine]) -> dict[str, object]:
     modes = Counter(row.output_mode for row in enabled)
     groups = Counter(row.category_group for row in enabled)
     length_counts = Counter(_length_bucket(len(text)) for text in texts)
-    catchphrase_lines = sum(any(phrase in text for phrase in CATCHPHRASES) for text in texts)
+    catchphrase_lines = sum(contains_seasoning_marker(text) for text in texts)
     return {
         "count": count,
         "exact_duplicates": sum(value - 1 for value in exact.values() if value > 1),
@@ -424,7 +436,7 @@ def _legacy_metrics(lines: Sequence[LegacyLine]) -> dict[str, object]:
     exact = Counter(texts)
     normalized = Counter(normalize_text(text) for text in texts)
     length_counts = Counter(_length_bucket(len(text)) for text in texts)
-    catchphrase_lines = sum(any(phrase in text for phrase in CATCHPHRASES) for text in texts)
+    catchphrase_lines = sum(contains_seasoning_marker(text) for text in texts)
     technical_categories = {
         "Debugging",
         "Python",
@@ -920,6 +932,7 @@ __all__ = [
     "combine_hard_violations",
     "derive_distribution_policy",
     "derive_dry_sharp_policy",
+    "derive_lexical_exposure_policy",
     "derive_subseed",
     "probe_inventory_coverage",
     "render_simulation_report",

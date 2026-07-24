@@ -42,10 +42,13 @@ class DistributionPolicy:
 
 @dataclass(frozen=True, slots=True)
 class DrySharpPolicy:
-    inventory_target: float
-    inventory_acceptance: tuple[float, float]
-    inventory_enforcement_minimum_rows: int
-    bootstrap_minimum_rows: int
+    scene_inventory_target: float
+    scene_inventory_acceptance: tuple[float, float]
+    scene_inventory_enforcement_profile: str
+    scene_inventory_enforcement_minimum_rows: int
+    bootstrap_minimum_scenes: int
+    bootstrap_enforcement_minimum_rows: int
+    row_inventory_policy: str
     playback_target: float
     playback_acceptance: tuple[float, float]
     recent_window: int
@@ -53,6 +56,16 @@ class DrySharpPolicy:
     forbidden_category_groups: frozenset[str]
     forbidden_triggers: frozenset[str]
     forbidden_context_tokens: frozenset[str]
+
+
+@dataclass(frozen=True, slots=True)
+class LexicalExposurePolicy:
+    playback_acceptance: tuple[float, float]
+    recent_window: int
+    recent_max: int
+    curated_inventory_maximum: float
+    expanded_inventory_minimum_rows: int
+    expanded_inventory_policy: str
 
 
 def _bounds(target: float, tolerance: DistributionTolerance) -> RatioBounds:
@@ -114,20 +127,29 @@ def derive_dry_sharp_policy(
     """Load the tone contract used by validation, selection and simulation."""
 
     value = PERSONA_CONTRACT.dry_sharp if source is None else source
-    inventory_acceptance = tuple(value["inventory_acceptance"])
+    inventory_acceptance = tuple(value["scene_inventory_acceptance"])
     playback_acceptance = tuple(value["playback_acceptance"])
     if len(inventory_acceptance) != 2 or len(playback_acceptance) != 2:
         raise ValueError("dry_sharp acceptance ranges must contain two values")
     return DrySharpPolicy(
-        inventory_target=float(value["inventory_target"]),
-        inventory_acceptance=(
+        scene_inventory_target=float(value["scene_inventory_target"]),
+        scene_inventory_acceptance=(
             float(inventory_acceptance[0]),
             float(inventory_acceptance[1]),
         ),
-        inventory_enforcement_minimum_rows=int(
-            value["inventory_enforcement_minimum_rows"]
+        scene_inventory_enforcement_profile=str(
+            value["scene_inventory_enforcement_profile"]
         ),
-        bootstrap_minimum_rows=int(value["bootstrap_minimum_rows"]),
+        scene_inventory_enforcement_minimum_rows=int(
+            PERSONA_CONTRACT.inventory[
+                str(value["scene_inventory_enforcement_profile"])
+            ][0]
+        ),
+        bootstrap_minimum_scenes=int(value["bootstrap_minimum_scenes"]),
+        bootstrap_enforcement_minimum_rows=int(
+            PERSONA_CONTRACT.inventory["curated_core"][0]
+        ),
+        row_inventory_policy=str(value["row_inventory_policy"]),
         playback_target=float(value["playback_target"]),
         playback_acceptance=(
             float(playback_acceptance[0]),
@@ -138,4 +160,37 @@ def derive_dry_sharp_policy(
         forbidden_category_groups=frozenset(value["forbidden_category_groups"]),
         forbidden_triggers=frozenset(value["forbidden_triggers"]),
         forbidden_context_tokens=frozenset(value["forbidden_context_tokens"]),
+    )
+
+
+def derive_lexical_exposure_policy(
+    source: Mapping[str, object] | None = None,
+) -> LexicalExposurePolicy:
+    """Load the shared seasoning inventory/playback exposure contract."""
+
+    value = (
+        PERSONA_CONTRACT.lexical_exposure["seasoning"]
+        if source is None
+        else source
+    )
+    playback_acceptance = tuple(value["playback_acceptance"])
+    inventory_profiles = value["inventory_profiles"]
+    if len(playback_acceptance) != 2 or not isinstance(inventory_profiles, Mapping):
+        raise ValueError("seasoning policy ranges or inventory profiles are malformed")
+    curated = inventory_profiles["curated_core"]
+    expanded = inventory_profiles["expanded_runtime"]
+    if not isinstance(curated, Mapping) or not isinstance(expanded, Mapping):
+        raise ValueError("seasoning inventory profiles must be mappings")
+    return LexicalExposurePolicy(
+        playback_acceptance=(
+            float(playback_acceptance[0]),
+            float(playback_acceptance[1]),
+        ),
+        recent_window=int(value["recent_window"]),
+        recent_max=int(value["recent_max"]),
+        curated_inventory_maximum=float(curated["maximum"]),
+        expanded_inventory_minimum_rows=int(
+            PERSONA_CONTRACT.inventory["expanded_runtime"][0]
+        ),
+        expanded_inventory_policy=str(expanded["policy"]),
     )

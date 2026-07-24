@@ -7,9 +7,10 @@ from typing import Protocol, Sequence
 
 from ..context import ContextError, PersonaContext, daypart_for
 from ..history import HistoryRecord, SelectionHistory
+from ..lexical import contains_seasoning_marker
 from ..models import CorpusLine
 from ..selector import SchedulerConfig, select_line
-from .metrics import derive_dry_sharp_policy
+from .metrics import derive_dry_sharp_policy, derive_lexical_exposure_policy
 
 
 _EPSILON = 1e-9
@@ -123,6 +124,7 @@ def analyze_constraints(
     """Recompute scheduler hard limits from a supplied output trace."""
 
     dry_sharp_policy = derive_dry_sharp_policy()
+    lexical_policy = derive_lexical_exposure_policy()
     by_seed: dict[int, list[AttemptLike]] = defaultdict(list)
     for attempt in attempts:
         if attempt.row is not None:
@@ -277,6 +279,14 @@ def analyze_constraints(
                 > dry_sharp_policy.recent_max
             ):
                 add("recent_dry_sharp_violation", attempt)
+            if (
+                sum(
+                    contains_seasoning_marker(item.text)
+                    for item in recent_rows[-lexical_policy.recent_window :]
+                )
+                > lexical_policy.recent_max
+            ):
+                add("recent_seasoning_violation", attempt)
 
             last_id[row.id] = now
             last_semantic[row.semantic_group] = now

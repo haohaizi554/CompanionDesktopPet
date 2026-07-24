@@ -14,6 +14,10 @@ from unittest.mock import patch
 from src.persona_corpus.builder import serialize_v2
 from src.persona_corpus.context import PersonaContext
 from src.persona_corpus.contract import PERSONA_CONTRACT
+from src.persona_corpus.lexical import (
+    SEASONING_SUBSTRING_MARKERS,
+    contains_seasoning_marker,
+)
 from src.persona_corpus.loader import load_v2
 from src.persona_corpus.simulation import (
     SUBSEED_DERIVATION_VERSION,
@@ -29,6 +33,7 @@ from src.persona_corpus.simulation import (
     derive_subseed,
     derive_distribution_policy,
     derive_dry_sharp_policy,
+    derive_lexical_exposure_policy,
     probe_inventory_coverage,
     render_simulation_report,
     run_adversarial_suite,
@@ -42,11 +47,7 @@ from src.persona_corpus.selector import (
     select_line,
 )
 from src.persona_corpus.simulation_core.report import analyze_simulation
-from src.persona_corpus.validation import (
-    CATCHPHRASES,
-    load_json_object,
-    scheduler_config_sha256,
-)
+from src.persona_corpus.validation import load_json_object, scheduler_config_sha256
 from src.persona_corpus.validation import validate_corpus
 from tools.simulate_persona import seed_sequence_from_count
 
@@ -76,15 +77,24 @@ METRIC_ATTRIBUTES = (
     "tone_counts",
     "tone_ratio",
     "dry_sharp_policy",
+    "lexical_exposure_policy",
     "dry_sharp_ratio",
     "dry_sharp_recent_violations",
     "dry_sharp_forbidden_hits",
     "enabled_corpus_count",
-    "dry_sharp_inventory_count",
-    "dry_sharp_inventory_ratio",
-    "dry_sharp_inventory_enforced",
-    "dry_sharp_playback_enforced",
-    "dry_sharp_inventory_bootstrap_gap",
+    "enabled_scene_count",
+    "dry_sharp_scene_count",
+    "dry_sharp_scene_ratio",
+    "dry_sharp_scene_inventory_enforced",
+    "dry_sharp_scene_bootstrap_gap",
+    "dry_sharp_row_count",
+    "dry_sharp_row_ratio",
+    "seasoning_inventory_count",
+    "seasoning_inventory_ratio",
+    "seasoning_inventory_profile",
+    "seasoning_inventory_policy",
+    "seasoning_ratio",
+    "seasoning_recent_violations",
     "id_cooldown_repeats",
     "semantic_cooldown_repeats",
     "adjacent_same_category_group",
@@ -318,7 +328,8 @@ class SimulationIntegrationTests(unittest.TestCase):
         self.assertIn("Selector decision", first_markdown)
         self.assertIn("Inventory trigger misses", first_markdown)
         self.assertIn("dry_sharp playback", first_markdown)
-        self.assertIn("dry_sharp inventory", first_markdown)
+        self.assertIn("dry_sharp scene inventory", first_markdown)
+        self.assertIn("Seasoning lexical exposure", first_markdown)
         first_events = self.report.to_validation_json()
         second_events = self.report.to_validation_json()
         self.assertEqual(first_events, second_events)
@@ -328,17 +339,32 @@ class SimulationIntegrationTests(unittest.TestCase):
 
     def test_dry_sharp_report_discloses_inventory_playback_and_constraint_evidence(self) -> None:
         enabled = [row for row in self.corpus if row.enabled]
-        inventory_count = sum(row.tone == "dry_sharp" for row in enabled)
+        scene_tones = {row.semantic_group: row.tone for row in enabled}
+        dry_scene_count = sum(tone == "dry_sharp" for tone in scene_tones.values())
+        dry_row_count = sum(row.tone == "dry_sharp" for row in enabled)
+        seasoning_inventory_count = sum(
+            contains_seasoning_marker(row.text) for row in enabled
+        )
         playback_count = sum(
             attempt.row is not None and attempt.row.tone == "dry_sharp"
             for attempt in self.report.attempts
         )
         policy = derive_dry_sharp_policy()
 
-        self.assertEqual(inventory_count, self.report.dry_sharp_inventory_count)
+        self.assertEqual(len(scene_tones), self.report.enabled_scene_count)
+        self.assertEqual(dry_scene_count, self.report.dry_sharp_scene_count)
         self.assertAlmostEqual(
-            inventory_count / len(enabled) if enabled else 0.0,
-            self.report.dry_sharp_inventory_ratio,
+            dry_scene_count / len(scene_tones) if scene_tones else 0.0,
+            self.report.dry_sharp_scene_ratio,
+        )
+        self.assertEqual(dry_row_count, self.report.dry_sharp_row_count)
+        self.assertAlmostEqual(
+            dry_row_count / len(enabled) if enabled else 0.0,
+            self.report.dry_sharp_row_ratio,
+        )
+        self.assertEqual(
+            seasoning_inventory_count,
+            self.report.seasoning_inventory_count,
         )
         self.assertEqual(playback_count, self.report.tone_counts["dry_sharp"])
         self.assertAlmostEqual(
@@ -346,12 +372,15 @@ class SimulationIntegrationTests(unittest.TestCase):
             self.report.dry_sharp_ratio,
         )
         self.assertEqual(
-            len(enabled) >= policy.inventory_enforcement_minimum_rows,
-            self.report.dry_sharp_inventory_enforced,
+            len(enabled) >= policy.scene_inventory_enforcement_minimum_rows,
+            self.report.dry_sharp_scene_inventory_enforced,
         )
         self.assertEqual(
-            inventory_count < policy.bootstrap_minimum_rows,
-            self.report.dry_sharp_inventory_bootstrap_gap,
+            policy.bootstrap_enforcement_minimum_rows
+            <= len(enabled)
+            < policy.scene_inventory_enforcement_minimum_rows
+            and dry_scene_count < policy.bootstrap_minimum_scenes,
+            self.report.dry_sharp_scene_bootstrap_gap,
         )
         self.assertEqual(
             sum(self.report.tone_counts.values()),
@@ -794,6 +823,33 @@ class SimulationUnitTests(unittest.TestCase):
                     analyze_constraints((attempt,), scheduler).codes,
                 )
 
+    def test_constraint_checker_counts_catchphrases_in_recent_window(self) -> None:
+        scheduler = SchedulerConfig.from_mapping(self.config)
+        policy = derive_lexical_exposure_policy()
+        marker = "我丢"
+        self.assertIn(marker, SEASONING_SUBSTRING_MARKERS)
+        start = datetime(2026, 7, 1, 8, 0, tzinfo=timezone(timedelta(hours=8)))
+        attempts = []
+        for index in range(policy.recent_window):
+            attempt = self._constraint_attempt(
+                when=start + timedelta(minutes=61 * index),
+                row_index=350 + index,
+                elapsed_minutes=1440 if index == 0 else 61,
+            )
+            assert attempt.row is not None
+            text = (
+                f"{marker} item{index}"
+                if index in {0, policy.recent_window - 1}
+                else f"plain fixture item{index}"
+            )
+            attempts.append(replace(attempt, row=replace(attempt.row, text=text)))
+
+        violating = analyze_constraints(tuple(attempts), scheduler)
+        allowed_trace = analyze_constraints(tuple(attempts[1:]), scheduler)
+
+        self.assertIn("recent_seasoning_violation", violating.codes)
+        self.assertNotIn("recent_seasoning_violation", allowed_trace.codes)
+
     def test_constraint_checker_retains_context_question_and_cooldown_gates(self) -> None:
         scheduler = SchedulerConfig.from_mapping(self.config)
         start = datetime(2026, 7, 1, 8, 0, tzinfo=timezone(timedelta(hours=8)))
@@ -967,13 +1023,25 @@ class SimulationUnitTests(unittest.TestCase):
         policy = derive_dry_sharp_policy()
         contract = PERSONA_CONTRACT.dry_sharp
 
-        self.assertEqual(contract["inventory_target"], policy.inventory_target)
-        self.assertEqual(tuple(contract["inventory_acceptance"]), policy.inventory_acceptance)
         self.assertEqual(
-            contract["inventory_enforcement_minimum_rows"],
-            policy.inventory_enforcement_minimum_rows,
+            contract["scene_inventory_target"],
+            policy.scene_inventory_target,
         )
-        self.assertEqual(contract["bootstrap_minimum_rows"], policy.bootstrap_minimum_rows)
+        self.assertEqual(
+            tuple(contract["scene_inventory_acceptance"]),
+            policy.scene_inventory_acceptance,
+        )
+        self.assertEqual(
+            PERSONA_CONTRACT.inventory[
+                contract["scene_inventory_enforcement_profile"]
+            ][0],
+            policy.scene_inventory_enforcement_minimum_rows,
+        )
+        self.assertEqual(
+            contract["bootstrap_minimum_scenes"],
+            policy.bootstrap_minimum_scenes,
+        )
+        self.assertEqual(contract["row_inventory_policy"], policy.row_inventory_policy)
         self.assertEqual(contract["playback_target"], policy.playback_target)
         self.assertEqual(tuple(contract["playback_acceptance"]), policy.playback_acceptance)
         self.assertEqual(contract["recent_window"], policy.recent_window)
@@ -991,15 +1059,37 @@ class SimulationUnitTests(unittest.TestCase):
             policy.forbidden_context_tokens,
         )
 
-    def test_dry_sharp_inventory_threshold_controls_hard_enforcement(self) -> None:
+    def test_lexical_exposure_policy_is_loaded_from_shared_contract(self) -> None:
+        policy = derive_lexical_exposure_policy()
+        contract = PERSONA_CONTRACT.lexical_exposure["seasoning"]
+
+        self.assertEqual(
+            tuple(contract["playback_acceptance"]),
+            policy.playback_acceptance,
+        )
+        self.assertEqual(contract["recent_window"], policy.recent_window)
+        self.assertEqual(contract["recent_max"], policy.recent_max)
+        self.assertEqual(
+            contract["inventory_profiles"]["curated_core"]["maximum"],
+            policy.curated_inventory_maximum,
+        )
+        self.assertEqual(
+            contract["inventory_profiles"]["expanded_runtime"]["policy"],
+            policy.expanded_inventory_policy,
+        )
+
+    def test_dry_sharp_scene_threshold_controls_hard_enforcement(self) -> None:
         scheduler = SchedulerConfig.from_mapping(self.config)
         base = simulate(self.corpus, self.config, days=1, seeds=(0,))
 
-        def report_for(enabled_rows: int):
+        def report_for(enabled_rows: int, dry_scene_count: int):
             return analyze_simulation(
                 corpus_sha256=base.corpus_sha256,
                 enabled_corpus_count=enabled_rows,
-                dry_sharp_inventory_count=0,
+                enabled_scene_count=100,
+                dry_sharp_scene_count=dry_scene_count,
+                dry_sharp_row_count=0,
+                seasoning_inventory_count=0,
                 config_sha256=base.scheduler_config_sha256,
                 config=scheduler,
                 days=30,
@@ -1011,41 +1101,32 @@ class SimulationUnitTests(unittest.TestCase):
                 adversarial_result=base.adversarial_result,
             )
 
-        minimum = derive_dry_sharp_policy().inventory_enforcement_minimum_rows
-        bootstrap = report_for(minimum - 1)
-        enforced = report_for(minimum)
+        minimum = derive_dry_sharp_policy().scene_inventory_enforcement_minimum_rows
+        bootstrap = report_for(minimum - 1, 4)
+        enforced = report_for(minimum, 0)
 
-        self.assertFalse(bootstrap.dry_sharp_inventory_enforced)
+        self.assertFalse(bootstrap.dry_sharp_scene_inventory_enforced)
         self.assertNotIn(
-            "dry_sharp_inventory_ratio_out_of_bounds",
+            "dry_sharp_scene_inventory_ratio_out_of_bounds",
             bootstrap.natural_hard_violations,
         )
-        self.assertNotIn(
-            "dry_sharp_ratio_out_of_bounds",
-            bootstrap.natural_hard_violations,
-        )
-        self.assertTrue(enforced.dry_sharp_inventory_enforced)
+        self.assertTrue(enforced.dry_sharp_scene_inventory_enforced)
         self.assertIn(
-            "dry_sharp_inventory_ratio_out_of_bounds",
-            enforced.natural_hard_violations,
-        )
-        self.assertIn(
-            "dry_sharp_ratio_out_of_bounds",
-            enforced.natural_hard_violations,
-        )
-        self.assertIn(
-            "seed_0:dry_sharp_ratio_out_of_bounds",
+            "dry_sharp_scene_inventory_ratio_out_of_bounds",
             enforced.natural_hard_violations,
         )
 
-    def test_playback_catchphrase_hard_limit_allows_ten_percent_only(self) -> None:
+    def test_playback_seasoning_bounds_come_from_shared_contract(self) -> None:
         scheduler = SchedulerConfig.from_mapping(self.config)
         base = simulate(self.corpus, self.config, days=1, seeds=(0,))
+        policy = derive_lexical_exposure_policy()
+        marker = "我丢"
+        self.assertIn(marker, SEASONING_SUBSTRING_MARKERS)
         start = datetime(2026, 7, 1, 8, 0, tzinfo=timezone(timedelta(hours=8)))
 
-        def report_for(catchphrase_outputs: int):
+        def report_for(seasoning_outputs: int):
             attempts = []
-            for index in range(10):
+            for index in range(100):
                 attempt = self._constraint_attempt(
                     when=start + timedelta(minutes=61 * index),
                     row_index=380 + index,
@@ -1053,15 +1134,18 @@ class SimulationUnitTests(unittest.TestCase):
                 )
                 assert attempt.row is not None
                 text = (
-                    f"{CATCHPHRASES[1]} playback fixture {index}"
-                    if index < catchphrase_outputs
-                    else f"plain playback fixture {index}"
+                    f"{marker} playback fixture item{index}"
+                    if index < seasoning_outputs
+                    else f"plain playback fixture item{index}"
                 )
                 attempts.append(replace(attempt, row=replace(attempt.row, text=text)))
             return analyze_simulation(
                 corpus_sha256=base.corpus_sha256,
                 enabled_corpus_count=len(self.corpus),
-                dry_sharp_inventory_count=0,
+                enabled_scene_count=100,
+                dry_sharp_scene_count=4,
+                dry_sharp_row_count=0,
+                seasoning_inventory_count=seasoning_outputs,
                 config_sha256=base.scheduler_config_sha256,
                 config=scheduler,
                 days=30,
@@ -1073,17 +1157,16 @@ class SimulationUnitTests(unittest.TestCase):
                 adversarial_result=base.adversarial_result,
             )
 
-        exact = report_for(1)
-        above = report_for(2)
+        exact = report_for(round(policy.playback_acceptance[0] * 100))
+        above = report_for(round(policy.playback_acceptance[1] * 100) + 1)
 
-        self.assertAlmostEqual(0.10, exact.catchphrase_ratio)
+        self.assertAlmostEqual(policy.playback_acceptance[0], exact.seasoning_ratio)
         self.assertNotIn(
-            "catchphrase_ratio_above_limit",
+            "seasoning_ratio_out_of_bounds",
             exact.natural_hard_violations,
         )
-        self.assertAlmostEqual(0.20, above.catchphrase_ratio)
         self.assertIn(
-            "catchphrase_ratio_above_limit",
+            "seasoning_ratio_out_of_bounds",
             above.natural_hard_violations,
         )
 

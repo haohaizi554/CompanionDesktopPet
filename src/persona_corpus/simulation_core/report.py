@@ -8,17 +8,23 @@ from typing import Iterable, Mapping, Sequence
 
 from ..context import ContextError, PersonaContext
 from ..contract import TONES
+from ..lexical import (
+    SEASONING_MARKERS,
+    contains_seasoning_marker,
+    match_seasoning_markers,
+)
 from ..models import CorpusLine
 from ..selector import SchedulerConfig
-from ..validation import CATCHPHRASES
 from .constraints import AdversarialSuiteResult
 from .constraints import analyze_constraints
 from .metrics import (
     DistributionPolicy,
     DistributionTolerance,
     DrySharpPolicy,
+    LexicalExposurePolicy,
     derive_distribution_policy,
     derive_dry_sharp_policy,
+    derive_lexical_exposure_policy,
 )
 from .scenarios import (
     SUBSEED_DERIVATION_SHA256,
@@ -104,6 +110,7 @@ class SeedMetrics:
     tone_counts: Mapping[str, int]
     tone_ratio: Mapping[str, float]
     dry_sharp_ratio: float
+    seasoning_ratio: float
     anomalies: tuple[str, ...]
 
 
@@ -116,6 +123,7 @@ class SimulationReport:
     subseed_derivation_sha256: str
     distribution_policy: DistributionPolicy
     dry_sharp_policy: DrySharpPolicy
+    lexical_exposure_policy: LexicalExposurePolicy
     scenario_coverage: ScenarioCoverage
     inventory_coverage: InventoryCoverage
     adversarial_result: AdversarialSuiteResult
@@ -143,11 +151,19 @@ class SimulationReport:
     dry_sharp_recent_violations: int
     dry_sharp_forbidden_hits: int
     enabled_corpus_count: int
-    dry_sharp_inventory_count: int
-    dry_sharp_inventory_ratio: float
-    dry_sharp_inventory_enforced: bool
-    dry_sharp_playback_enforced: bool
-    dry_sharp_inventory_bootstrap_gap: bool
+    enabled_scene_count: int
+    dry_sharp_scene_count: int
+    dry_sharp_scene_ratio: float
+    dry_sharp_scene_inventory_enforced: bool
+    dry_sharp_scene_bootstrap_gap: bool
+    dry_sharp_row_count: int
+    dry_sharp_row_ratio: float
+    seasoning_inventory_count: int
+    seasoning_inventory_ratio: float
+    seasoning_inventory_profile: str
+    seasoning_inventory_policy: str
+    seasoning_ratio: float
+    seasoning_recent_violations: int
     id_cooldown_repeats: int
     semantic_cooldown_repeats: int
     adjacent_same_category_group: int
@@ -287,7 +303,10 @@ def analyze_simulation(
     *,
     corpus_sha256: str,
     enabled_corpus_count: int,
-    dry_sharp_inventory_count: int,
+    enabled_scene_count: int,
+    dry_sharp_scene_count: int,
+    dry_sharp_row_count: int,
+    seasoning_inventory_count: int,
     config_sha256: str,
     config: SchedulerConfig,
     days: int,
@@ -301,24 +320,49 @@ def analyze_simulation(
     hard: set[str] = set()
     distribution_policy = derive_distribution_policy(config, distribution_tolerance)
     dry_sharp_policy = derive_dry_sharp_policy()
-    dry_sharp_inventory_ratio = (
-        dry_sharp_inventory_count / enabled_corpus_count
+    lexical_exposure_policy = derive_lexical_exposure_policy()
+    dry_sharp_scene_ratio = (
+        dry_sharp_scene_count / enabled_scene_count
+        if enabled_scene_count
+        else 0.0
+    )
+    dry_sharp_row_ratio = (
+        dry_sharp_row_count / enabled_corpus_count if enabled_corpus_count else 0.0
+    )
+    seasoning_inventory_ratio = (
+        seasoning_inventory_count / enabled_corpus_count
         if enabled_corpus_count
         else 0.0
     )
-    dry_sharp_inventory_enforced = (
-        enabled_corpus_count >= dry_sharp_policy.inventory_enforcement_minimum_rows
+    dry_sharp_scene_inventory_enforced = (
+        enabled_corpus_count
+        >= dry_sharp_policy.scene_inventory_enforcement_minimum_rows
     )
-    dry_sharp_playback_enforced = dry_sharp_inventory_enforced
-    dry_sharp_inventory_bootstrap_gap = (
-        dry_sharp_inventory_count < dry_sharp_policy.bootstrap_minimum_rows
+    dry_sharp_scene_bootstrap_gap = (
+        dry_sharp_policy.bootstrap_enforcement_minimum_rows
+        <= enabled_corpus_count
+        < dry_sharp_policy.scene_inventory_enforcement_minimum_rows
+        and dry_sharp_scene_count < dry_sharp_policy.bootstrap_minimum_scenes
     )
-    if dry_sharp_inventory_enforced and not (
-        dry_sharp_policy.inventory_acceptance[0]
-        <= dry_sharp_inventory_ratio
-        <= dry_sharp_policy.inventory_acceptance[1]
+    if dry_sharp_scene_inventory_enforced and not (
+        dry_sharp_policy.scene_inventory_acceptance[0]
+        <= dry_sharp_scene_ratio
+        <= dry_sharp_policy.scene_inventory_acceptance[1]
     ):
-        hard.add("dry_sharp_inventory_ratio_out_of_bounds")
+        hard.add("dry_sharp_scene_inventory_ratio_out_of_bounds")
+    if dry_sharp_scene_bootstrap_gap:
+        hard.add("dry_sharp_scene_inventory_bootstrap_gap")
+    seasoning_inventory_profile = (
+        "expanded_runtime"
+        if enabled_corpus_count
+        >= lexical_exposure_policy.expanded_inventory_minimum_rows
+        else "curated_core"
+    )
+    seasoning_inventory_policy = (
+        lexical_exposure_policy.expanded_inventory_policy
+        if seasoning_inventory_profile == "expanded_runtime"
+        else "maximum"
+    )
     anomalies: dict[int, set[str]] = {seed: set() for seed in seeds}
     constraint_analysis = analyze_constraints(attempts, config)
     constraint_counts = Counter(
@@ -338,6 +382,7 @@ def analyze_simulation(
     total_group_counts: Counter[str] = Counter()
     total_mode_counts: Counter[str] = Counter()
     total_tone_counts: Counter[str] = Counter()
+    total_seasoning_count = 0
     selected_texts: list[str] = []
     id_cooldown_repeats = 0
     semantic_cooldown_repeats = 0
@@ -360,6 +405,7 @@ def analyze_simulation(
         seed_group_counts: Counter[str] = Counter()
         seed_mode_counts: Counter[str] = Counter()
         seed_tone_counts: Counter[str] = Counter()
+        seed_seasoning_count = 0
         previous: SimulationAttempt | None = None
         last_id: dict[str, datetime] = {}
         last_semantic: dict[str, datetime] = {}
@@ -376,9 +422,11 @@ def analyze_simulation(
             seed_group_counts[row.category_group] += 1
             seed_mode_counts[row.output_mode] += 1
             seed_tone_counts[row.tone] += 1
+            seed_seasoning_count += int(contains_seasoning_marker(row.text))
             total_group_counts[row.category_group] += 1
             total_mode_counts[row.output_mode] += 1
             total_tone_counts[row.tone] += 1
+            total_seasoning_count += int(contains_seasoning_marker(row.text))
             selected_texts.append(row.text)
 
             if previous is not None and previous.row is not None:
@@ -465,18 +513,29 @@ def analyze_simulation(
                 _add_hard(hard, anomalies, seed, "self_ambient_ratio_below_minimum")
             if seed_mode_ratio["user_direct"] > distribution_policy.user_direct.maximum:
                 _add_hard(hard, anomalies, seed, "user_direct_ratio_above_limit")
-            if dry_sharp_playback_enforced and not (
+            if not (
                 dry_sharp_policy.playback_acceptance[0]
                 <= seed_tone_ratio["dry_sharp"]
                 <= dry_sharp_policy.playback_acceptance[1]
             ):
                 _add_hard(hard, anomalies, seed, "dry_sharp_ratio_out_of_bounds")
+            seed_seasoning_ratio = seed_seasoning_count / seed_output_count
+            if not (
+                lexical_exposure_policy.playback_acceptance[0]
+                <= seed_seasoning_ratio
+                <= lexical_exposure_policy.playback_acceptance[1]
+            ):
+                _add_hard(hard, anomalies, seed, "seasoning_ratio_out_of_bounds")
             if seed_group_counts["easter_egg"] == 0:
                 anomalies[seed].add("easter_egg_not_observed")
             if seed_mode_counts["user_direct"] == 0:
                 anomalies[seed].add("user_direct_not_observed")
             if seed_tone_counts["dry_sharp"] == 0:
                 anomalies[seed].add("dry_sharp_not_observed")
+            if seed_seasoning_count == 0:
+                anomalies[seed].add("seasoning_not_observed")
+        else:
+            seed_seasoning_ratio = 0.0
 
         per_seed[seed] = SeedMetrics(
             seed=seed,
@@ -490,6 +549,7 @@ def analyze_simulation(
             tone_counts={key: seed_tone_counts[key] for key in TONE_VALUES},
             tone_ratio=seed_tone_ratio,
             dry_sharp_ratio=seed_tone_ratio["dry_sharp"],
+            seasoning_ratio=seed_seasoning_ratio,
             anomalies=(),
         )
 
@@ -500,6 +560,9 @@ def analyze_simulation(
     group_ratio = _ratio(group_counts, CATEGORY_GROUPS, output_count)
     mode_ratio = _ratio(mode_counts, OUTPUT_MODES, output_count)
     tone_ratio = _ratio(tone_counts, TONE_VALUES, output_count)
+    seasoning_ratio = (
+        total_seasoning_count / output_count if output_count else 0.0
+    )
     if output_count == 0:
         hard.add("zero_outputs")
     else:
@@ -520,25 +583,28 @@ def analyze_simulation(
             hard.add("self_ambient_ratio_below_minimum")
         if mode_ratio["user_direct"] > distribution_policy.user_direct.maximum:
             hard.add("user_direct_ratio_above_limit")
-        if dry_sharp_playback_enforced and not (
+        if not (
             dry_sharp_policy.playback_acceptance[0]
             <= tone_ratio["dry_sharp"]
             <= dry_sharp_policy.playback_acceptance[1]
         ):
             hard.add("dry_sharp_ratio_out_of_bounds")
+        if not (
+            lexical_exposure_policy.playback_acceptance[0]
+            <= seasoning_ratio
+            <= lexical_exposure_policy.playback_acceptance[1]
+        ):
+            hard.add("seasoning_ratio_out_of_bounds")
 
     lengths = [len(text) for text in selected_texts]
     length_counts = Counter(_length_bucket(length) for length in lengths)
     length_distribution = _ratio(length_counts, LENGTH_BUCKETS, output_count)
+    matched_seasoning = [match_seasoning_markers(text) for text in selected_texts]
     catchphrase_counts = {
-        phrase: sum(phrase in text for text in selected_texts) for phrase in CATCHPHRASES
+        marker: sum(marker in matches for matches in matched_seasoning)
+        for marker in SEASONING_MARKERS
     }
-    catchphrase_lines = sum(
-        any(phrase in text for phrase in CATCHPHRASES) for text in selected_texts
-    )
-    catchphrase_ratio = catchphrase_lines / output_count if output_count else 0.0
-    if catchphrase_ratio > 0.10 + _EPSILON:
-        hard.add("catchphrase_ratio_above_limit")
+    catchphrase_ratio = seasoning_ratio
 
 
     per_seed_anomalies = {
@@ -558,6 +624,7 @@ def analyze_simulation(
             tone_counts=metrics.tone_counts,
             tone_ratio=metrics.tone_ratio,
             dry_sharp_ratio=metrics.dry_sharp_ratio,
+            seasoning_ratio=metrics.seasoning_ratio,
             anomalies=tuple(per_seed_anomalies[seed]),
         )
 
@@ -569,6 +636,7 @@ def analyze_simulation(
         subseed_derivation_sha256=SUBSEED_DERIVATION_SHA256,
         distribution_policy=distribution_policy,
         dry_sharp_policy=dry_sharp_policy,
+        lexical_exposure_policy=lexical_exposure_policy,
         scenario_coverage=scenario_coverage,
         inventory_coverage=inventory_coverage,
         adversarial_result=adversarial_result,
@@ -601,11 +669,21 @@ def analyze_simulation(
             "dry_sharp_forbidden_metadata_violation"
         ],
         enabled_corpus_count=enabled_corpus_count,
-        dry_sharp_inventory_count=dry_sharp_inventory_count,
-        dry_sharp_inventory_ratio=dry_sharp_inventory_ratio,
-        dry_sharp_inventory_enforced=dry_sharp_inventory_enforced,
-        dry_sharp_playback_enforced=dry_sharp_playback_enforced,
-        dry_sharp_inventory_bootstrap_gap=dry_sharp_inventory_bootstrap_gap,
+        enabled_scene_count=enabled_scene_count,
+        dry_sharp_scene_count=dry_sharp_scene_count,
+        dry_sharp_scene_ratio=dry_sharp_scene_ratio,
+        dry_sharp_scene_inventory_enforced=dry_sharp_scene_inventory_enforced,
+        dry_sharp_scene_bootstrap_gap=dry_sharp_scene_bootstrap_gap,
+        dry_sharp_row_count=dry_sharp_row_count,
+        dry_sharp_row_ratio=dry_sharp_row_ratio,
+        seasoning_inventory_count=seasoning_inventory_count,
+        seasoning_inventory_ratio=seasoning_inventory_ratio,
+        seasoning_inventory_profile=seasoning_inventory_profile,
+        seasoning_inventory_policy=seasoning_inventory_policy,
+        seasoning_ratio=seasoning_ratio,
+        seasoning_recent_violations=constraint_counts[
+            "recent_seasoning_violation"
+        ],
         id_cooldown_repeats=id_cooldown_repeats,
         semantic_cooldown_repeats=semantic_cooldown_repeats,
         adjacent_same_category_group=adjacent_same_group,
@@ -715,6 +793,11 @@ def render_simulation_report(report: SimulationReport) -> str:
                     report.dry_sharp_recent_violations,
                 ),
                 ("dry_sharp forbidden metadata hits", report.dry_sharp_forbidden_hits),
+                ("seasoning playback ratio", _percent(report.seasoning_ratio)),
+                (
+                    "seasoning recent-window violations",
+                    report.seasoning_recent_violations,
+                ),
                 ("11. ID cooldown repeats", report.id_cooldown_repeats),
                 ("12. Semantic cooldown repeats", report.semantic_cooldown_repeats),
                 ("13. Adjacent same category_group", report.adjacent_same_category_group),
@@ -726,7 +809,7 @@ def render_simulation_report(report: SimulationReport) -> str:
                     report.adjacent_care,
                 ),
                 ("16. Average text length", f"{report.average_text_length:.3f}"),
-                ("19. Catchphrase line ratio", _percent(report.catchphrase_ratio)),
+                ("19. Seasoning line ratio", _percent(report.seasoning_ratio)),
                 ("20. Question/reply outputs", report.question_count),
                 ("21. Unmet trigger/context outputs", report.unmet_context_count),
                 (
@@ -790,13 +873,23 @@ def render_simulation_report(report: SimulationReport) -> str:
             ("Metric", "Observed", "Target", "Acceptance", "Enforced"),
             (
                 (
-                    "dry_sharp inventory",
-                    f"{report.dry_sharp_inventory_count}/{report.enabled_corpus_count} "
-                    f"({_percent(report.dry_sharp_inventory_ratio)})",
-                    _percent(dry_policy.inventory_target),
-                    f"{_percent(dry_policy.inventory_acceptance[0])}–"
-                    f"{_percent(dry_policy.inventory_acceptance[1])}",
-                    "yes" if report.dry_sharp_inventory_enforced else "no (bootstrap)",
+                    "dry_sharp scene inventory",
+                    f"{report.dry_sharp_scene_count}/{report.enabled_scene_count} "
+                    f"({_percent(report.dry_sharp_scene_ratio)})",
+                    _percent(dry_policy.scene_inventory_target),
+                    f"{_percent(dry_policy.scene_inventory_acceptance[0])}–"
+                    f"{_percent(dry_policy.scene_inventory_acceptance[1])}",
+                    "yes"
+                    if report.dry_sharp_scene_inventory_enforced
+                    else "no (bootstrap)",
+                ),
+                (
+                    "dry_sharp row inventory observation",
+                    f"{report.dry_sharp_row_count}/{report.enabled_corpus_count} "
+                    f"({_percent(report.dry_sharp_row_ratio)})",
+                    "observation only",
+                    "n/a",
+                    "no",
                 ),
                 (
                     "dry_sharp playback",
@@ -805,7 +898,7 @@ def render_simulation_report(report: SimulationReport) -> str:
                     _percent(dry_policy.playback_target),
                     f"{_percent(dry_policy.playback_acceptance[0])}–"
                     f"{_percent(dry_policy.playback_acceptance[1])}",
-                    "yes" if report.dry_sharp_playback_enforced else "no (bootstrap)",
+                    "yes",
                 ),
             ),
         )
@@ -814,13 +907,40 @@ def render_simulation_report(report: SimulationReport) -> str:
         [
             "",
             (
-                "Bootstrap inventory gap: "
-                + ("yes" if report.dry_sharp_inventory_bootstrap_gap else "no")
-                + f" (minimum {dry_policy.bootstrap_minimum_rows} rows)."
+                "Bootstrap scene gap: "
+                + ("yes" if report.dry_sharp_scene_bootstrap_gap else "no")
+                + f" (minimum {dry_policy.bootstrap_minimum_scenes} scenes)."
             ),
             f"Recent playback limit: at most {dry_policy.recent_max} dry_sharp line(s) "
             f"in the latest {dry_policy.recent_window} outputs.",
         ]
+    )
+
+    lexical_policy = report.lexical_exposure_policy
+    lines.extend(["", "## Seasoning lexical exposure evidence", ""])
+    lines.extend(
+        _markdown_table(
+            ("Metric", "Observed", "Acceptance / policy"),
+            (
+                (
+                    f"{report.seasoning_inventory_profile} inventory observation",
+                    f"{report.seasoning_inventory_count}/{report.enabled_corpus_count} "
+                    f"({_percent(report.seasoning_inventory_ratio)})",
+                    report.seasoning_inventory_policy,
+                ),
+                (
+                    "seasoning playback",
+                    f"{_percent(report.seasoning_ratio)}",
+                    f"{_percent(lexical_policy.playback_acceptance[0])}–"
+                    f"{_percent(lexical_policy.playback_acceptance[1])}",
+                ),
+                (
+                    "seasoning recent window",
+                    report.seasoning_recent_violations,
+                    f"max {lexical_policy.recent_max} in {lexical_policy.recent_window}",
+                ),
+            ),
+        )
     )
 
     coverage = report.scenario_coverage
@@ -919,11 +1039,11 @@ def render_simulation_report(report: SimulationReport) -> str:
         lines.extend(_markdown_table(("Ending", "Playback count"), report.common_endings[width]))
         lines.append("")
 
-    lines.extend(["## Catchphrase counts", ""])
+    lines.extend(["## Seasoning marker counts", ""])
     lines.extend(
         _markdown_table(
             ("Catchphrase", "Playback count"),
-            ((phrase, report.catchphrase_counts[phrase]) for phrase in CATCHPHRASES),
+            ((marker, report.catchphrase_counts[marker]) for marker in SEASONING_MARKERS),
         )
     )
     lines.extend(["", "## 22. Per-seed results and anomalies", ""])
@@ -939,6 +1059,7 @@ def render_simulation_report(report: SimulationReport) -> str:
                 "user_direct",
                 "EasterEgg",
                 "dry_sharp",
+                "seasoning",
                 "Anomalies",
             ),
             (
@@ -955,6 +1076,7 @@ def render_simulation_report(report: SimulationReport) -> str:
                     _percent(report.per_seed[seed].mode_ratio["user_direct"]),
                     _percent(report.per_seed[seed].group_ratio["easter_egg"]),
                     _percent(report.per_seed[seed].dry_sharp_ratio),
+                    _percent(report.per_seed[seed].seasoning_ratio),
                     ", ".join(report.per_seed_anomalies[seed]) or "none",
                 )
                 for seed in report.seeds
@@ -964,7 +1086,7 @@ def render_simulation_report(report: SimulationReport) -> str:
     lines.extend(
         [
             "",
-            "`easter_egg_not_observed`, `user_direct_not_observed`, and `dry_sharp_not_observed` are transparent non-hard observations. They are not fabricated into the event stream; the current selector and enabled inventory naturally produced zero during this fixed schedule.",
+            "`easter_egg_not_observed`, `user_direct_not_observed`, `dry_sharp_not_observed`, and `seasoning_not_observed` are transparent non-hard observations. They are not fabricated into the event stream.",
         ]
     )
     return _final_markdown(lines)
