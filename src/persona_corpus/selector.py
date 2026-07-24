@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import random
+import hashlib
 from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -128,12 +129,115 @@ class SelectedLine:
         return self.row.id
 
 
+_SCENE_SCHEDULING_FIELDS = (
+    "category",
+    "category_group",
+    "semantic_group",
+    "output_mode",
+    "trigger",
+    "required_context",
+    "tone",
+    "interrupt_cost",
+    "cooldown_hours",
+    "semantic_cooldown_hours",
+    "max_per_day",
+    "weight",
+    "requires_reply",
+    "enabled",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedScene:
+    semantic_group: str
+    variants: tuple[CorpusLine, ...]
+
+    @property
+    def representative(self) -> CorpusLine:
+        return self.variants[0]
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedCorpus:
+    input_row_count: int
+    scenes: tuple[PreparedScene, ...]
+    scenes_by_trigger: Mapping[str, tuple[PreparedScene, ...]]
+    duplicate_ids: tuple[str, ...]
+    rejected_semantic_groups: tuple[str, ...]
+
+    @property
+    def scene_count(self) -> int:
+        return len(self.scenes)
+
+    @property
+    def variant_count(self) -> int:
+        return sum(len(scene.variants) for scene in self.scenes)
+
+
+def _scene_signature(row: CorpusLine) -> tuple[object, ...]:
+    return tuple(getattr(row, field) for field in _SCENE_SCHEDULING_FIELDS)
+
+
+def prepare_corpus(corpus: Sequence[CorpusLine] | PreparedCorpus) -> PreparedCorpus:
+    """Build an immutable semantic-scene index in one pass over source rows."""
+    if isinstance(corpus, PreparedCorpus):
+        return corpus
+    rows = tuple(corpus)
+    typed = tuple(row for row in rows if isinstance(row, CorpusLine))
+    id_counts = Counter(row.id for row in typed)
+    duplicate_ids = tuple(sorted(line_id for line_id, count in id_counts.items() if count > 1))
+    duplicate_set = frozenset(duplicate_ids)
+    grouped: dict[str, list[CorpusLine]] = {}
+    for row in typed:
+        if (
+            row.id in duplicate_set
+            or row.enabled is not True
+            or row.requires_reply is not False
+            or not isinstance(row.semantic_group, str)
+            or not row.semantic_group.strip()
+        ):
+            continue
+        grouped.setdefault(row.semantic_group, []).append(row)
+
+    scenes: list[PreparedScene] = []
+    rejected: list[str] = []
+    for semantic_group, variants in sorted(grouped.items()):
+        ordered = tuple(sorted(variants, key=lambda row: row.id))
+        signature = _scene_signature(ordered[0])
+        if any(_scene_signature(row) != signature for row in ordered[1:]):
+            rejected.append(semantic_group)
+            continue
+        scenes.append(PreparedScene(semantic_group=semantic_group, variants=ordered))
+
+    by_trigger: dict[str, list[PreparedScene]] = {}
+    for scene in scenes:
+        by_trigger.setdefault(scene.representative.trigger, []).append(scene)
+    return PreparedCorpus(
+        input_row_count=len(rows),
+        scenes=tuple(scenes),
+        scenes_by_trigger=MappingProxyType(
+            {
+                trigger: tuple(trigger_scenes)
+                for trigger, trigger_scenes in sorted(by_trigger.items())
+            }
+        ),
+        duplicate_ids=duplicate_ids,
+        rejected_semantic_groups=tuple(rejected),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class _ScoredCandidate:
     row: CorpusLine
     score: float
     score_band: int
     reasons: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _ScoredScene:
+    scene: PreparedScene
+    scored: _ScoredCandidate
 
 
 def _aware(value: datetime) -> bool:
@@ -238,10 +342,6 @@ def _trigger_matches(
     return False
 
 
-def _most_recent(records: Sequence[HistoryRecord], predicate) -> HistoryRecord | None:
-    return next((record for record in reversed(records) if predicate(record)), None)
-
-
 def _outside_cooldown(now: datetime, previous: HistoryRecord | None, hours: float) -> bool:
     return previous is None or _elapsed_minutes(now, previous.played_at) + _EPSILON >= hours * 60
 
@@ -300,13 +400,22 @@ def _score(
     return _ScoredCandidate(row=row, score=score, score_band=band, reasons=reasons)
 
 
-def _weighted_choice(candidates: Sequence[_ScoredCandidate], seed: int | None) -> _ScoredCandidate:
-    rng = random.Random(seed)
-    total = math.fsum(float(candidate.row.weight) for candidate in candidates)
+def _selector_subseed(seed: int | None, stage: str, semantic_group: str = "") -> int | None:
+    if seed is None:
+        return None
+    identity = f"persona-selector-v2:{seed}:{stage}:{semantic_group}"
+    return int.from_bytes(hashlib.sha256(identity.encode("utf-8")).digest()[:8], "big")
+
+
+def _weighted_scene_choice(
+    candidates: Sequence[_ScoredScene], seed: int | None
+) -> _ScoredScene:
+    rng = random.Random(_selector_subseed(seed, "scene"))
+    total = math.fsum(float(candidate.scored.row.weight) for candidate in candidates)
     point = rng.random() * total
     cumulative = 0.0
     for candidate in candidates:
-        cumulative += float(candidate.row.weight)
+        cumulative += float(candidate.scored.row.weight)
         if point < cumulative:
             return candidate
     return candidates[-1]
@@ -358,7 +467,7 @@ def _scheduler_config_mapping(config: SchedulerConfig) -> dict[str, object]:
 
 
 def select_line(
-    corpus: Sequence[CorpusLine],
+    corpus: Sequence[CorpusLine] | PreparedCorpus,
     context: PersonaContext,
     history: SelectionHistory,
     now: datetime,
@@ -366,7 +475,7 @@ def select_line(
     *,
     scheduler_config: SchedulerConfig | Mapping[str, object] | None = None,
 ) -> SelectedLine | None:
-    """Run the documented twelve-stage selector and append only a successful choice."""
+    """Select one semantic scene, then one surface variant within that scene."""
 
     if (
         not _aware(now)
@@ -380,6 +489,7 @@ def select_line(
         context.validate_for(now)
         context_tokens = context.controlled_tokens(now)
         history.validate_for(now)
+        prepared = prepare_corpus(corpus)
     except (ContextError, HistoryFormatError, SelectorConfigError, TypeError, ValueError):
         return None
 
@@ -392,68 +502,56 @@ def select_line(
     if actual_elapsed < -_EPSILON:
         return None
 
-    # 1. enabled=true, safe rows only; duplicate IDs are excluded rather than made order-dependent.
-    enabled = [row for row in corpus if _candidate_row_is_safe(row, config)]
-    id_counts = Counter(row.id for row in enabled)
-    candidates = sorted((row for row in enabled if id_counts[row.id] == 1), key=lambda row: row.id)
+    records_by_id: dict[str, HistoryRecord] = {}
+    semantic_records: dict[str, HistoryRecord] = {}
+    today_counts: Counter[str] = Counter()
+    local_date = now.date()
+    for record in records:
+        records_by_id[record.selected_id] = record
+        semantic_records[record.semantic_group] = record
+        if record.played_at.astimezone(now.tzinfo).date() == local_date:
+            today_counts[record.selected_id] += 1
 
-    # 2. exact trigger match.
-    candidates = [
-        row for row in candidates if _trigger_matches(row.trigger, context, actual_elapsed, config)
-    ]
+    def variant_available(row: CorpusLine) -> bool:
+        return _outside_cooldown(
+            now,
+            records_by_id.get(row.id),
+            float(row.cooldown_hours),
+        ) and today_counts[row.id] < row.max_per_day
 
-    # 3. all controlled required_context tokens must be demonstrably true.
-    context_filtered: list[CorpusLine] = []
-    for row in candidates:
+    # 1-3. Static preparation has removed duplicate/disabled rows. Runtime
+    # trigger and context checks now visit one representative per semantic scene.
+    candidates: list[PreparedScene] = []
+    for scene in prepared.scenes:
+        row = scene.representative
+        if not _candidate_row_is_safe(row, config):
+            continue
+        if not _trigger_matches(row.trigger, context, actual_elapsed, config):
+            continue
         required = _context_tokens(row.required_context, config)
         if required is not None and (
             required == ("none",) or all(token in context_tokens for token in required)
         ):
-            context_filtered.append(row)
-    candidates = context_filtered
+            candidates.append(scene)
 
-    # 4. per-ID cooldown (the exact boundary is allowed).
+    # 4-6. Per-ID availability short-circuits at the first usable variant;
+    # semantic cooldown remains a scene-level rule.
     candidates = [
-        row
-        for row in candidates
-        if _outside_cooldown(
+        scene
+        for scene in candidates
+        if any(variant_available(row) for row in scene.variants)
+        and _outside_cooldown(
             now,
-            _most_recent(records, lambda record, row=row: record.selected_id == row.id),
-            float(row.cooldown_hours),
+            semantic_records.get(scene.semantic_group),
+            float(scene.representative.semantic_cooldown_hours),
         )
-    ]
-
-    # 5. semantic-group cooldown (the exact boundary is allowed).
-    candidates = [
-        row
-        for row in candidates
-        if _outside_cooldown(
-            now,
-            _most_recent(
-                records,
-                lambda record, row=row: record.semantic_group == row.semantic_group,
-            ),
-            float(row.semantic_cooldown_hours),
-        )
-    ]
-
-    # 6. max_per_day is evaluated in now's local timezone.
-    local_date = now.date()
-    candidates = [
-        row
-        for row in candidates
-        if sum(
-            record.selected_id == row.id
-            and record.played_at.astimezone(now.tzinfo).date() == local_date
-            for record in records
-        )
-        < row.max_per_day
     ]
 
     # 7. adjacent semantic/group bans and candidate-aware group windows.
     last = records[-1] if records else None
-    group_filtered: list[CorpusLine] = []
-    for row in candidates:
+    group_filtered: list[PreparedScene] = []
+    for scene in candidates:
+        row = scene.representative
         if config.semantic_group_no_repeat and last is not None and last.semantic_group == row.semantic_group:
             continue
         if (
@@ -476,13 +574,14 @@ def select_line(
             lambda record: record.category_group == "easter_egg",
         ) > config.easter_egg_recent_max:
             continue
-        group_filtered.append(row)
+        group_filtered.append(scene)
     candidates = group_filtered
 
     # 8. candidate-aware output-mode repetition window.
     candidates = [
-        row
-        for row in candidates
+        scene
+        for scene in candidates
+        for row in (scene.representative,)
         if row.output_mode != "user_direct"
         or _candidate_window_count(
             records,
@@ -513,8 +612,9 @@ def select_line(
             candidates = []
     if records:
         candidates = [
-            row
-            for row in candidates
+            scene
+            for scene in candidates
+            for row in (scene.representative,)
             if actual_elapsed + _EPSILON
             >= config.interrupt_cost_minimum_intervals_minutes[row.interrupt_cost]
         ]
@@ -522,33 +622,48 @@ def select_line(
     if not candidates:
         return None
 
-    # 10. group/output deficits, row weight and interruption cost form an explicit score.
-    scored = [_score(row, records, config) for row in candidates]
+    # 10. A scene receives exactly one score regardless of surface variant count.
+    scored = [
+        _ScoredScene(scene=scene, scored=_score(scene.representative, records, config))
+        for scene in candidates
+    ]
 
-    # 11. weighted local-RNG choice is restricted to the single highest integer score band.
-    highest_band = max(candidate.score_band for candidate in scored)
-    highest = [candidate for candidate in scored if candidate.score_band == highest_band]
-    chosen = _weighted_choice(highest, seed)
+    # 11. Choose a semantic scene first, then a surface variant. Namespaced
+    # local RNGs make scene choice invariant when a scene gains more variants.
+    highest_band = max(candidate.scored.score_band for candidate in scored)
+    highest = [
+        candidate for candidate in scored if candidate.scored.score_band == highest_band
+    ]
+    chosen_scene = _weighted_scene_choice(highest, seed)
+    eligible_variants = tuple(
+        row for row in chosen_scene.scene.variants if variant_available(row)
+    )
+    if not eligible_variants:
+        return None
+    variant_rng = random.Random(
+        _selector_subseed(seed, "surface", chosen_scene.scene.semantic_group)
+    )
+    chosen_row = eligible_variants[variant_rng.randrange(len(eligible_variants))]
 
     # 12. history mutates exactly once and only after a candidate is selected.
     try:
         history.append(
             HistoryRecord(
-                selected_id=chosen.row.id,
+                selected_id=chosen_row.id,
                 played_at=now,
-                category=chosen.row.category,
-                category_group=chosen.row.category_group,
-                semantic_group=chosen.row.semantic_group,
-                output_mode=chosen.row.output_mode,
-                trigger=chosen.row.trigger,
-                interrupt_cost=chosen.row.interrupt_cost,
+                category=chosen_row.category,
+                category_group=chosen_row.category_group,
+                semantic_group=chosen_row.semantic_group,
+                output_mode=chosen_row.output_mode,
+                trigger=chosen_row.trigger,
+                interrupt_cost=chosen_row.interrupt_cost,
             )
         )
     except HistoryFormatError:
         return None
     return SelectedLine(
-        row=chosen.row,
-        score=float(chosen.score),
-        score_band=chosen.score_band,
-        reasons=chosen.reasons,
+        row=chosen_row,
+        score=float(chosen_scene.scored.score),
+        score_band=chosen_scene.scored.score_band,
+        reasons=chosen_scene.scored.reasons,
     )
