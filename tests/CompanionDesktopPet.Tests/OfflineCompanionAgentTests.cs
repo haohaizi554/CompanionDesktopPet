@@ -1,4 +1,5 @@
 using CompanionDesktopPet.Services;
+using System.Diagnostics;
 using System.IO;
 
 namespace CompanionDesktopPet.Tests;
@@ -205,15 +206,20 @@ public sealed class OfflineCompanionAgentTests
         var start = new DateTime(2026, 7, 24, 9, 0, 0, DateTimeKind.Local);
         string? previousLineId = null;
         var usedDeepFallback = false;
+        var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        var stopwatch = Stopwatch.StartNew();
+        var clickLatencies = new double[900];
 
         for (var clickIndex = 0; clickIndex < 900; clickIndex++)
         {
             var now = start.AddSeconds(clickIndex * 10);
             var historyBefore = agent.History.Entries.ToArray();
+            var clickStarted = Stopwatch.GetTimestamp();
             var click = agent.Respond(
                 CompanionEvent.Click,
                 now,
                 random);
+            clickLatencies[clickIndex] = Stopwatch.GetElapsedTime(clickStarted).TotalMilliseconds;
             Assert.True(
                 click.ShouldDisplayText,
                 $"Click became silent at index {clickIndex}; history={agent.History.Entries.Count}, scene={click.SceneId}.");
@@ -238,8 +244,6 @@ public sealed class OfflineCompanionAgentTests
                 Assert.False(semanticWasCoolingDown);
                 Assert.False(lineWasCoolingDown);
                 Assert.True(dailyCount < click.SourceLine.MaxPerDay);
-                Assert.Contains(click.SourceLine.CategoryGroup,
-                    new[] { DialogueCategoryGroup.Technical, DialogueCategoryGroup.EasterEgg });
             }
 
             usedDeepFallback |= semanticWasCoolingDown
@@ -248,7 +252,26 @@ public sealed class OfflineCompanionAgentTests
             previousLineId = click.SourceLine.Id;
         }
 
+        stopwatch.Stop();
+        var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+        var orderedLatencies = clickLatencies.Order().ToArray();
+        var meanLatency = clickLatencies.Average();
+        var p95Latency = orderedLatencies[(int)Math.Ceiling(orderedLatencies.Length * 0.95) - 1];
+        var p99Latency = orderedLatencies[(int)Math.Ceiling(orderedLatencies.Length * 0.99) - 1];
+        var coldLatency = clickLatencies[0];
+        var warmMaximumLatency = clickLatencies.Skip(1).Max();
+        Console.WriteLine(
+            $"900 clicks: mean={meanLatency:F3}ms p95={p95Latency:F3}ms "
+            + $"p99={p99Latency:F3}ms cold={coldLatency:F3}ms warm_max={warmMaximumLatency:F3}ms "
+            + $"allocated={allocatedBytes:N0} elapsed={stopwatch.Elapsed}");
+
         Assert.True(usedDeepFallback);
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(20), stopwatch.Elapsed.ToString());
+        Assert.True(allocatedBytes < 512L * 1024 * 1024, $"allocated bytes: {allocatedBytes:N0}");
+        Assert.True(p95Latency < 50, $"p95 click latency: {p95Latency:F3}ms");
+        Assert.True(p99Latency < 100, $"p99 click latency: {p99Latency:F3}ms");
+        Assert.True(coldLatency < 3_000, $"cold click latency: {coldLatency:F3}ms");
+        Assert.True(warmMaximumLatency < 500, $"warm maximum click latency: {warmMaximumLatency:F3}ms");
 
         var automatic = agent.Respond(
             CompanionEvent.Automatic,

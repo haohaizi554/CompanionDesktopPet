@@ -2,6 +2,7 @@ using System.Globalization;
 using System.IO;
 using System.Reflection;
 using System.Text;
+using System.Diagnostics;
 using CompanionDesktopPet.Services;
 
 namespace CompanionDesktopPet.Tests;
@@ -37,7 +38,10 @@ public sealed class PersonaCorpusTests
     {
         var lines = PersonaCorpus.All;
 
-        Assert.InRange(lines.Count, 800, 1_200);
+        Assert.InRange(
+            lines.Count,
+            PersonaContractGenerated.ExpandedRuntimeMinimumRows,
+            PersonaContractGenerated.ExpandedRuntimeMaximumRows);
         Assert.All(lines, line => Assert.False(string.IsNullOrWhiteSpace(line.Text)));
         Assert.Equal(lines.Count, lines.Select(line => Normalize(line.Text)).Distinct().Count());
         Assert.DoesNotContain(lines, line => line.Text.Contains('?') || line.Text.Contains('？'));
@@ -81,6 +85,27 @@ public sealed class PersonaCorpusTests
     public void GeneratedSeasoningMatcher_RejectsSubstringsAndIdentityMarkers(string text)
     {
         Assert.False(PersonaContractGenerated.ContainsSeasoningMarker(text));
+    }
+
+    [Fact]
+    public void Corpus_ParsesExpandedRuntimeInventoryWithinDesktopStartupBudget()
+    {
+        using var stream = typeof(PersonaCorpus).Assembly.GetManifestResourceStream(PersonaCorpus.EmbeddedResourceName);
+        Assert.NotNull(stream);
+        GC.Collect();
+        var before = GC.GetTotalMemory(true);
+        var stopwatch = Stopwatch.StartNew();
+
+        var lines = PersonaCorpus.Load(stream!);
+
+        stopwatch.Stop();
+        var retainedBytes = Math.Max(0, GC.GetTotalMemory(true) - before);
+        Assert.InRange(
+            lines.Count,
+            PersonaContractGenerated.ExpandedRuntimeMinimumRows,
+            PersonaContractGenerated.ExpandedRuntimeMaximumRows);
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(5), stopwatch.Elapsed.ToString());
+        Assert.True(retainedBytes < 128L * 1024 * 1024, $"retained bytes: {retainedBytes:N0}");
     }
 
     [Fact]

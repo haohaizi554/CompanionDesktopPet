@@ -2,15 +2,20 @@ namespace CompanionDesktopPet.Services;
 
 public static class SceneCatalog
 {
-    public static IReadOnlyList<SceneDefinition> PersonaScenes { get; } = BuildPersonaScenes();
+    public static IReadOnlyList<SceneDefinition> PersonaScenes { get; } = BuildPersonaScenes(PersonaCorpus.All);
+
+    public static IReadOnlySet<string> DrySharpSemanticGroups { get; } = PersonaScenes
+        .Where(scene => scene.Tone == "dry_sharp")
+        .Select(scene => scene.SemanticGroup)
+        .ToHashSet(StringComparer.Ordinal);
 
     private static readonly Lazy<IReadOnlyList<SceneDefinition>> AllScenes = new(() =>
         [.. PersonaScenes, .. StoryArcCatalog.All.SelectMany(arc => arc.Nodes)]);
 
     public static IReadOnlyList<SceneDefinition> All => AllScenes.Value;
 
-    private static IReadOnlyList<SceneDefinition> BuildPersonaScenes() =>
-        PersonaCorpus.All
+    internal static IReadOnlyList<SceneDefinition> BuildPersonaScenes(IReadOnlyList<DialogueLine> lines) =>
+        lines
             .GroupBy(line => line.SemanticGroup, StringComparer.Ordinal)
             .OrderBy(group => group.Key, StringComparer.Ordinal)
             .Select(group => CreateScene($"persona:{group.Key}", group.ToArray()))
@@ -30,6 +35,7 @@ public static class SceneCatalog
         var lines = source.OrderBy(line => line.Id, StringComparer.Ordinal).ToArray();
         var first = lines[0];
         if (lines.Any(line => line.SemanticGroup != first.SemanticGroup
+                              || line.Category != first.Category
                               || line.CategoryGroup != first.CategoryGroup
                               || line.OutputMode != first.OutputMode
                               || line.Trigger != first.Trigger
@@ -38,7 +44,10 @@ public static class SceneCatalog
                               || line.SemanticCooldown != first.SemanticCooldown
                               || line.MaxPerDay != first.MaxPerDay
                               || line.InterruptionCost != first.InterruptionCost
-                              || line.Weight != first.Weight))
+                              || line.Weight != first.Weight
+                              || line.Tone != first.Tone
+                              || line.RequiresReply != first.RequiresReply
+                              || line.Enabled != first.Enabled))
         {
             throw new InvalidOperationException($"Semantic group '{first.SemanticGroup}' has inconsistent runtime metadata.");
         }
@@ -56,6 +65,7 @@ public static class SceneCatalog
             expression,
             DialogueForest.GetTreeForGroup(first.CategoryGroup).Kind,
             first.Category,
+            first.Tone,
             storyArcId is null ? TriggersFor(first.Trigger) : StoryTriggers(storyNode),
             Priority: (int)Math.Round(DialogueForest.CategoryGroupWeights[first.CategoryGroup] * 100),
             Cooldown: first.Cooldown,

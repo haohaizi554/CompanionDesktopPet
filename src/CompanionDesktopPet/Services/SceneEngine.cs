@@ -16,6 +16,7 @@ public sealed record SceneDefinition(
     SceneExpression Expression,
     DialogueTreeKind Tree,
     DialogueCategory Category,
+    string Tone,
     IReadOnlySet<CompanionEvent> Triggers,
     int Priority,
     TimeSpan Cooldown,
@@ -56,7 +57,8 @@ public sealed record SceneHistoryEntry(
     [property: JsonRequired] DialogueOutputMode OutputMode = DialogueOutputMode.SelfTalk,
     [property: JsonRequired] DialogueTrigger DialogueTrigger = DialogueTrigger.Any,
     [property: JsonRequired] int InterruptionCost = 0,
-    [property: JsonRequired] DateOnly? PlayedLocalDate = null);
+    [property: JsonRequired] DateOnly? PlayedLocalDate = null,
+    bool WasDrySharp = false);
 
 public sealed class SceneHistory
 {
@@ -66,8 +68,15 @@ public sealed class SceneHistory
     public const int UserDirectRecentMaximum = 2;
     public const int EasterEggRecentWindow = PersonaContractGenerated.EasterEggRecentWindow;
     public const int EasterEggRecentMaximum = PersonaContractGenerated.EasterEggRecentMaximum;
+    public const int DrySharpRecentWindow = PersonaContractGenerated.DrySharpRecentWindow;
+    public const int DrySharpRecentMaximum = PersonaContractGenerated.DrySharpRecentMaximum;
 
     private readonly List<SceneHistoryEntry> _entries = [];
+    private readonly Dictionary<string, SceneHistoryEntry> _lastBySceneId = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, SceneHistoryEntry> _lastBySemanticGroup = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, SceneHistoryEntry> _lastByLineId = new(StringComparer.Ordinal);
+    private readonly Dictionary<(string LineId, DateOnly Date), int> _dailyCounts = [];
+    private readonly Dictionary<string, HashSet<string>> _seenLineIdsBySemanticGroup = new(StringComparer.Ordinal);
 
     public IReadOnlyList<SceneHistoryEntry> Entries => _entries;
 
@@ -75,7 +84,7 @@ public sealed class SceneHistory
     {
         ArgumentNullException.ThrowIfNull(scene);
         ArgumentNullException.ThrowIfNull(line);
-        _entries.Add(new SceneHistoryEntry(
+        var entry = new SceneHistoryEntry(
             scene.Id,
             line.SemanticGroup,
             playedAt,
@@ -86,8 +95,14 @@ public sealed class SceneHistory
             line.OutputMode,
             line.Trigger,
             line.InterruptionCost,
-            DateOnly.FromDateTime(playedAt)));
-        Trim();
+            DateOnly.FromDateTime(playedAt),
+            line.Tone == "dry_sharp");
+        _entries.Add(entry);
+        Index(entry);
+        if (Trim())
+        {
+            RebuildIndexes();
+        }
     }
 
     public void Record(SceneDefinition scene, DateTime playedAt, string variant)
@@ -101,29 +116,27 @@ public sealed class SceneHistory
         ArgumentNullException.ThrowIfNull(entries);
         _entries.Clear();
         _entries.AddRange(entries.OrderBy(entry => entry.PlayedAt).TakeLast(2_000));
+        RebuildIndexes();
     }
 
     public DateTime? LastSceneAt => _entries.Count == 0 ? null : _entries[^1].PlayedAt;
 
     public bool IsSceneCoolingDown(SceneDefinition scene, DateTime now) =>
-        _entries.LastOrDefault(entry => entry.SceneId == scene.Id) is { } previous
+        _lastBySceneId.GetValueOrDefault(scene.Id) is { } previous
         && Elapsed(now, previous.PlayedAt) < scene.Cooldown;
 
     public bool IsLineCoolingDown(DialogueLine line, DateTime now) =>
-        _entries.LastOrDefault(entry => entry.DialogueLineId == line.Id) is { } previous
+        _lastByLineId.GetValueOrDefault(line.Id) is { } previous
         && Elapsed(now, previous.PlayedAt) < line.Cooldown;
 
     public bool IsSemanticGroupCoolingDown(SceneDefinition scene, DateTime now) =>
-        _entries.LastOrDefault(entry => entry.SemanticGroup == scene.SemanticGroup) is { } previous
+        _lastBySemanticGroup.GetValueOrDefault(scene.SemanticGroup) is { } previous
         && Elapsed(now, previous.PlayedAt) < scene.SemanticCooldown;
 
     public bool IsBelowDailyMaximum(DialogueLine line, DateTime now)
     {
         var localDate = DateOnly.FromDateTime(now);
-        return _entries.Count(entry =>
-                   entry.DialogueLineId == line.Id
-                   && (entry.PlayedLocalDate ?? DateOnly.FromDateTime(entry.PlayedAt)) == localDate)
-               < line.MaxPerDay;
+        return _dailyCounts.GetValueOrDefault((line.Id, localDate)) < line.MaxPerDay;
     }
 
     public bool MeetsAdjacencyAndRecentQuotas(SceneDefinition scene)
@@ -143,9 +156,7 @@ public sealed class SceneHistory
             return false;
         }
 
-        if (scene.CategoryGroup == DialogueCategoryGroup.EasterEgg
-            && CandidateWindowCount(EasterEggRecentWindow,
-                entry => entry.CategoryGroup == DialogueCategoryGroup.EasterEgg) > EasterEggRecentMaximum)
+        if (!MeetsRareRecentQuotas(scene))
         {
             return false;
         }
@@ -155,10 +166,43 @@ public sealed class SceneHistory
                    entry => entry.OutputMode == DialogueOutputMode.UserDirect) <= UserDirectRecentMaximum;
     }
 
+    public bool MeetsRareRecentQuotas(SceneDefinition scene)
+    {
+        if (scene.CategoryGroup == DialogueCategoryGroup.EasterEgg
+            && CandidateWindowCount(EasterEggRecentWindow,
+                entry => entry.CategoryGroup == DialogueCategoryGroup.EasterEgg) > EasterEggRecentMaximum)
+        {
+            return false;
+        }
+
+        return scene.Tone != "dry_sharp"
+               || CandidateWindowCount(DrySharpRecentWindow,
+                   entry => entry.WasDrySharp
+                            || SceneCatalog.DrySharpSemanticGroups.Contains(entry.SemanticGroup))
+               <= DrySharpRecentMaximum;
+    }
+
     public IReadOnlyList<DialogueLine> EligibleLines(SceneDefinition scene, DateTime now) =>
         scene.Lines
             .Where(line => !IsLineCoolingDown(line, now) && IsBelowDailyMaximum(line, now))
             .ToArray();
+
+    public bool HasEligibleLine(SceneDefinition scene, DateTime now)
+    {
+        if (scene.Lines.Count == 0 || !scene.Lines[0].Enabled)
+        {
+            return false;
+        }
+
+        if (!_seenLineIdsBySemanticGroup.TryGetValue(scene.SemanticGroup, out var seen)
+            || scene.Lines.Count > seen.Count)
+        {
+            return true;
+        }
+
+        return scene.Lines.Any(line =>
+            !IsLineCoolingDown(line, now) && IsBelowDailyMaximum(line, now));
+    }
 
     public DateTime NextEligibleAt(SceneDefinition scene, DateTime now)
     {
@@ -168,7 +212,7 @@ public sealed class SceneHistory
             next = Later(next, lastScene.AddMinutes(InterruptionBudget.CostIntervalsMinutes[scene.InterruptionCost]));
         }
 
-        if (_entries.LastOrDefault(entry => entry.SemanticGroup == scene.SemanticGroup) is { } semantic)
+        if (_lastBySemanticGroup.GetValueOrDefault(scene.SemanticGroup) is { } semantic)
         {
             next = Later(next, semantic.PlayedAt + scene.SemanticCooldown);
         }
@@ -176,7 +220,7 @@ public sealed class SceneHistory
         var lineTimes = scene.Lines.Select(line =>
         {
             var candidate = now;
-            if (_entries.LastOrDefault(entry => entry.DialogueLineId == line.Id) is { } previous)
+            if (_lastByLineId.GetValueOrDefault(line.Id) is { } previous)
             {
                 candidate = Later(candidate, previous.PlayedAt + line.Cooldown);
             }
@@ -204,12 +248,47 @@ public sealed class SceneHistory
 
     private static DateTime Later(DateTime left, DateTime right) => left >= right ? left : right;
 
-    private void Trim()
+    private void Index(SceneHistoryEntry entry)
+    {
+        _lastBySceneId[entry.SceneId] = entry;
+        _lastBySemanticGroup[entry.SemanticGroup] = entry;
+        if (!string.IsNullOrEmpty(entry.DialogueLineId))
+        {
+            _lastByLineId[entry.DialogueLineId] = entry;
+            var localDate = entry.PlayedLocalDate ?? DateOnly.FromDateTime(entry.PlayedAt);
+            var dailyKey = (entry.DialogueLineId, localDate);
+            _dailyCounts[dailyKey] = _dailyCounts.GetValueOrDefault(dailyKey) + 1;
+            if (!_seenLineIdsBySemanticGroup.TryGetValue(entry.SemanticGroup, out var lineIds))
+            {
+                lineIds = new HashSet<string>(StringComparer.Ordinal);
+                _seenLineIdsBySemanticGroup[entry.SemanticGroup] = lineIds;
+            }
+            lineIds.Add(entry.DialogueLineId);
+        }
+    }
+
+    private void RebuildIndexes()
+    {
+        _lastBySceneId.Clear();
+        _lastBySemanticGroup.Clear();
+        _lastByLineId.Clear();
+        _dailyCounts.Clear();
+        _seenLineIdsBySemanticGroup.Clear();
+        foreach (var entry in _entries)
+        {
+            Index(entry);
+        }
+    }
+
+    private bool Trim()
     {
         if (_entries.Count > 2_000)
         {
             _entries.RemoveRange(0, _entries.Count - 2_000);
+            return true;
         }
+
+        return false;
     }
 }
 
@@ -291,6 +370,7 @@ public sealed class SceneScheduler
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(history);
         ArgumentNullException.ThrowIfNull(random);
+        var contextTokens = ContextTokens(context);
 
         if (context.Trigger == CompanionEvent.StoryTimerDue)
         {
@@ -301,20 +381,25 @@ public sealed class SceneScheduler
             if (due is not null)
             {
                 var storyScene = StoryArcCatalog.All.Single(arc => arc.Id == due.ArcId).Nodes[due.NodeIndex];
-                return CanSelect(storyScene, context, history, ignoreTrigger: true) ? storyScene : null;
+                return CanSelect(storyScene, context, contextTokens, history, ignoreTrigger: true)
+                       && history.HasEligibleLine(storyScene, context.Now)
+                    ? storyScene
+                    : null;
             }
         }
 
+        var recent = RecentHistoryProfile.Create(history);
         var candidates = AvailableScenes(context)
             .Where(scene => CanSelect(
                 scene,
                 context,
+                contextTokens,
                 history,
                 ignoreTrigger: false,
                 bypassInterruptionBudget))
-            .Select(scene => Score(scene, history))
+            .Select(scene => Score(scene, recent))
             .ToArray();
-        return ChooseBest(candidates, random);
+        return ChooseBestWithEligibleLine(candidates, context.Now, history, random);
     }
 
     internal ClickFallbackSelection? SelectClickFallback(
@@ -331,19 +416,22 @@ public sealed class SceneScheduler
             return null;
         }
 
+        var contextTokens = ContextTokens(context);
+        var recent = RecentHistoryProfile.Create(history);
         var quotaRelaxed = AvailableScenes(context)
-            .Where(scene => TriggerAndContextMatch(scene, context, history))
+            .Where(scene => TriggerAndContextMatch(scene, context, contextTokens, history))
             .Where(scene => !history.IsSemanticGroupCoolingDown(scene, context.Now))
-            .Where(scene => history.EligibleLines(scene, context.Now).Count > 0)
-            .Select(scene => Score(scene, history))
+            .Where(history.MeetsRareRecentQuotas)
+            .Select(scene => Score(scene, recent))
             .ToArray();
-        if (ChooseBest(quotaRelaxed, random) is { } quotaRelaxedScene)
+        if (ChooseBestWithEligibleLine(quotaRelaxed, context.Now, history, random) is { } quotaRelaxedScene)
         {
             return new ClickFallbackSelection(quotaRelaxedScene);
         }
 
         var reusableScenes = AvailableScenes(context)
-            .Where(scene => TriggerAndContextMatch(scene, context, history))
+            .Where(scene => TriggerAndContextMatch(scene, context, contextTokens, history))
+            .Where(history.MeetsRareRecentQuotas)
             .Where(scene => scene.Lines.Any(line => line.Enabled))
             .ToArray();
         if (reusableScenes.Length == 0)
@@ -376,6 +464,30 @@ public sealed class SceneScheduler
         return band[^1].Scene;
     }
 
+    private static SceneDefinition? ChooseBestWithEligibleLine(
+        IReadOnlyList<ScoredScene> candidates,
+        DateTime now,
+        SceneHistory history,
+        Random random)
+    {
+        var remaining = candidates.ToList();
+        while (remaining.Count > 0)
+        {
+            var selected = ChooseBest(remaining, random);
+            if (selected is null)
+            {
+                return null;
+            }
+            if (history.HasEligibleLine(selected, now))
+            {
+                return selected;
+            }
+            remaining.RemoveAll(candidate => candidate.Scene.Id == selected.Id);
+        }
+
+        return null;
+    }
+
     internal ClickFallbackSelection? SelectReusableClickFallback(
         IReadOnlyList<SceneDefinition> scenes,
         SceneHistory history,
@@ -385,8 +497,15 @@ public sealed class SceneScheduler
         ArgumentNullException.ThrowIfNull(history);
         ArgumentNullException.ThrowIfNull(random);
 
+        var quotaEligibleScenes = scenes.Where(history.MeetsRareRecentQuotas).ToArray();
+        if (quotaEligibleScenes.Length == 0)
+        {
+            return null;
+        }
+
         var lastLineId = history.Entries.LastOrDefault()?.DialogueLineId;
-        var hasNonRepeatingLine = scenes.Any(scene =>
+        var recent = RecentHistoryProfile.Create(history);
+        var hasNonRepeatingLine = quotaEligibleScenes.Any(scene =>
             scene.Lines.Any(line => line.Enabled && line.Id != lastLineId));
         var lastPlayedAt = new Dictionary<string, DateTime>(StringComparer.Ordinal);
         foreach (var entry in history.Entries)
@@ -394,8 +513,28 @@ public sealed class SceneScheduler
             lastPlayedAt[entry.DialogueLineId] = entry.PlayedAt;
         }
 
+        var scenesWithUnusedLines = quotaEligibleScenes
+            .Where(scene => scene.Lines.Any(line =>
+                line.Enabled
+                && (!hasNonRepeatingLine || line.Id != lastLineId)
+                && !lastPlayedAt.ContainsKey(line.Id)))
+            .Select(scene => Score(scene, recent))
+            .ToArray();
+        if (ChooseBest(scenesWithUnusedLines, random) is { } unusedScene)
+        {
+            var unusedLines = unusedScene.Lines
+                .Where(line =>
+                    line.Enabled
+                    && (!hasNonRepeatingLine || line.Id != lastLineId)
+                    && !lastPlayedAt.ContainsKey(line.Id))
+                .ToArray();
+            return new ClickFallbackSelection(
+                unusedScene,
+                WeightedLineChoice(unusedLines, random));
+        }
+
         var oldest = DateTime.MaxValue;
-        foreach (var scene in scenes)
+        foreach (var scene in quotaEligibleScenes)
         {
             foreach (var line in scene.Lines)
             {
@@ -417,12 +556,12 @@ public sealed class SceneScheduler
             return null;
         }
 
-        var oldestScenes = scenes
+        var oldestScenes = quotaEligibleScenes
             .Where(scene => scene.Lines.Any(line =>
                 line.Enabled
                 && (!hasNonRepeatingLine || line.Id != lastLineId)
                 && lastPlayedAt.GetValueOrDefault(line.Id, DateTime.MinValue) == oldest))
-            .Select(scene => Score(scene, history))
+            .Select(scene => Score(scene, recent))
             .ToArray();
         var selectedScene = ChooseBest(oldestScenes, random);
         if (selectedScene is null)
@@ -437,17 +576,26 @@ public sealed class SceneScheduler
                 && lastPlayedAt.GetValueOrDefault(line.Id, DateTime.MinValue) == oldest)
             .ToArray();
 
-        var roll = random.NextDouble() * leastRecentlyUsed.Sum(line => line.Weight);
-        foreach (var line in leastRecentlyUsed)
+        return new ClickFallbackSelection(
+            selectedScene,
+            WeightedLineChoice(leastRecentlyUsed, random));
+    }
+
+    private static DialogueLine WeightedLineChoice(
+        IReadOnlyList<DialogueLine> lines,
+        Random random)
+    {
+        var roll = random.NextDouble() * lines.Sum(line => line.Weight);
+        foreach (var line in lines)
         {
             roll -= line.Weight;
             if (roll <= 0)
             {
-                return new ClickFallbackSelection(selectedScene, line);
+                return line;
             }
         }
 
-        return new ClickFallbackSelection(selectedScene, leastRecentlyUsed[^1]);
+        return lines[^1];
     }
 
     private static IEnumerable<SceneDefinition> AvailableScenes(SceneContext context) =>
@@ -457,23 +605,24 @@ public sealed class SceneScheduler
     private static bool TriggerAndContextMatch(
         SceneDefinition scene,
         SceneContext context,
+        IReadOnlySet<string> contextTokens,
         SceneHistory history) =>
         scene.Triggers.Contains(context.Trigger)
         && TriggerMatches(scene, context, history)
-        && ContextMatches(scene, context);
+        && ContextMatches(scene, contextTokens);
 
     private static bool CanSelect(
         SceneDefinition scene,
         SceneContext context,
+        IReadOnlySet<string> contextTokens,
         SceneHistory history,
         bool ignoreTrigger,
         bool bypassInterruptionBudget = false) =>
         (ignoreTrigger
-            ? ContextMatches(scene, context)
-            : TriggerAndContextMatch(scene, context, history))
+            ? ContextMatches(scene, contextTokens)
+            : TriggerAndContextMatch(scene, context, contextTokens, history))
         && !history.IsSemanticGroupCoolingDown(scene, context.Now)
         && history.MeetsAdjacencyAndRecentQuotas(scene)
-        && history.EligibleLines(scene, context.Now).Count > 0
         && (bypassInterruptionBudget
             || InterruptionBudget.CanPlay(scene, context.Now, history, context.IsFullscreen));
 
@@ -499,14 +648,13 @@ public sealed class SceneScheduler
         };
     }
 
-    private static bool ContextMatches(SceneDefinition scene, SceneContext context)
+    private static bool ContextMatches(SceneDefinition scene, IReadOnlySet<string> tokens)
     {
         if (scene.RequiredContext.Count == 1 && scene.RequiredContext[0] == "none")
         {
             return true;
         }
 
-        var tokens = ContextTokens(context);
         return scene.RequiredContext.All(tokens.Contains);
     }
 
@@ -532,19 +680,46 @@ public sealed class SceneScheduler
         return tokens;
     }
 
-    private static ScoredScene Score(SceneDefinition scene, SceneHistory history)
+    private static ScoredScene Score(SceneDefinition scene, RecentHistoryProfile recent)
     {
-        var recent = history.Entries.TakeLast(50).ToArray();
-        var total = recent.Length;
-        var groupObserved = total == 0 ? 0 : recent.Count(entry => entry.CategoryGroup == scene.CategoryGroup) / (double)total;
-        var modeObserved = total == 0 ? 0 : recent.Count(entry => entry.OutputMode == scene.OutputMode) / (double)total;
-        var categoryObserved = total == 0 ? 0 : recent.Count(entry => entry.Category == scene.Category) / (double)total;
+        var total = recent.Total;
+        var groupObserved = total == 0
+            ? 0
+            : recent.CategoryGroups.GetValueOrDefault(scene.CategoryGroup) / (double)total;
+        var modeObserved = total == 0
+            ? 0
+            : recent.OutputModes.GetValueOrDefault(scene.OutputMode) / (double)total;
+        var categoryObserved = total == 0
+            ? 0
+            : recent.Categories.GetValueOrDefault(scene.Category) / (double)total;
         var score = (DialogueForest.CategoryGroupWeights[scene.CategoryGroup] - groupObserved) * 100
                     + (DialogueForest.OutputModeTargets[scene.OutputMode] - modeObserved) * 35
                     + scene.Weight * 0.5
                     - scene.InterruptionCost * 0.75
                     - categoryObserved * 5;
         return new ScoredScene(scene, score, (int)Math.Floor(score));
+    }
+
+    private sealed record RecentHistoryProfile(
+        int Total,
+        IReadOnlyDictionary<DialogueCategoryGroup, int> CategoryGroups,
+        IReadOnlyDictionary<DialogueOutputMode, int> OutputModes,
+        IReadOnlyDictionary<DialogueCategory, int> Categories)
+    {
+        public static RecentHistoryProfile Create(SceneHistory history)
+        {
+            var categoryGroups = new Dictionary<DialogueCategoryGroup, int>();
+            var outputModes = new Dictionary<DialogueOutputMode, int>();
+            var categories = new Dictionary<DialogueCategory, int>();
+            var recent = history.Entries.TakeLast(50).ToArray();
+            foreach (var entry in recent)
+            {
+                categoryGroups[entry.CategoryGroup] = categoryGroups.GetValueOrDefault(entry.CategoryGroup) + 1;
+                outputModes[entry.OutputMode] = outputModes.GetValueOrDefault(entry.OutputMode) + 1;
+                categories[entry.Category] = categories.GetValueOrDefault(entry.Category) + 1;
+            }
+            return new RecentHistoryProfile(recent.Length, categoryGroups, outputModes, categories);
+        }
     }
 
     private sealed record ScoredScene(SceneDefinition Scene, double Score, int Band);

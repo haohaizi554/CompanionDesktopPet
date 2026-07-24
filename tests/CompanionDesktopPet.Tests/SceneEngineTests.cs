@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using CompanionDesktopPet.Services;
 
 namespace CompanionDesktopPet.Tests;
@@ -29,8 +30,10 @@ public sealed class SceneEngineTests
                 Assert.True(enabledById.TryGetValue(line.Id, out var enabled));
                 Assert.Same(enabled, line);
                 Assert.Equal(scene.SemanticGroup, line.SemanticGroup);
+                Assert.Equal(scene.Category, line.Category);
                 Assert.Equal(scene.CategoryGroup, line.CategoryGroup);
                 Assert.Equal(scene.OutputMode, line.OutputMode);
+                Assert.Equal(scene.Tone, line.Tone);
             });
             Assert.Equal(scene.Lines[0].Cooldown, scene.Cooldown);
             Assert.Equal(scene.Lines[0].SemanticCooldown, scene.SemanticCooldown);
@@ -111,6 +114,114 @@ public sealed class SceneEngineTests
     }
 
     [Fact]
+    public void History_DrySharpQuotaUsesSemanticGroupsAndReleasesAtWindowBoundary()
+    {
+        Assert.Equal(20, SceneHistory.DrySharpRecentWindow);
+        Assert.Equal(1, SceneHistory.DrySharpRecentMaximum);
+        var dry = SceneCatalog.PersonaScenes.Where(scene => scene.Tone == "dry_sharp").Take(2).ToArray();
+        var fillers = SceneCatalog.PersonaScenes
+            .Where(scene => scene.CategoryGroup == DialogueCategoryGroup.CharacterLife && scene.Tone != "dry_sharp")
+            .Take(19)
+            .ToArray();
+        Assert.Equal(2, dry.Length);
+        Assert.Equal(19, fillers.Length);
+
+        var history = new SceneHistory();
+        var now = new DateTime(2026, 7, 24, 15, 0, 0, DateTimeKind.Local);
+        history.Record(dry[0], now.AddHours(-40), dry[0].Lines[0]);
+        for (var index = 0; index < 18; index++)
+        {
+            history.Record(fillers[index], now.AddHours(-38 + index * 2), fillers[index].Lines[0]);
+        }
+
+        Assert.False(history.MeetsAdjacencyAndRecentQuotas(dry[1]));
+        history.Record(fillers[18], now.AddHours(-1), fillers[18].Lines[0]);
+        Assert.True(history.MeetsAdjacencyAndRecentQuotas(dry[1]));
+    }
+
+    [Fact]
+    public void History_DrySharpQuotaSurvivesSceneRemovalOrRetoningAfterRestore()
+    {
+        const string retiredSemanticGroup = "retired.dry.scene";
+        Assert.DoesNotContain(retiredSemanticGroup, SceneCatalog.DrySharpSemanticGroups);
+        var candidate = SceneCatalog.PersonaScenes.First(scene => scene.Tone == "dry_sharp");
+        var filler = SceneCatalog.PersonaScenes.First(scene =>
+            scene.CategoryGroup == DialogueCategoryGroup.CharacterLife && scene.Tone != "dry_sharp");
+        var now = new DateTime(2026, 7, 24, 15, 0, 0, DateTimeKind.Local);
+        var entries = new List<SceneHistoryEntry>
+        {
+            new(
+                "retired-scene-id",
+                retiredSemanticGroup,
+                now.AddHours(-40),
+                "retired variant",
+                "retired-line-id",
+                DialogueCategory.Career,
+                DialogueCategoryGroup.Career,
+                DialogueOutputMode.SelfTalk,
+                DialogueTrigger.Any,
+                1,
+                DateOnly.FromDateTime(now),
+                WasDrySharp: true)
+        };
+        entries.AddRange(Enumerable.Range(0, 18).Select(index => new SceneHistoryEntry(
+            $"filler-{index}",
+            $"filler.{index}",
+            now.AddHours(-38 + index * 2),
+            $"filler {index}",
+            $"filler-line-{index}",
+            filler.Category,
+            filler.CategoryGroup,
+            filler.OutputMode,
+            filler.DialogueTrigger,
+            filler.InterruptionCost,
+            DateOnly.FromDateTime(now),
+            WasDrySharp: false)));
+        var history = new SceneHistory();
+        history.Restore(entries);
+
+        Assert.False(history.MeetsAdjacencyAndRecentQuotas(candidate));
+    }
+
+    [Fact]
+    public void ClickDeepFallbackPreservesEasterEggAndDrySharpRareQuotas()
+    {
+        var dry = SceneCatalog.PersonaScenes.Where(scene => scene.Tone == "dry_sharp").Take(2).ToArray();
+        var easter = SceneCatalog.PersonaScenes
+            .Where(scene => scene.CategoryGroup == DialogueCategoryGroup.EasterEgg)
+            .Take(2)
+            .ToArray();
+        var fillers = SceneCatalog.PersonaScenes
+            .Where(scene => scene.CategoryGroup == DialogueCategoryGroup.CharacterLife && scene.Tone != "dry_sharp")
+            .Take(18)
+            .ToArray();
+        Assert.Equal(2, dry.Length);
+        Assert.Equal(2, easter.Length);
+        Assert.Equal(18, fillers.Length);
+
+        var history = new SceneHistory();
+        var now = new DateTime(2026, 7, 24, 15, 0, 0, DateTimeKind.Local);
+        history.Record(dry[0], now.AddHours(-40), dry[0].Lines[0]);
+        for (var index = 0; index < 9; index++)
+        {
+            history.Record(fillers[index], now.AddHours(-38 + index * 2), fillers[index].Lines[0]);
+        }
+        history.Record(easter[0], now.AddHours(-18), easter[0].Lines[0]);
+        for (var index = 9; index < 17; index++)
+        {
+            history.Record(fillers[index], now.AddHours(-16 + (index - 9) * 2), fillers[index].Lines[0]);
+        }
+
+        var selection = new SceneScheduler().SelectReusableClickFallback(
+            [dry[1], easter[1], fillers[17]],
+            history,
+            new Random(20260724));
+
+        Assert.NotNull(selection);
+        Assert.Equal(fillers[17].Id, selection!.Scene.Id);
+    }
+
+    [Fact]
     public void SceneWeight_IsSemanticWeightAndDoesNotGrowWithVariantCount()
     {
         var line = PersonaCorpus.All.First(item => item.CategoryGroup == DialogueCategoryGroup.Technical);
@@ -135,6 +246,78 @@ public sealed class SceneEngineTests
 
         Assert.Throws<InvalidOperationException>(() =>
             SceneCatalog.CreateScene("bad", [line, inconsistent]));
+    }
+
+    [Fact]
+    public void Catalog_RejectsCategoryToneAndSafetyFlagDriftWithinASemanticScene()
+    {
+        var line = PersonaCorpus.All.First(item => item.CategoryGroup == DialogueCategoryGroup.Technical);
+        var changes = new[]
+        {
+            line with { Category = Enum.GetValues<DialogueCategory>().First(value => value != line.Category) },
+            line with { Tone = line.Tone == "dry" ? "gentle" : "dry" },
+            line with { RequiresReply = !line.RequiresReply },
+            line with { Enabled = !line.Enabled }
+        };
+
+        foreach (var changed in changes)
+        {
+            var inconsistent = changed with
+            {
+                Id = line.Id + ".inconsistent." + changed.GetHashCode(),
+                Text = line.Text + " metadata drift"
+            };
+            Assert.Throws<InvalidOperationException>(() =>
+                SceneCatalog.CreateScene("bad", [line, inconsistent]));
+        }
+    }
+
+    [Fact]
+    public void Catalog_RebuildsExpandedRuntimeInventoryWithinDesktopStartupBudget()
+    {
+        GC.Collect();
+        var before = GC.GetTotalMemory(true);
+        var stopwatch = Stopwatch.StartNew();
+
+        var scenes = SceneCatalog.BuildPersonaScenes(PersonaCorpus.All);
+
+        stopwatch.Stop();
+        var retainedBytes = Math.Max(0, GC.GetTotalMemory(true) - before);
+        Assert.Equal(PersonaCorpus.All.Select(line => line.SemanticGroup).Distinct().Count(), scenes.Count);
+        Assert.Equal(PersonaCorpus.All.Count, scenes.Sum(scene => scene.Lines.Count));
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(5), stopwatch.Elapsed.ToString());
+        Assert.True(retainedBytes < 128L * 1024 * 1024, $"retained bytes: {retainedBytes:N0}");
+        GC.KeepAlive(scenes);
+    }
+
+    [Fact]
+    public void ClickSelection_WithMaximumRetainedHistoryStaysWithinInteractiveBudget()
+    {
+        var scenes = SceneCatalog.PersonaScenes
+            .Where(scene => scene.Triggers.Contains(CompanionEvent.Click))
+            .Where(scene => scene.CategoryGroup != DialogueCategoryGroup.EasterEgg && scene.Tone != "dry_sharp")
+            .Take(24)
+            .ToArray();
+        Assert.Equal(24, scenes.Length);
+        var now = new DateTime(2026, 7, 24, 15, 0, 0, DateTimeKind.Local);
+        var history = new SceneHistory();
+        for (var index = 0; index < 2_000; index++)
+        {
+            var scene = scenes[index % scenes.Length];
+            var line = scene.Lines[index % scene.Lines.Count];
+            history.Record(scene, now.AddMinutes(-2_100 + index), line);
+        }
+        var context = new SceneContext(CompanionEvent.Click, now, CharacterState.Create(now));
+        var scheduler = new SceneScheduler();
+        var stopwatch = Stopwatch.StartNew();
+
+        for (var index = 0; index < 20; index++)
+        {
+            Assert.NotNull(scheduler.Select(context, history, new Random(index), bypassInterruptionBudget: true));
+        }
+
+        stopwatch.Stop();
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(2), stopwatch.Elapsed.ToString());
     }
 
     [Fact]
@@ -237,6 +420,7 @@ public sealed class SceneEngineTests
         var scenes = SceneCatalog.PersonaScenes
             .Where(scene => scene.Triggers.Contains(CompanionEvent.Click))
             .Where(scene => scene.Lines.All(line => line.Enabled))
+            .Where(scene => scene.CategoryGroup != DialogueCategoryGroup.EasterEgg && scene.Tone != "dry_sharp")
             .OrderBy(scene => scene.Lines.Count)
             .Take(2)
             .ToArray();

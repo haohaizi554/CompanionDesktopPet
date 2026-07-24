@@ -102,6 +102,8 @@ public sealed record DialogueLine(
 public static class PersonaCorpus
 {
     public const string EmbeddedResourceName = "CompanionDesktopPet.Assets.persona-corpus-v2.tsv";
+    public const int MinimumRuntimeRows = PersonaContractGenerated.ExpandedRuntimeMinimumRows;
+    public const int MaximumRuntimeRows = PersonaContractGenerated.ExpandedRuntimeMaximumRows;
 
     public static IReadOnlyList<string> V2Header { get; } =
     [
@@ -149,9 +151,10 @@ public static class PersonaCorpus
         using var stream = typeof(PersonaCorpus).Assembly.GetManifestResourceStream(EmbeddedResourceName)
             ?? throw new InvalidOperationException($"Embedded persona corpus '{EmbeddedResourceName}' was not found.");
         var all = Load(stream);
-        if (all.Count is < 800 or > 1_200)
+        if (all.Count is < MinimumRuntimeRows or > MaximumRuntimeRows)
         {
-            throw new InvalidDataException($"Enabled v2 persona corpus must contain 800-1200 rows, found {all.Count}.");
+            throw new InvalidDataException(
+                $"Enabled v2 persona corpus must contain {MinimumRuntimeRows}-{MaximumRuntimeRows} rows, found {all.Count}.");
         }
 
         return new CorpusSnapshot(
@@ -172,7 +175,7 @@ public static class PersonaCorpus
 
         var columns = header.Select((name, index) => (name, index))
             .ToDictionary(item => item.name, item => item.index, StringComparer.Ordinal);
-        var lines = new List<DialogueLine>(1_200);
+        var lines = new List<DialogueLine>(MaximumRuntimeRows);
         var ids = new HashSet<string>(StringComparer.Ordinal);
         var normalizedTexts = new HashSet<string>(StringComparer.Ordinal);
         var lineNumber = 1;
