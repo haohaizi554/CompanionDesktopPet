@@ -1,4 +1,5 @@
 using CompanionDesktopPet.Services;
+using System.IO;
 
 namespace CompanionDesktopPet.Tests;
 
@@ -258,23 +259,62 @@ public sealed class OfflineCompanionAgentTests
     }
 
     [Fact]
-    public void Respond_RestoredExhaustedSessionStillAnswersClicks()
+    public async Task Respond_RestoredLegacyAbsorbingStateStillAnswersConsecutiveClicks()
     {
         var random = new Random(20260724);
         var start = new DateTime(2026, 7, 24, 9, 0, 0, DateTimeKind.Local);
         var original = new OfflineCompanionAgent();
-        for (var clickIndex = 0; clickIndex < 300; clickIndex++)
+        for (var clickIndex = 0; clickIndex < 129; clickIndex++)
         {
-            original.Respond(CompanionEvent.Click, start.AddSeconds(clickIndex * 10), random);
+            var now = start.AddSeconds(clickIndex * 10);
+            var historyBefore = new SceneHistory();
+            historyBefore.Restore(original.History.Entries);
+            var reply = original.Respond(CompanionEvent.Click, now, random);
+
+            Assert.True(reply.ShouldDisplayText);
+            var scene = SceneCatalog.All.Single(item => item.Id == reply.SceneId);
+            Assert.False(historyBefore.IsSemanticGroupCoolingDown(scene, now));
+            Assert.True(historyBefore.MeetsAdjacencyAndRecentQuotas(scene));
+            Assert.Contains(reply.SourceLine, historyBefore.EligibleLines(scene, now));
         }
 
-        var restored = new OfflineCompanionAgent(original.CreateSnapshot());
-        var reply = restored.Respond(CompanionEvent.Click, start.AddSeconds(300 * 10), random);
+        var healthy = original.CreateSnapshot();
+        var legacyAbsorbingState = healthy with { TurnCount = 318 };
+        Assert.Equal(129, legacyAbsorbingState.History.Count);
+        Assert.Equal(64, legacyAbsorbingState.RecentLines.Count);
+        Assert.True(legacyAbsorbingState.TurnCount > legacyAbsorbingState.History.Count);
 
-        Assert.True(reply.ShouldDisplayText);
-        Assert.NotNull(reply.SourceLine);
-        Assert.Equal(original.History.Entries.Count + 1, restored.History.Entries.Count);
-        Assert.Equal(reply.SourceLine!.Id, restored.History.Entries[^1].DialogueLineId);
-        Assert.Equal(reply.SceneId, restored.History.Entries[^1].SceneId);
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            $"CompanionDesktopPet-click-liveness-{Guid.NewGuid():N}");
+        try
+        {
+            var memory = new AgentMemoryService(directory);
+            await memory.SaveAsync(legacyAbsorbingState);
+            var loaded = Assert.IsType<AgentMemorySnapshot>(await memory.LoadAsync());
+            var restored = new OfflineCompanionAgent(loaded);
+
+            for (var clickIndex = 0; clickIndex < 20; clickIndex++)
+            {
+                var reply = restored.Respond(
+                    CompanionEvent.Click,
+                    start.AddSeconds((129 + clickIndex) * 10),
+                    random);
+
+                Assert.True(reply.ShouldDisplayText);
+                Assert.NotNull(reply.SourceLine);
+                Assert.True(reply.SourceLine!.Enabled);
+                Assert.Equal(130 + clickIndex, restored.History.Entries.Count);
+                Assert.Equal(reply.SourceLine.Id, restored.History.Entries[^1].DialogueLineId);
+                Assert.Equal(reply.SceneId, restored.History.Entries[^1].SceneId);
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
     }
 }

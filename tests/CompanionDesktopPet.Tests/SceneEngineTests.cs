@@ -196,6 +196,38 @@ public sealed class SceneEngineTests
         Assert.Equal(expected, timeToken);
     }
 
+    [Fact]
+    public void ClickFallback_ChoosesTheGlobalLeastRecentlyUsedEnabledLineBeforeScoringItsScene()
+    {
+        var scenes = SceneCatalog.PersonaScenes
+            .Where(scene => scene.Triggers.Contains(CompanionEvent.Click))
+            .Where(scene => scene.Lines.All(line => line.Enabled))
+            .OrderBy(scene => scene.Lines.Count)
+            .Take(2)
+            .ToArray();
+        Assert.Equal(2, scenes.Length);
+
+        var history = new SceneHistory();
+        var now = new DateTime(2026, 7, 24, 15, 0, 0, DateTimeKind.Local);
+        for (var index = 0; index < scenes[0].Lines.Count; index++)
+        {
+            history.Record(scenes[0], now.AddHours(-8).AddSeconds(index), scenes[0].Lines[index]);
+        }
+        for (var index = 0; index < scenes[1].Lines.Count; index++)
+        {
+            history.Record(scenes[1], now.AddHours(-1).AddSeconds(index), scenes[1].Lines[index]);
+        }
+
+        var selection = new SceneScheduler().SelectReusableClickFallback(
+            scenes,
+            history,
+            new Random(20260724));
+
+        Assert.NotNull(selection);
+        Assert.Equal(scenes[0].Id, selection!.Scene.Id);
+        Assert.Equal(scenes[0].Lines[0].Id, selection.ReusedLine!.Id);
+    }
+
     private static IReadOnlySet<string> ContextTokens(SceneContext context)
     {
         var method = typeof(SceneScheduler).GetMethod(

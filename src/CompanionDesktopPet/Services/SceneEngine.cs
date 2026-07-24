@@ -351,23 +351,7 @@ public sealed class SceneScheduler
             return null;
         }
 
-        var lastLineId = history.Entries.LastOrDefault()?.DialogueLineId;
-        var nonRepeatingScenes = reusableScenes
-            .Where(scene => scene.Lines.Any(line => line.Enabled && line.Id != lastLineId))
-            .ToArray();
-        var reusableScene = ChooseBest(
-            (nonRepeatingScenes.Length > 0 ? nonRepeatingScenes : reusableScenes)
-                .Select(scene => Score(scene, history))
-                .ToArray(),
-            random);
-        if (reusableScene is null)
-        {
-            return null;
-        }
-
-        return new ClickFallbackSelection(
-            reusableScene,
-            SelectLeastRecentlyUsedLine(reusableScene, history, random));
+        return SelectReusableClickFallback(reusableScenes, history, random);
     }
 
     private static SceneDefinition? ChooseBest(IReadOnlyList<ScoredScene> candidates, Random random)
@@ -392,21 +376,66 @@ public sealed class SceneScheduler
         return band[^1].Scene;
     }
 
-    private static DialogueLine SelectLeastRecentlyUsedLine(
-        SceneDefinition scene,
+    internal ClickFallbackSelection? SelectReusableClickFallback(
+        IReadOnlyList<SceneDefinition> scenes,
         SceneHistory history,
         Random random)
     {
-        var enabled = scene.Lines.Where(line => line.Enabled).ToArray();
+        ArgumentNullException.ThrowIfNull(scenes);
+        ArgumentNullException.ThrowIfNull(history);
+        ArgumentNullException.ThrowIfNull(random);
+
         var lastLineId = history.Entries.LastOrDefault()?.DialogueLineId;
-        var nonRepeating = enabled.Where(line => line.Id != lastLineId).ToArray();
-        var candidates = nonRepeating.Length > 0 ? nonRepeating : enabled;
-        var lastPlayedAt = candidates.ToDictionary(
-            line => line.Id,
-            line => history.Entries.LastOrDefault(entry => entry.DialogueLineId == line.Id)?.PlayedAt
-                    ?? DateTime.MinValue);
-        var oldest = lastPlayedAt.Values.Min();
-        var leastRecentlyUsed = candidates.Where(line => lastPlayedAt[line.Id] == oldest).ToArray();
+        var hasNonRepeatingLine = scenes.Any(scene =>
+            scene.Lines.Any(line => line.Enabled && line.Id != lastLineId));
+        var lastPlayedAt = new Dictionary<string, DateTime>(StringComparer.Ordinal);
+        foreach (var entry in history.Entries)
+        {
+            lastPlayedAt[entry.DialogueLineId] = entry.PlayedAt;
+        }
+
+        var oldest = DateTime.MaxValue;
+        foreach (var scene in scenes)
+        {
+            foreach (var line in scene.Lines)
+            {
+                if (!line.Enabled || (hasNonRepeatingLine && line.Id == lastLineId))
+                {
+                    continue;
+                }
+
+                var playedAt = lastPlayedAt.GetValueOrDefault(line.Id, DateTime.MinValue);
+                if (playedAt < oldest)
+                {
+                    oldest = playedAt;
+                }
+            }
+        }
+
+        if (oldest == DateTime.MaxValue)
+        {
+            return null;
+        }
+
+        var oldestScenes = scenes
+            .Where(scene => scene.Lines.Any(line =>
+                line.Enabled
+                && (!hasNonRepeatingLine || line.Id != lastLineId)
+                && lastPlayedAt.GetValueOrDefault(line.Id, DateTime.MinValue) == oldest))
+            .Select(scene => Score(scene, history))
+            .ToArray();
+        var selectedScene = ChooseBest(oldestScenes, random);
+        if (selectedScene is null)
+        {
+            return null;
+        }
+
+        var leastRecentlyUsed = selectedScene.Lines
+            .Where(line =>
+                line.Enabled
+                && (!hasNonRepeatingLine || line.Id != lastLineId)
+                && lastPlayedAt.GetValueOrDefault(line.Id, DateTime.MinValue) == oldest)
+            .ToArray();
 
         var roll = random.NextDouble() * leastRecentlyUsed.Sum(line => line.Weight);
         foreach (var line in leastRecentlyUsed)
@@ -414,11 +443,11 @@ public sealed class SceneScheduler
             roll -= line.Weight;
             if (roll <= 0)
             {
-                return line;
+                return new ClickFallbackSelection(selectedScene, line);
             }
         }
 
-        return leastRecentlyUsed[^1];
+        return new ClickFallbackSelection(selectedScene, leastRecentlyUsed[^1]);
     }
 
     private static IEnumerable<SceneDefinition> AvailableScenes(SceneContext context) =>
