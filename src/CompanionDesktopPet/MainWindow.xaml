@@ -69,7 +69,8 @@
         </TransformGroup>
       </Grid.RenderTransform>
       <Grid.ContextMenu>
-        <ContextMenu Style="{StaticResource KawaiiContextMenuStyle}">
+        <ContextMenu x:Name="ControlMenu"
+                     Style="{StaticResource KawaiiContextMenuStyle}">
           <MenuItem x:Name="SayMenuItem" Header="说句话 ♡" Tag="✦" />
           <MenuItem x:Name="GreetingMenuItem" Header="打个招呼♡" Tag="♡" />
           <MenuItem x:Name="PauseMenuItem" Header="暂停动画" Tag="☾" />
@@ -84,8 +85,13 @@
                     Tag="⌁"
                     IsCheckable="True"
                     IsChecked="True" />
+          <MenuItem x:Name="AutoStartMenuItem"
+                    Header="开机自启动"
+                    Tag="⌁"
+                    IsCheckable="True" />
           <MenuItem x:Name="RestorePositionMenuItem" Header="回到右下角" Tag="⌂" />
           <Separator />
+          <MenuItem x:Name="HideToTrayMenuItem" Header="藏到托盘里 ♡" Tag="☾" />
           <MenuItem x:Name="ExitMenuItem" Header="先休息啦（退出）" Tag="☁" />
         </ContextMenu>
       </Grid.ContextMenu>

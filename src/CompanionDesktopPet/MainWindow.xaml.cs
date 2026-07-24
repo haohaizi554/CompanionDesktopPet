@@ -26,6 +26,7 @@ public partial class MainWindow : Window
     private readonly PetActionCoordinator _actionCoordinator = new();
     private readonly AmbientActionScheduler _ambientScheduler;
     private readonly IIdleTimeProvider _idleTimeProvider;
+    private readonly IAutoStartService _autoStartService;
     private readonly bool _suppressApplicationShutdownOnClose;
     private readonly Action _shutdownApplication;
     private CompanionEventPump? _eventPump;
@@ -37,6 +38,8 @@ public partial class MainWindow : Window
     private StartupGreetingState _startupGreetingState = StartupGreetingState.Pending;
     private bool _runningSmokeProbe;
     private bool _isClosed;
+    private bool _lastKnownAutoStart;
+    private bool _exitCommandRunning;
     private PetAmbientAction _pendingAmbientAction;
     private long _ambientScheduleGeneration;
     private long _armedAmbientGeneration;
@@ -62,7 +65,29 @@ public partial class MainWindow : Window
             idleTimeProvider,
             suppressApplicationShutdownOnClose,
             shutdownApplication,
-            new AmbientActionScheduler())
+            new AmbientActionScheduler(),
+            suppressApplicationShutdownOnClose
+                ? DisabledAutoStartService.Instance
+                : new WindowsAutoStartService())
+    {
+    }
+
+    internal MainWindow(
+        PetSettings settings,
+        SettingsService settingsService,
+        AgentMemoryService? agentMemoryService,
+        AgentMemorySnapshot? agentMemory,
+        IAutoStartService autoStartService)
+        : this(
+            settings,
+            settingsService,
+            agentMemoryService,
+            agentMemory,
+            idleTimeProvider: null,
+            suppressApplicationShutdownOnClose: false,
+            shutdownApplication: null,
+            new AmbientActionScheduler(),
+            autoStartService)
     {
     }
 
@@ -75,6 +100,31 @@ public partial class MainWindow : Window
         bool suppressApplicationShutdownOnClose,
         Action? shutdownApplication,
         AmbientActionScheduler ambientScheduler)
+        : this(
+            settings,
+            settingsService,
+            agentMemoryService,
+            agentMemory,
+            idleTimeProvider,
+            suppressApplicationShutdownOnClose,
+            shutdownApplication,
+            ambientScheduler,
+            suppressApplicationShutdownOnClose
+                ? DisabledAutoStartService.Instance
+                : new WindowsAutoStartService())
+    {
+    }
+
+    internal MainWindow(
+        PetSettings settings,
+        SettingsService settingsService,
+        AgentMemoryService? agentMemoryService,
+        AgentMemorySnapshot? agentMemory,
+        IIdleTimeProvider? idleTimeProvider,
+        bool suppressApplicationShutdownOnClose,
+        Action? shutdownApplication,
+        AmbientActionScheduler ambientScheduler,
+        IAutoStartService autoStartService)
     {
         InitializeComponent();
         _settings = settings;
@@ -83,6 +133,8 @@ public partial class MainWindow : Window
         _idleTimeProvider = idleTimeProvider ?? new WindowsIdleTimeProvider();
         _ambientScheduler = ambientScheduler
             ?? throw new ArgumentNullException(nameof(ambientScheduler));
+        _autoStartService = autoStartService
+            ?? throw new ArgumentNullException(nameof(autoStartService));
         _suppressApplicationShutdownOnClose = suppressApplicationShutdownOnClose;
         _shutdownApplication = shutdownApplication
             ?? (() => System.Windows.Application.Current?.Shutdown());
@@ -119,7 +171,10 @@ public partial class MainWindow : Window
         NormalSizeMenuItem.Click += SetSize_Click;
         LargeSizeMenuItem.Click += SetSize_Click;
         TopmostMenuItem.Click += ToggleTopmost_Click;
+        ControlMenu.Opened += ControlMenu_Opened;
+        AutoStartMenuItem.Click += ToggleAutoStart_Click;
         RestorePositionMenuItem.Click += RestorePosition_Click;
+        HideToTrayMenuItem.Click += HideToTray_Click;
         ExitMenuItem.Click += Exit_Click;
         _bubbleTimer.Tick += BubbleTimer_Tick;
         _automaticTimer.Tick += AutomaticTimer_Tick;
@@ -716,7 +771,9 @@ public partial class MainWindow : Window
         await SaveAgentMemoryAsync();
     }
 
-    private void SaySomething_Click(object sender, RoutedEventArgs e) => ReactAndSpeak();
+    internal void SaySomething() => ReactAndSpeak();
+
+    private void SaySomething_Click(object sender, RoutedEventArgs e) => SaySomething();
 
     private void Greeting_Click(object sender, RoutedEventArgs e)
     {
@@ -730,6 +787,11 @@ public partial class MainWindow : Window
     }
 
     private async void ToggleAnimation_Click(object sender, RoutedEventArgs e)
+    {
+        await ToggleAnimationAsync();
+    }
+
+    internal async Task ToggleAnimationAsync()
     {
         _paused = !_paused;
         if (_paused)
@@ -808,11 +870,87 @@ public partial class MainWindow : Window
         await SaveSettingsAsync();
     }
 
+    internal void HideToTray() => Hide();
+
+    internal void ToggleVisibilityFromTray()
+    {
+        if (IsVisible)
+        {
+            HideToTray();
+            return;
+        }
+
+        Show();
+        WindowState = WindowState.Normal;
+        Activate();
+    }
+
+    internal bool TryReadAutoStart(out bool enabled) =>
+        _autoStartService.TryGetEnabled(out enabled);
+
+    internal void ToggleAutoStartFromTray()
+    {
+        var enabled = _autoStartService.TryGetEnabled(out var current) && current;
+        ApplyAutoStart(!enabled);
+    }
+
+    private void ControlMenu_Opened(object sender, RoutedEventArgs e) =>
+        RefreshAutoStartState();
+
+    private void ToggleAutoStart_Click(object sender, RoutedEventArgs e) =>
+        ApplyAutoStart(AutoStartMenuItem.IsChecked);
+
+    private void HideToTray_Click(object sender, RoutedEventArgs e) => HideToTray();
+
+    private void RefreshAutoStartState()
+    {
+        if (_autoStartService.TryGetEnabled(out var enabled))
+        {
+            _lastKnownAutoStart = enabled;
+            AutoStartMenuItem.IsChecked = enabled;
+            AutoStartMenuItem.IsEnabled = true;
+            AutoStartMenuItem.ToolTip = null;
+            return;
+        }
+
+        AutoStartMenuItem.IsChecked = _lastKnownAutoStart;
+        AutoStartMenuItem.IsEnabled = false;
+        AutoStartMenuItem.ToolTip = "Windows 暂时不允许读取开机启动设置。";
+    }
+
+    private void ApplyAutoStart(bool requested)
+    {
+        var previous = _lastKnownAutoStart;
+        if (_autoStartService.TrySetEnabled(requested))
+        {
+            RefreshAutoStartState();
+            return;
+        }
+
+        _lastKnownAutoStart = previous;
+        AutoStartMenuItem.IsChecked = previous;
+        ShowBubble("开机启动没设置上，Windows 不让改。");
+    }
+
     private async void Exit_Click(object sender, RoutedEventArgs e)
     {
+        await RequestExitAsync();
+    }
+
+    internal async Task RequestExitAsync()
+    {
+        if (_exitCommandRunning || _isClosed)
+        {
+            return;
+        }
+
+        _exitCommandRunning = true;
         await SaveSettingsAsync();
         await SaveAgentMemoryAsync();
-        Close();
+        if (!_isClosed)
+        {
+            Close();
+        }
     }
 
     private async Task SaveAgentMemoryAsync()

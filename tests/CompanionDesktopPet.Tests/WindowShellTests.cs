@@ -592,8 +592,11 @@ public sealed class WindowShellTests
             typeof(Action)
         ], publicConstructor.GetParameters().Select(parameter => parameter.ParameterType));
 
+        var internalConstructors = typeof(MainWindow)
+            .GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic);
         var injectionConstructor = Assert.Single(
-            typeof(MainWindow).GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic));
+            internalConstructors,
+            constructor => constructor.GetParameters().Length == 8);
         Assert.Equal(
         [
             typeof(PetSettings),
@@ -608,6 +611,33 @@ public sealed class WindowShellTests
         Assert.DoesNotContain(
             injectionConstructor.GetParameters(),
             parameter => parameter.HasDefaultValue);
+
+        Assert.Contains(
+            internalConstructors,
+            constructor => constructor.GetParameters().Select(parameter => parameter.ParameterType)
+                .SequenceEqual(
+                [
+                    typeof(PetSettings),
+                    typeof(SettingsService),
+                    typeof(AgentMemoryService),
+                    typeof(AgentMemorySnapshot),
+                    typeof(IAutoStartService)
+                ]));
+        Assert.Contains(
+            internalConstructors,
+            constructor => constructor.GetParameters().Select(parameter => parameter.ParameterType)
+                .SequenceEqual(
+                [
+                    typeof(PetSettings),
+                    typeof(SettingsService),
+                    typeof(AgentMemoryService),
+                    typeof(AgentMemorySnapshot),
+                    typeof(IIdleTimeProvider),
+                    typeof(bool),
+                    typeof(Action),
+                    typeof(AmbientActionScheduler),
+                    typeof(IAutoStartService)
+                ]));
     }
 
     [Fact]
@@ -623,6 +653,185 @@ public sealed class WindowShellTests
 
             Assert.NotNull(window);
             DeleteSettingsDirectory(settingsDirectory);
+        });
+    }
+
+    [Fact]
+    public void MainWindow_SystemCommands_RefreshAndApplyAutoStartFromTheControlMenu()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var autoStart = new FakeAutoStartService { Enabled = true };
+            var window = CreateWindowWithAutoStart(settingsDirectory, autoStart);
+            try
+            {
+                var menu = Assert.IsType<ContextMenu>(window.FindName("ControlMenu"));
+                var autoStartItem = Assert.IsType<MenuItem>(window.FindName("AutoStartMenuItem"));
+                Assert.IsType<MenuItem>(window.FindName("HideToTrayMenuItem"));
+
+                menu.RaiseEvent(new RoutedEventArgs(ContextMenu.OpenedEvent));
+
+                Assert.Equal(1, autoStart.ReadCount);
+                Assert.True(autoStartItem.IsEnabled);
+                Assert.True(autoStartItem.IsChecked);
+                Assert.Null(autoStartItem.ToolTip);
+
+                autoStartItem.IsChecked = false;
+                autoStartItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+
+                Assert.Equal([false], autoStart.WriteRequests);
+                Assert.False(autoStartItem.IsChecked);
+            }
+            finally
+            {
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
+    public void MainWindow_SystemCommands_AutoStartFailureRollsBackWithoutChangingConversation()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var autoStart = new FakeAutoStartService
+            {
+                Enabled = true,
+                SetSucceeds = false
+            };
+            var window = CreateWindowWithAutoStart(settingsDirectory, autoStart);
+            try
+            {
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                var menu = Assert.IsType<ContextMenu>(window.FindName("ControlMenu"));
+                var autoStartItem = Assert.IsType<MenuItem>(window.FindName("AutoStartMenuItem"));
+                var speech = Assert.IsType<TextBlock>(window.FindName("SpeechText"));
+                var replyBeforeFailure = GetLastReply(window);
+                menu.RaiseEvent(new RoutedEventArgs(ContextMenu.OpenedEvent));
+
+                autoStartItem.IsChecked = false;
+                autoStartItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+
+                Assert.Equal([false], autoStart.WriteRequests);
+                Assert.True(autoStartItem.IsChecked);
+                Assert.True(window.IsVisible);
+                Assert.Same(replyBeforeFailure, GetLastReply(window));
+                Assert.Equal("开机启动没设置上，Windows 不让改。", speech.Text);
+            }
+            finally
+            {
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
+    public void MainWindow_SystemCommands_HideAndShowPreserveWindowLifetime()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var shutdownRequests = 0;
+            var window = CreateWindowWithAutoStart(
+                settingsDirectory,
+                new FakeAutoStartService(),
+                suppressApplicationShutdownOnClose: false,
+                shutdownApplication: () => shutdownRequests++);
+            var closedCount = 0;
+            window.Closed += (_, _) => closedCount++;
+            try
+            {
+                window.Show();
+                window.HideToTray();
+
+                Assert.False(window.IsVisible);
+                Assert.Equal(0, closedCount);
+                Assert.Equal(0, shutdownRequests);
+
+                window.WindowState = WindowState.Minimized;
+                window.ToggleVisibilityFromTray();
+
+                Assert.True(window.IsVisible);
+                Assert.Equal(WindowState.Normal, window.WindowState);
+                Assert.True(window.IsActive);
+
+                window.ToggleVisibilityFromTray();
+                Assert.False(window.IsVisible);
+                Assert.Equal(0, closedCount);
+                Assert.Equal(0, shutdownRequests);
+            }
+            finally
+            {
+                window.Close();
+                Assert.Equal(1, closedCount);
+                Assert.Equal(1, shutdownRequests);
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
+    public async Task MainWindow_SystemCommands_WpfAndInternalCommandsShareOutcomesAndExitIsIdempotent()
+    {
+        await RunOnStaThreadAsync(async () =>
+        {
+            var directSettingsDirectory = CreateSettingsDirectory();
+            var directShutdownRequests = 0;
+            var directClosedCount = 0;
+            var directWindow = CreateWindowWithAutoStart(
+                directSettingsDirectory,
+                new FakeAutoStartService(),
+                suppressApplicationShutdownOnClose: false,
+                shutdownApplication: () => directShutdownRequests++);
+            directWindow.Closed += (_, _) => directClosedCount++;
+            directWindow.Show();
+            directWindow.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+
+            var say = Assert.IsType<MenuItem>(directWindow.FindName("SayMenuItem"));
+            say.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            Assert.Equal(CompanionEvent.Click, GetLastReply(directWindow).Trigger);
+            directWindow.SaySomething();
+            Assert.Equal(CompanionEvent.Click, GetLastReply(directWindow).Trigger);
+
+            var pause = Assert.IsType<MenuItem>(directWindow.FindName("PauseMenuItem"));
+            pause.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            Assert.True(GetPrivateField<bool>(directWindow, "_paused"));
+            await directWindow.ToggleAnimationAsync();
+            Assert.False(GetPrivateField<bool>(directWindow, "_paused"));
+
+            await Task.WhenAll(
+                directWindow.RequestExitAsync(),
+                directWindow.RequestExitAsync());
+
+            Assert.Equal(1, directClosedCount);
+            Assert.Equal(1, directShutdownRequests);
+
+            var wpfSettingsDirectory = CreateSettingsDirectory();
+            var wpfShutdownRequests = 0;
+            var wpfClosedCount = 0;
+            var wpfWindow = CreateWindowWithAutoStart(
+                wpfSettingsDirectory,
+                new FakeAutoStartService(),
+                suppressApplicationShutdownOnClose: false,
+                shutdownApplication: () => wpfShutdownRequests++);
+            wpfWindow.Closed += (_, _) => wpfClosedCount++;
+            wpfWindow.Show();
+
+            Assert.IsType<MenuItem>(wpfWindow.FindName("ExitMenuItem"))
+                .RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            WaitForCondition(
+                () => wpfClosedCount == 1,
+                TimeSpan.FromSeconds(5),
+                () => "The WPF exit command did not close the window.");
+
+            Assert.Equal(1, wpfShutdownRequests);
+            DeleteSettingsDirectory(directSettingsDirectory);
+            DeleteSettingsDirectory(wpfSettingsDirectory);
         });
     }
 
@@ -1195,6 +1404,22 @@ public sealed class WindowShellTests
         ]));
     }
 
+    private static MainWindow CreateWindowWithAutoStart(
+        string settingsDirectory,
+        IAutoStartService autoStartService,
+        bool suppressApplicationShutdownOnClose = true,
+        Action? shutdownApplication = null) =>
+        new(
+            PetSettings.Default,
+            new SettingsService(settingsDirectory),
+            null,
+            null,
+            null,
+            suppressApplicationShutdownOnClose,
+            shutdownApplication,
+            new AmbientActionScheduler(() => 0.5),
+            autoStartService);
+
     private static object GetPrivateFieldValue(MainWindow window, string fieldName)
     {
         var field = typeof(MainWindow).GetField(
@@ -1412,6 +1637,33 @@ public sealed class WindowShellTests
         public void Advance(TimeSpan elapsed) => _timestamp += elapsed.Ticks;
 
         public void SetUtcNow(DateTimeOffset value) => _utcNow = value;
+    }
+
+    private sealed class FakeAutoStartService : IAutoStartService
+    {
+        public bool Enabled { get; set; }
+        public bool ReadSucceeds { get; set; } = true;
+        public bool SetSucceeds { get; set; } = true;
+        public int ReadCount { get; private set; }
+        public List<bool> WriteRequests { get; } = [];
+
+        public bool TryGetEnabled(out bool enabled)
+        {
+            ReadCount++;
+            enabled = Enabled;
+            return ReadSucceeds;
+        }
+
+        public bool TrySetEnabled(bool enabled)
+        {
+            WriteRequests.Add(enabled);
+            if (SetSucceeds)
+            {
+                Enabled = enabled;
+            }
+
+            return SetSucceeds;
+        }
     }
 
     private static AgentReply GetLastReply(MainWindow window)
