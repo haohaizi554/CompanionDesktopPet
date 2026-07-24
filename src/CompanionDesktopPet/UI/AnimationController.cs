@@ -21,6 +21,7 @@ public sealed class AnimationController
     private readonly TranslateTransform _greetingBadgeOffset;
     private bool _started;
     private int _ambientAnimationVersion;
+    private double _nextClickTiltDirection = -1;
 
     public AnimationController(
         ScaleTransform breathingScale,
@@ -124,7 +125,11 @@ public sealed class AnimationController
     {
         ApplyReaction(reactionScale, ScaleTransform.ScaleXProperty, 1.0, 1.06);
         ApplyReaction(reactionScale, ScaleTransform.ScaleYProperty, 1.0, 0.94);
-        ApplyReaction(reactionRotation, RotateTransform.AngleProperty, 0.0, 2.2);
+        var targetAngle = 2.2 * _nextClickTiltDirection;
+        _nextClickTiltDirection *= -1;
+        reactionRotation.BeginAnimation(RotateTransform.AngleProperty, null);
+        reactionRotation.Angle = 0;
+        ApplyReaction(reactionRotation, RotateTransform.AngleProperty, 0.0, targetAngle);
         PlayHearts();
     }
 

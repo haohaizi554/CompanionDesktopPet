@@ -121,6 +121,77 @@ public sealed class AnimationControllerTests
     }
 
     [Fact]
+    public void ClickReaction_AlternatesTiltDirection()
+    {
+        RunOnStaThread(() =>
+        {
+            var breathing = new ScaleTransform();
+            var sway = new RotateTransform();
+            var floating = new TranslateTransform();
+            var reactionScale = new ScaleTransform();
+            var reactionRotation = new RotateTransform();
+            var actionScale = new ScaleTransform();
+            var actionRotation = new RotateTransform();
+            var actionOffset = new TranslateTransform();
+            var root = new Grid
+            {
+                RenderTransform = new TransformGroup
+                {
+                    Children =
+                    {
+                        breathing,
+                        sway,
+                        floating,
+                        reactionScale,
+                        reactionRotation,
+                        actionScale,
+                        actionRotation,
+                        actionOffset
+                    }
+                }
+            };
+            var host = new Window { Content = root };
+            var controller = new AnimationController(
+                breathing,
+                sway,
+                floating,
+                reactionScale,
+                reactionRotation,
+                actionScale,
+                actionRotation,
+                actionOffset,
+                []);
+            host.Show();
+            host.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+
+            try
+            {
+                controller.PlayClickReaction();
+                var first = SampleFor(
+                    () => reactionRotation.Angle,
+                    TimeSpan.FromMilliseconds(150));
+                controller.PlayClickReaction();
+                var second = SampleFor(
+                    () => reactionRotation.Angle,
+                    TimeSpan.FromMilliseconds(150));
+
+                Assert.True(first.Min() < -0.3);
+                Assert.True(first.Max() <= 0.001);
+                Assert.True(second.Max() > 0.3);
+                Assert.True(second.Min() >= -0.001);
+                WaitFor(
+                    () => Math.Abs(reactionRotation.Angle) < 0.001,
+                    TimeSpan.FromMilliseconds(500));
+                Assert.Equal(0, reactionRotation.Angle);
+            }
+            finally
+            {
+                host.Close();
+            }
+        });
+    }
+
+    [Fact]
     public void AmbientAnimations_CompleteOnceAndRestoreNeutralBaseValues()
     {
         RunOnStaThread(() =>
