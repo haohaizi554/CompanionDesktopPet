@@ -1055,10 +1055,12 @@ public sealed class WindowShellTests
 
     private sealed class StaTestHost
     {
+        private readonly Application _application;
         private readonly Dispatcher _dispatcher;
 
         public StaTestHost()
         {
+            Application? application = null;
             Dispatcher? dispatcher = null;
             Exception? initializationException = null;
             using var ready = new ManualResetEventSlim();
@@ -1066,8 +1068,17 @@ public sealed class WindowShellTests
             {
                 try
                 {
-                    var app = new App();
-                    app.InitializeComponent();
+                    // Window tests need a real WPF lifetime without invoking production App.OnStartup.
+                    application = new Application
+                    {
+                        ShutdownMode = ShutdownMode.OnExplicitShutdown
+                    };
+                    application.Resources.MergedDictionaries.Add(new ResourceDictionary
+                    {
+                        Source = new Uri(
+                            "/CompanionDesktopPet;component/Themes/PetTheme.xaml",
+                            UriKind.Relative)
+                    });
                     dispatcher = Dispatcher.CurrentDispatcher;
                 }
                 catch (Exception caught)
@@ -1081,7 +1092,7 @@ public sealed class WindowShellTests
 
                 if (initializationException is null)
                 {
-                    Dispatcher.Run();
+                    application!.Run();
                 }
             })
             {
@@ -1097,6 +1108,8 @@ public sealed class WindowShellTests
                 ExceptionDispatchInfo.Capture(initializationException).Throw();
             }
 
+            _application = application
+                ?? throw new InvalidOperationException("The WPF test application did not start.");
             _dispatcher = dispatcher
                 ?? throw new InvalidOperationException("The WPF test dispatcher did not start.");
         }
