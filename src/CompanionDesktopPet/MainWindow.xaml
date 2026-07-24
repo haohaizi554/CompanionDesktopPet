@@ -13,47 +13,63 @@
         SnapsToDevicePixels="True"
         UseLayoutRounding="True">
   <Grid x:Name="InteractionSurface">
-    <StackPanel x:Name="PetStack"
+    <Popup x:Name="BubblePopup"
+           AllowsTransparency="True"
+           Focusable="False"
+           Placement="RelativePoint"
+           PlacementTarget="{Binding ElementName=CharacterStage}"
+           StaysOpen="True">
+      <Border x:Name="BubblePopupSurface"
+              Padding="10"
+              Background="Transparent">
+        <StackPanel x:Name="SpeechBubble"
+                    Width="276"
+                    Visibility="Collapsed">
+          <Path x:Name="BubbleArrowUp"
+                Width="20"
+                Height="12"
                 HorizontalAlignment="Center"
-                VerticalAlignment="Bottom">
-      <StackPanel x:Name="SpeechBubble"
-                  Width="276"
-                  Margin="12,0,12,30"
-                  HorizontalAlignment="Center"
-                  Visibility="Collapsed"
-                  Panel.ZIndex="2">
-      <Border Padding="18,13"
-              CornerRadius="25"
-              Background="{StaticResource CreamBrush}"
-              BorderBrush="{StaticResource RoseBrush}"
-              BorderThickness="2">
-        <Border.Effect>
-          <DropShadowEffect Color="#663A2026"
-                            BlurRadius="14"
-                            ShadowDepth="3"
-                            Opacity="0.32" />
-        </Border.Effect>
-        <TextBlock x:Name="SpeechText"
-                   Foreground="{StaticResource CocoaBrush}"
-                   FontFamily="Microsoft YaHei UI"
-                   FontSize="15"
-                   FontWeight="SemiBold"
-                   TextWrapping="Wrap"
-                   TextAlignment="Center" />
+                Fill="{StaticResource BlushBrush}"
+                Stroke="{StaticResource RoseBrush}"
+                StrokeThickness="2"
+                Visibility="Collapsed"
+                Data="M 0,12 L 20,12 L 10,0 Z" />
+          <Border Padding="18,13"
+                  CornerRadius="25"
+                  Background="{StaticResource CreamBrush}"
+                  BorderBrush="{StaticResource RoseBrush}"
+                  BorderThickness="2">
+            <Border.Effect>
+              <DropShadowEffect Color="#663A2026"
+                                BlurRadius="14"
+                                ShadowDepth="3"
+                                Opacity="0.32" />
+            </Border.Effect>
+            <TextBlock x:Name="SpeechText"
+                       Foreground="{StaticResource CocoaBrush}"
+                       FontFamily="Microsoft YaHei UI"
+                       FontSize="15"
+                       FontWeight="SemiBold"
+                       TextWrapping="Wrap"
+                       TextAlignment="Center" />
+          </Border>
+          <Path x:Name="BubbleArrowDown"
+                Width="20"
+                Height="12"
+                HorizontalAlignment="Center"
+                Fill="{StaticResource BlushBrush}"
+                Stroke="{StaticResource RoseBrush}"
+                StrokeThickness="2"
+                Data="M 0,0 L 20,0 L 10,12 Z" />
+        </StackPanel>
       </Border>
-      <Path Width="20"
-            Height="12"
-            HorizontalAlignment="Center"
-            Fill="{StaticResource BlushBrush}"
-            Stroke="{StaticResource RoseBrush}"
-            StrokeThickness="2"
-            Data="M 0,0 L 20,0 L 10,12 Z" />
-      </StackPanel>
+    </Popup>
 
-      <Grid x:Name="CharacterStage"
+    <Grid x:Name="CharacterStage"
             Width="320"
             Height="320"
             HorizontalAlignment="Center"
+            VerticalAlignment="Bottom"
             Background="Transparent"
             RenderTransformOrigin="0.5,0.92">
       <Grid.RenderTransform>
@@ -179,7 +195,6 @@
       </Canvas>
         </Grid>
       </Viewbox>
-      </Grid>
-    </StackPanel>
+    </Grid>
   </Grid>
 </Window>

@@ -33,6 +33,7 @@ public partial class MainWindow : Window
     private readonly IAutoStartService _autoStartService;
     private readonly bool _suppressApplicationShutdownOnClose;
     private readonly Action _shutdownApplication;
+    private const double BubbleShadowSafety = 10;
     private CompanionEventPump? _eventPump;
     private PetSettings _settings;
     private PetScale _scale;
@@ -50,7 +51,11 @@ public partial class MainWindow : Window
     private long _armedAmbientGeneration;
     private long _ambientDueTimestamp;
     private System.Windows.Point _mouseDown;
+    private ScreenPoint _dragGrabOffset;
     private double _lastDragLeft;
+    private bool _dragCompletionStarted;
+    private BubblePlacementSide _bubbleSide = BubblePlacementSide.Above;
+    private bool _bubbleSuspendedForWindowHide;
 
     internal AgentReply? LastReply { get; private set; }
 
@@ -217,10 +222,12 @@ public partial class MainWindow : Window
 
         Loaded += Window_Loaded;
         ContentRendered += Window_ContentRendered;
+        LocationChanged += Window_LocationChanged;
         Closed += Window_Closed;
         PetImage.PreviewMouseLeftButtonDown += PetImage_MouseLeftButtonDown;
         PetImage.PreviewMouseMove += PetImage_MouseMove;
         PetImage.PreviewMouseLeftButtonUp += PetImage_MouseLeftButtonUp;
+        PetImage.LostMouseCapture += PetImage_LostMouseCapture;
         CharacterStage.MouseEnter += BubbleHover_MouseEnter;
         CharacterStage.MouseLeave += BubbleHover_MouseLeave;
         SpeechBubble.MouseEnter += BubbleHover_MouseEnter;
@@ -599,20 +606,59 @@ public partial class MainWindow : Window
             workAreas = [new ScreenRect(work.Left, work.Top, work.Width, work.Height)];
         }
 
+        var localBounds = GetCharacterLocalBounds();
         var requested = double.IsNaN(_settings.Left) || double.IsNaN(_settings.Top)
-            ? DefaultPosition(workAreas[0])
+            ? DefaultPosition(workAreas[0], localBounds)
             : new ScreenPoint(_settings.Left, _settings.Top);
-        var clamped = ScreenPlacementService.Clamp(
+        var clamped = ScreenPlacementService.ClampVisibleBounds(
             requested,
-            ActualWidth,
-            ActualHeight,
+            localBounds,
             workAreas);
         Left = clamped.X;
         Top = clamped.Y;
     }
 
-    private ScreenPoint DefaultPosition(ScreenRect workArea) =>
-        new(workArea.Right - ActualWidth - 24, workArea.Bottom - ActualHeight - 24);
+    private static ScreenPoint DefaultPosition(ScreenRect workArea, ScreenRect localBounds) =>
+        new(
+            workArea.Right - localBounds.Right - 24,
+            workArea.Bottom - localBounds.Bottom - 24);
+
+    private void EnsureCurrentPositionIsVisible()
+    {
+        var workAreas = WorkAreaService.GetWorkAreas();
+        if (workAreas.Count == 0 || !double.IsFinite(Left) || !double.IsFinite(Top))
+        {
+            return;
+        }
+
+        var clamped = ScreenPlacementService.ClampVisibleBounds(
+            new ScreenPoint(Left, Top),
+            GetCharacterLocalBounds(),
+            workAreas);
+        Left = clamped.X;
+        Top = clamped.Y;
+    }
+
+    private ScreenRect GetCharacterLocalBounds()
+    {
+        var width = CharacterStage.Width;
+        var height = CharacterStage.Height;
+        return new ScreenRect(
+            (ActualWidth - width) / 2,
+            ActualHeight - height,
+            width,
+            height);
+    }
+
+    private ScreenRect GetCharacterScreenBounds()
+    {
+        var local = GetCharacterLocalBounds();
+        return new ScreenRect(
+            Left + local.Left,
+            Top + local.Top,
+            local.Width,
+            local.Height);
+    }
 
     private void PetImage_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
@@ -623,45 +669,49 @@ public partial class MainWindow : Window
         }
 
         _mouseDown = e.GetPosition(this);
+        var grab = e.GetPosition(CharacterStage);
+        _dragGrabOffset = new ScreenPoint(grab.X, grab.Y);
         _dragged = false;
+        _dragCompletionStarted = false;
         PetImage.CaptureMouse();
         e.Handled = true;
     }
 
-    private async void PetImage_MouseMove(object sender, System.Windows.Input.MouseEventArgs e)
+    private void PetImage_MouseMove(object sender, System.Windows.Input.MouseEventArgs e)
     {
-        if (InteractionFrozen || e.LeftButton != MouseButtonState.Pressed || _dragged)
+        if (InteractionFrozen || e.LeftButton != MouseButtonState.Pressed)
         {
             return;
         }
 
         var current = e.GetPosition(this);
-        if (Math.Abs(current.X - _mouseDown.X) <= 4 && Math.Abs(current.Y - _mouseDown.Y) <= 4)
+        if (!_dragged
+            && Math.Abs(current.X - _mouseDown.X) <= 4
+            && Math.Abs(current.Y - _mouseDown.Y) <= 4)
         {
             return;
         }
 
-        _dragged = true;
-        PetImage.ReleaseMouseCapture();
-        BeginDragAction();
-        _lastDragLeft = Left;
-        LocationChanged += Window_LocationChanged;
-        try
+        if (!_dragged)
         {
-            DragMove();
-        }
-        finally
-        {
-            LocationChanged -= Window_LocationChanged;
-            BeginLandingAction();
+            _dragged = true;
+            BeginDragAction();
+            _lastDragLeft = Left;
         }
 
-        if (InteractionFrozen)
+        var workAreas = WorkAreaService.GetWorkAreas();
+        if (workAreas.Count == 0)
         {
             return;
         }
 
-        await CompleteDragAfterMoveAsync();
+        var target = ScreenPlacementService.PlaceGrabbedVisibleBounds(
+            new ScreenPoint(Left + current.X, Top + current.Y),
+            _dragGrabOffset,
+            GetCharacterLocalBounds(),
+            workAreas);
+        Left = target.X;
+        Top = target.Y;
     }
 
     private async Task CompleteDragAfterMoveAsync()
@@ -683,22 +733,47 @@ public partial class MainWindow : Window
 
     private void Window_LocationChanged(object? sender, EventArgs e)
     {
-        var horizontalDelta = Left - _lastDragLeft;
-        _lastDragLeft = Left;
-        _animation.SetDragLean(horizontalDelta);
+        if (_dragged)
+        {
+            var horizontalDelta = Left - _lastDragLeft;
+            _lastDragLeft = Left;
+            _animation.SetDragLean(horizontalDelta);
+        }
+
+        PositionBubble();
     }
 
     private void PetImage_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        PetImage.ReleaseMouseCapture();
-        if (!InteractionFrozen && !_dragged)
+        if (!InteractionFrozen && _dragged)
+        {
+            FinishDragOnce();
+        }
+        else if (!InteractionFrozen)
         {
             var clickPosition = e.GetPosition(PetImage);
             ReactAndSpeak(ResolveClickSide(clickPosition.X, PetImage.ActualWidth));
         }
 
         _dragged = false;
+        PetImage.ReleaseMouseCapture();
         e.Handled = true;
+    }
+
+    private void PetImage_LostMouseCapture(object sender, MouseEventArgs e) =>
+        FinishDragOnce();
+
+    private void FinishDragOnce()
+    {
+        if (!_dragged || _dragCompletionStarted)
+        {
+            return;
+        }
+
+        _dragCompletionStarted = true;
+        _dragged = false;
+        BeginLandingAction();
+        _ = CompleteDragAfterMoveAsync();
     }
 
     internal static ClickSide ResolveClickSide(double horizontalPosition, double renderedWidth)
@@ -775,6 +850,11 @@ public partial class MainWindow : Window
 
         SpeechText.Text = text;
         SpeechBubble.Visibility = Visibility.Visible;
+        BubblePopup.IsOpen = true;
+        _bubbleSuspendedForWindowHide = false;
+        SpeechBubble.UpdateLayout();
+        PositionBubble();
+        Dispatcher.BeginInvoke(PositionBubble, DispatcherPriority.Loaded);
         _bubbleCountdown.Show();
         SynchronizeBubbleTimer();
     }
@@ -833,6 +913,63 @@ public partial class MainWindow : Window
         _bubbleTimer.Stop();
         SpeechText.Text = string.Empty;
         SpeechBubble.Visibility = Visibility.Collapsed;
+        BubblePopup.IsOpen = false;
+        _bubbleSuspendedForWindowHide = false;
+    }
+
+    private void PositionBubble()
+    {
+        if (!BubblePopup.IsOpen || SpeechBubble.Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        var width = SpeechBubble.ActualWidth > 0
+            ? SpeechBubble.ActualWidth
+            : SpeechBubble.DesiredSize.Width;
+        var height = SpeechBubble.ActualHeight > 0
+            ? SpeechBubble.ActualHeight
+            : SpeechBubble.DesiredSize.Height;
+        if (width <= 0 || height <= 0)
+        {
+            return;
+        }
+
+        var workAreas = WorkAreaService.GetWorkAreas();
+        if (workAreas.Count == 0)
+        {
+            return;
+        }
+
+        var character = GetCharacterScreenBounds();
+        var center = new ScreenPoint(
+            character.Left + (character.Width / 2),
+            character.Top + (character.Height / 2));
+        var workArea = workAreas.FirstOrDefault(area => area.Contains(center));
+        if (workArea.Width <= 0)
+        {
+            workArea = workAreas[0];
+        }
+
+        var safeWorkArea = new ScreenRect(
+            workArea.Left + BubbleShadowSafety,
+            workArea.Top + BubbleShadowSafety,
+            Math.Max(0, workArea.Width - (BubbleShadowSafety * 2)),
+            Math.Max(0, workArea.Height - (BubbleShadowSafety * 2)));
+        var placement = BubblePlacementService.Place(
+            character,
+            new ScreenSize(width, height),
+            safeWorkArea,
+            _bubbleSide);
+        _bubbleSide = placement.Side;
+        BubbleArrowUp.Visibility = placement.Side == BubblePlacementSide.Below
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        BubbleArrowDown.Visibility = placement.Side == BubblePlacementSide.Above
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        BubblePopup.HorizontalOffset = placement.Origin.X - character.Left - BubbleShadowSafety;
+        BubblePopup.VerticalOffset = placement.Origin.Y - character.Top - BubbleShadowSafety;
     }
 
     private void SynchronizeBubbleTimer()
@@ -1006,8 +1143,22 @@ public partial class MainWindow : Window
         }
 
         _scale = scale;
+        var previousCharacter = GetCharacterScreenBounds();
         ApplyScale(scale);
-        PlaceOnScreen();
+        UpdateLayout();
+        var localBounds = GetCharacterLocalBounds();
+        var requested = new ScreenPoint(
+            previousCharacter.Left + (previousCharacter.Width / 2)
+                - localBounds.Left - (localBounds.Width / 2),
+            previousCharacter.Bottom - localBounds.Bottom);
+        var workAreas = WorkAreaService.GetWorkAreas();
+        var clamped = ScreenPlacementService.ClampVisibleBounds(
+            requested,
+            localBounds,
+            workAreas);
+        Left = clamped.X;
+        Top = clamped.Y;
+        PositionBubble();
         ShowEventBubble(CompanionEvent.SizeChanged);
         await SaveSettingsAsync(skipWhenExiting: true);
     }
@@ -1053,7 +1204,7 @@ public partial class MainWindow : Window
                 SystemParameters.WorkArea.Top,
                 SystemParameters.WorkArea.Width,
                 SystemParameters.WorkArea.Height);
-        var point = DefaultPosition(work);
+        var point = DefaultPosition(work, GetCharacterLocalBounds());
         Left = point.X;
         Top = point.Y;
         ShowEventBubble(CompanionEvent.PositionRestored);
@@ -1064,6 +1215,8 @@ public partial class MainWindow : Window
     {
         if (!InteractionFrozen && _trayAvailable)
         {
+            _bubbleSuspendedForWindowHide = BubblePopup.IsOpen;
+            BubblePopup.IsOpen = false;
             Hide();
         }
     }
@@ -1137,6 +1290,16 @@ public partial class MainWindow : Window
     {
         Show();
         WindowState = WindowState.Normal;
+        UpdateLayout();
+        EnsureCurrentPositionIsVisible();
+        if (_bubbleSuspendedForWindowHide
+            && SpeechBubble.Visibility == Visibility.Visible)
+        {
+            BubblePopup.IsOpen = true;
+        }
+
+        _bubbleSuspendedForWindowHide = false;
+        PositionBubble();
         Activate();
     }
 

@@ -1544,6 +1544,188 @@ public sealed class WindowShellTests
         DeleteSettingsDirectory(settingsDirectory);
     }
 
+    [Fact]
+    public void MainWindow_TrayRestore_ReclampsTheCharacterAfterDisplayTopologyChanges()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var window = CreateWindow(settingsDirectory);
+            window.Show();
+            window.SetTrayAvailability(true);
+            window.Left = 100_000;
+            window.Top = -100_000;
+            window.HideToTray();
+
+            window.ToggleVisibilityFromTray();
+
+            var stage = Assert.IsType<Grid>(window.FindName("CharacterStage"));
+            var character = new Rect(
+                window.Left + ((window.ActualWidth - stage.ActualWidth) / 2),
+                window.Top + window.ActualHeight - stage.ActualHeight,
+                stage.ActualWidth,
+                stage.ActualHeight);
+            var work = SystemParameters.WorkArea;
+            Assert.True(character.Left >= work.Left);
+            Assert.True(character.Top >= work.Top);
+            Assert.True(character.Right <= work.Right);
+            Assert.True(character.Bottom <= work.Bottom);
+            window.Close();
+            DeleteSettingsDirectory(settingsDirectory);
+        });
+    }
+
+    [Fact]
+    public void MainWindow_TrayHideAndRestore_HidesAndRestoresTheIndependentBubble()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var window = CreateWindow(settingsDirectory);
+            window.Show();
+            window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+            window.SetTrayAvailability(true);
+            var popup = Assert.IsType<Popup>(window.FindName("BubblePopup"));
+            Assert.True(popup.IsOpen);
+
+            window.HideToTray();
+            Assert.False(popup.IsOpen);
+
+            window.ToggleVisibilityFromTray();
+            Assert.True(popup.IsOpen);
+            window.Close();
+            DeleteSettingsDirectory(settingsDirectory);
+        });
+    }
+
+    [Fact]
+    public void MainWindow_LostCaptureAndMouseUpCompleteOneDragAndOneSettingsSave()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var settingsSaveCount = 0;
+            var window = CreateWindowWithPersistenceWriters(
+                settingsDirectory,
+                _ =>
+                {
+                    Interlocked.Increment(ref settingsSaveCount);
+                    return Task.CompletedTask;
+                },
+                _ => Task.CompletedTask,
+                () => { });
+            window.Show();
+            window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+            SetPrivateField(window, "_dragged", true);
+            SetPrivateField(window, "_dragCompletionStarted", false);
+            InvokePrivate(window, "BeginDragAction");
+
+            InvokePrivate(window, "FinishDragOnce");
+            InvokePrivate(window, "FinishDragOnce");
+
+            WaitForCondition(
+                () => Volatile.Read(ref settingsSaveCount) == 1,
+                TimeSpan.FromSeconds(5),
+                () => $"Expected one post-drag save, got {settingsSaveCount}.");
+            Assert.Equal(1, settingsSaveCount);
+            window.Close();
+            DeleteSettingsDirectory(settingsDirectory);
+        });
+    }
+
+    [Fact]
+    public void MainWindow_BubbleUsesIndependentPopupWithProtectedShadowAndDirectionalArrows()
+    {
+        var settingsDirectory = CreateSettingsDirectory();
+        RunOnStaThread(() =>
+        {
+            var window = CreateWindow(settingsDirectory);
+            window.Show();
+            window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+
+            var popup = Assert.IsType<Popup>(window.FindName("BubblePopup"));
+            var surface = Assert.IsType<Border>(window.FindName("BubblePopupSurface"));
+            var arrowUp = Assert.IsType<System.Windows.Shapes.Path>(window.FindName("BubbleArrowUp"));
+            var arrowDown = Assert.IsType<System.Windows.Shapes.Path>(window.FindName("BubbleArrowDown"));
+            var stage = Assert.IsType<Grid>(window.FindName("CharacterStage"));
+            var localTop = window.ActualHeight - stage.ActualHeight;
+            window.Left = SystemParameters.WorkArea.Left + 300;
+            window.Top = SystemParameters.WorkArea.Top - localTop;
+
+            InvokePrivate(window, "ShowBubble", "popup placement");
+            window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+
+            Assert.True(popup.IsOpen);
+            Assert.Same(stage, popup.PlacementTarget);
+            Assert.Equal(PlacementMode.RelativePoint, popup.Placement);
+            Assert.Equal(new Thickness(10), surface.Padding);
+            Assert.Equal(Visibility.Visible, arrowUp.Visibility);
+            Assert.Equal(Visibility.Collapsed, arrowDown.Visibility);
+            Assert.Equal(
+                window.Top + localTop + stage.ActualHeight + 30,
+                window.Top + localTop + popup.VerticalOffset + surface.Padding.Top,
+                3);
+            window.Close();
+        });
+        DeleteSettingsDirectory(settingsDirectory);
+    }
+
+    [Theory]
+    [InlineData(PetScale.Small)]
+    [InlineData(PetScale.Normal)]
+    [InlineData(PetScale.Large)]
+    public void MainWindow_PersistedTopPosition_ClampsTheCharacterExactlyToWorkAreaTop(PetScale scale)
+    {
+        var settingsDirectory = CreateSettingsDirectory();
+        RunOnStaThread(() =>
+        {
+            var settings = new PetSettings(500, -10_000, scale, false, true);
+            var window = CreateWindowWithScheduler(
+                settingsDirectory,
+                new AmbientActionScheduler(() => 0.5),
+                settings);
+            window.Show();
+            window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+            var stage = Assert.IsType<Grid>(window.FindName("CharacterStage"));
+
+            var characterTop = window.Top + window.ActualHeight - stage.ActualHeight;
+
+            Assert.Equal(SystemParameters.WorkArea.Top, characterTop, 3);
+            window.Close();
+        });
+        DeleteSettingsDirectory(settingsDirectory);
+    }
+
+    [Fact]
+    public void MainWindow_SizeChange_PreservesCharacterBottomCenterBeforeClamping()
+    {
+        var settingsDirectory = CreateSettingsDirectory();
+        RunOnStaThread(() =>
+        {
+            var window = CreateWindow(settingsDirectory);
+            window.Show();
+            window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+            var stage = Assert.IsType<Grid>(window.FindName("CharacterStage"));
+            window.Left = SystemParameters.WorkArea.Left + 500;
+            window.Top = SystemParameters.WorkArea.Top + 200;
+            var oldCenter = window.Left + ((window.ActualWidth - stage.ActualWidth) / 2)
+                + (stage.ActualWidth / 2);
+            var oldBottom = window.Top + window.ActualHeight;
+
+            Assert.IsType<MenuItem>(window.FindName("LargeSizeMenuItem"))
+                .RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+
+            var newCenter = window.Left + ((window.ActualWidth - stage.ActualWidth) / 2)
+                + (stage.ActualWidth / 2);
+            var newBottom = window.Top + window.ActualHeight;
+            Assert.Equal(oldCenter, newCenter, 3);
+            Assert.Equal(oldBottom, newBottom, 3);
+            window.Close();
+        });
+        DeleteSettingsDirectory(settingsDirectory);
+    }
+
     [Theory]
     [InlineData(PetScale.Small)]
     [InlineData(PetScale.Normal)]
@@ -1559,15 +1741,16 @@ public sealed class WindowShellTests
             InvokePrivate(window, "ShowBubble", "layout measurement");
             var stage = Assert.IsType<Grid>(window.FindName("CharacterStage"));
             var bubble = Assert.IsAssignableFrom<FrameworkElement>(window.FindName("SpeechBubble"));
+            var popup = Assert.IsType<Popup>(window.FindName("BubblePopup"));
+            var popupSurface = Assert.IsType<Border>(window.FindName("BubblePopupSurface"));
             stage.RenderTransform = Transform.Identity;
             window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
             window.UpdateLayout();
 
-            var bubbleBottom = bubble.TranslatePoint(
-                new System.Windows.Point(0, bubble.ActualHeight), window).Y;
-            var characterTop = stage.TranslatePoint(new System.Windows.Point(0, 0), window).Y;
+            var bubbleBottomRelativeToCharacter =
+                popup.VerticalOffset + popupSurface.Padding.Top + bubble.ActualHeight;
 
-            Assert.InRange(characterTop - bubbleBottom, 29.5, 30.5);
+            Assert.InRange(-bubbleBottomRelativeToCharacter, 29.5, 30.5);
             window.Close();
         });
         DeleteSettingsDirectory(settingsDirectory);
@@ -1590,20 +1773,20 @@ public sealed class WindowShellTests
             InvokePrivate(window, "ShowBubble", longestLine.Text);
             var stage = Assert.IsType<Grid>(window.FindName("CharacterStage"));
             var bubble = Assert.IsAssignableFrom<FrameworkElement>(window.FindName("SpeechBubble"));
+            var popup = Assert.IsType<Popup>(window.FindName("BubblePopup"));
+            var popupSurface = Assert.IsType<Border>(window.FindName("BubblePopupSurface"));
             stage.RenderTransform = Transform.Identity;
             window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
             window.UpdateLayout();
 
-            var bubbleTop = bubble.TranslatePoint(new System.Windows.Point(0, 0), window).Y;
-            var bubbleBottom = bubble.TranslatePoint(
-                new System.Windows.Point(0, bubble.ActualHeight), window).Y;
-            var characterTop = stage.TranslatePoint(new System.Windows.Point(0, 0), window).Y;
-            var gap = characterTop - bubbleBottom;
+            var bubbleBottomRelativeToCharacter =
+                popup.VerticalOffset + popupSurface.Padding.Top + bubble.ActualHeight;
+            var gap = -bubbleBottomRelativeToCharacter;
 
             Assert.True(
-                bubbleTop >= 0,
-                $"Bubble top {bubbleTop:F3} clips line {longestLine.Id} ({longestLine.Text.Length} chars); "
-                + $"bubble height={bubble.ActualHeight:F3}, gap={gap:F3}.");
+                popup.IsOpen && bubble.ActualHeight > 0 && bubble.ActualWidth > 0,
+                $"Bubble did not lay out line {longestLine.Id} ({longestLine.Text.Length} chars); "
+                + $"bubble size={bubble.ActualWidth:F3}x{bubble.ActualHeight:F3}, gap={gap:F3}.");
             Assert.InRange(gap, 29.5, 30.5);
             window.Close();
         });
@@ -1946,6 +2129,15 @@ public sealed class WindowShellTests
         var value = field!.GetValue(window);
         Assert.NotNull(value);
         return value;
+    }
+
+    private static void SetPrivateField<T>(MainWindow window, string fieldName, T value)
+    {
+        var field = typeof(MainWindow).GetField(
+            fieldName,
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(field);
+        field!.SetValue(window, value);
     }
 
     private static AmbientActionScheduler CreateSchedulerWithTimeProvider(
