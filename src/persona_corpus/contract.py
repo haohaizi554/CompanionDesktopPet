@@ -14,6 +14,7 @@ DEFAULT_CONTRACT_PATH = (
 )
 _TOP_LEVEL_KEYS = frozenset(
     {
+        "$schema",
         "schema_version",
         "inventory",
         "release_inventory",
@@ -84,6 +85,37 @@ def _row_range(value: object, name: str) -> tuple[int, int]:
     return value[0], value[1]
 
 
+def _hour_ranges(value: object, name: str) -> tuple[tuple[int, int], ...]:
+    if not isinstance(value, list) or not value:
+        raise PersonaContractError(f"{name} must be a non-empty array of hour ranges")
+    ranges: list[tuple[int, int]] = []
+    for position, interval in enumerate(value, start=1):
+        if (
+            not isinstance(interval, list)
+            or len(interval) != 2
+            or any(type(hour) is not int for hour in interval)
+            or not 0 <= interval[0] < interval[1] <= 24
+        ):
+            raise PersonaContractError(
+                f"{name}[{position}] must be a half-open integer range inside [0, 24]"
+            )
+        ranges.append((interval[0], interval[1]))
+    return tuple(ranges)
+
+
+def _require_exact_hour_partition(
+    ranges_by_name: Mapping[str, tuple[tuple[int, int], ...]],
+    name: str,
+) -> None:
+    coverage = [0] * 24
+    for ranges in ranges_by_name.values():
+        for start, end in ranges:
+            for hour in range(start, end):
+                coverage[hour] += 1
+    if coverage != [1] * 24:
+        raise PersonaContractError(f"{name} must cover every hour exactly once")
+
+
 @dataclass(frozen=True, slots=True)
 class PersonaContract:
     schema_version: int
@@ -118,6 +150,10 @@ def load_persona_contract(path: Path = DEFAULT_CONTRACT_PATH) -> PersonaContract
     if not isinstance(raw, dict) or set(raw) != _TOP_LEVEL_KEYS:
         raise PersonaContractError(
             f"persona contract must contain exactly {sorted(_TOP_LEVEL_KEYS)!r}"
+        )
+    if raw.get("$schema") != "./schemas/persona-contract.schema.json":
+        raise PersonaContractError(
+            "$schema must reference ./schemas/persona-contract.schema.json"
         )
     if type(raw.get("schema_version")) is not int or raw["schema_version"] != 1:
         raise PersonaContractError("schema_version must be integer 1")
@@ -245,6 +281,73 @@ def load_persona_contract(path: Path = DEFAULT_CONTRACT_PATH) -> PersonaContract
     lexical_exposure = _mapping(raw.get("lexical_exposure"), "lexical_exposure")
     temporal = _mapping(raw.get("temporal"), "temporal")
     lineage = _mapping(raw.get("lineage"), "lineage")
+    if set(temporal) != {
+        "daypart_hours",
+        "context_token_hours",
+        "context_token_trigger",
+    }:
+        raise PersonaContractError("temporal uses an unexpected key set")
+    daypart_hours_raw = _mapping(temporal.get("daypart_hours"), "temporal.daypart_hours")
+    expected_dayparts = {"morning", "noon", "afternoon", "evening", "late_night"}
+    if set(daypart_hours_raw) != expected_dayparts:
+        raise PersonaContractError("temporal.daypart_hours must cover every daypart")
+    daypart_hours = {
+        name: _hour_ranges(value, f"temporal.daypart_hours.{name}")
+        for name, value in daypart_hours_raw.items()
+    }
+    _require_exact_hour_partition(daypart_hours, "daypart_hours")
+
+    context_hours_raw = _mapping(
+        temporal.get("context_token_hours"),
+        "temporal.context_token_hours",
+    )
+    expected_time_tokens = {
+        token for token in context_tokens if token.startswith("time:")
+    }
+    if set(context_hours_raw) != expected_time_tokens:
+        raise PersonaContractError(
+            "temporal.context_token_hours must cover every controlled time token"
+        )
+    context_hours = {
+        name: _hour_ranges(value, f"temporal.context_token_hours.{name}")
+        for name, value in context_hours_raw.items()
+    }
+    _require_exact_hour_partition(context_hours, "context_token_hours")
+
+    context_trigger_raw = _mapping(
+        temporal.get("context_token_trigger"),
+        "temporal.context_token_trigger",
+    )
+    if (
+        set(context_trigger_raw) != expected_time_tokens
+        or any(
+            not isinstance(trigger, str)
+            or trigger not in mvp_triggers | future_triggers
+            for trigger in context_trigger_raw.values()
+        )
+    ):
+        raise PersonaContractError(
+            "temporal.context_token_trigger must map every time token to a controlled trigger"
+        )
+    daypart_hour_sets = {
+        name: {
+            hour
+            for start, end in ranges
+            for hour in range(start, end)
+        }
+        for name, ranges in daypart_hours.items()
+    }
+    for token, ranges in context_hours.items():
+        trigger = str(context_trigger_raw[token])
+        token_hours = {
+            hour
+            for start, end in ranges
+            for hour in range(start, end)
+        }
+        if trigger not in daypart_hour_sets or not token_hours <= daypart_hour_sets[trigger]:
+            raise PersonaContractError(
+                f"temporal token {token!r} is outside trigger {trigger!r} hours"
+            )
     if "dry_sharp" not in tones:
         raise PersonaContractError("dry_sharp policy requires the dry_sharp controlled tone")
     expected_dry_sharp_keys = {

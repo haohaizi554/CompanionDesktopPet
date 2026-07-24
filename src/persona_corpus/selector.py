@@ -6,23 +6,35 @@ import hashlib
 from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from functools import lru_cache
 from pathlib import Path
 from types import MappingProxyType
 from typing import Mapping, Sequence
 
 from .context import ContextError, PersonaContext, daypart_for
-from .contract import PERSONA_CONTRACT
 from .history import HistoryFormatError, HistoryRecord, SelectionHistory
-from .lexical import contains_seasoning_marker
 from .models import CorpusLine
 from .surface_exposure import SURFACE_RECENT_WINDOW, surface_exposure
-from .validation import ValidationInputError, load_json_object, validate_config
+from .trigger_matching import trigger_matches as _trigger_matches
 
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "persona-scheduler.json"
 SCORE_HISTORY_WINDOW = 50
 SCORE_BAND_WIDTH = 1.0
 _EPSILON = 1e-9
+
+
+@lru_cache(maxsize=1)
+def _persona_contract():
+    from .contract import PERSONA_CONTRACT
+
+    return PERSONA_CONTRACT
+
+
+def _contains_seasoning_marker(text: object) -> bool:
+    from .lexical import contains_seasoning_marker
+
+    return contains_seasoning_marker(text)
 
 
 class SelectorConfigError(ValueError):
@@ -32,6 +44,8 @@ class SelectorConfigError(ValueError):
 @dataclass(frozen=True, slots=True)
 class SchedulerConfig:
     schema_version: int
+    schema_reference: str | None
+    derived_from: Mapping[str, object]
     category_group_weights: Mapping[str, float]
     output_mode_targets: Mapping[str, float]
     minimum_interval_minutes: int
@@ -53,6 +67,8 @@ class SchedulerConfig:
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, object]) -> SchedulerConfig:
+        from .validation import validate_config
+
         if type(value.get("schema_version")) is not int or value.get("schema_version") != 1:
             raise SelectorConfigError("scheduler config schema_version must be integer 1")
         report = validate_config(value)
@@ -60,6 +76,12 @@ class SchedulerConfig:
             detail = "; ".join(f"{issue.code}: {issue.message}" for issue in report.errors)
             raise SelectorConfigError(detail)
         try:
+            schema_reference = value.get("$schema")
+            derived_from = value.get("derived_from")
+            if schema_reference is not None and not isinstance(schema_reference, str):
+                raise TypeError("$schema must be a string")
+            if derived_from is not None and not isinstance(derived_from, Mapping):
+                raise TypeError("derived_from must be an object")
             group_weights = value["category_group_weights"]
             mode_targets = value["output_mode_targets"]
             limits = value["runtime_limits"]
@@ -76,6 +98,13 @@ class SchedulerConfig:
             assert isinstance(intervals, Mapping)
             return cls(
                 schema_version=1,
+                schema_reference=schema_reference,
+                derived_from=MappingProxyType(
+                    {
+                        str(name): item
+                        for name, item in (derived_from or {}).items()
+                    }
+                ),
                 category_group_weights=MappingProxyType(
                     {str(name): float(weight) for name, weight in group_weights.items()}
                 ),
@@ -110,6 +139,8 @@ class SchedulerConfig:
 
 
 def load_scheduler_config(path: Path = DEFAULT_CONFIG_PATH) -> SchedulerConfig:
+    from .validation import ValidationInputError, load_json_object
+
     try:
         value = load_json_object(Path(path))
     except ValidationInputError as error:
@@ -117,7 +148,15 @@ def load_scheduler_config(path: Path = DEFAULT_CONFIG_PATH) -> SchedulerConfig:
     return SchedulerConfig.from_mapping(value)
 
 
-DEFAULT_SCHEDULER_CONFIG = load_scheduler_config()
+@lru_cache(maxsize=1)
+def get_default_scheduler_config() -> SchedulerConfig:
+    return load_scheduler_config()
+
+
+def __getattr__(name: str) -> object:
+    if name == "DEFAULT_SCHEDULER_CONFIG":
+        return get_default_scheduler_config()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,7 +263,11 @@ def prepare_corpus(corpus: Sequence[CorpusLine] | PreparedCorpus) -> PreparedCor
         seasoning_rows: list[CorpusLine] = []
         neutral_rows: list[CorpusLine] = []
         for row in ordered:
-            (seasoning_rows if contains_seasoning_marker(row.text) else neutral_rows).append(row)
+            (
+                seasoning_rows
+                if _contains_seasoning_marker(row.text)
+                else neutral_rows
+            ).append(row)
         scenes.append(
             PreparedScene(
                 semantic_group=semantic_group,
@@ -339,39 +382,6 @@ def _context_tokens(required_context: str, config: SchedulerConfig) -> tuple[str
     return tokens
 
 
-def _trigger_matches(
-    trigger: str,
-    context: PersonaContext,
-    elapsed_minutes: float,
-    config: SchedulerConfig,
-) -> bool:
-    if trigger == "any":
-        return True
-    if trigger == "app_start":
-        return context.event == "app_start"
-    if trigger == "day_changed":
-        return context.event == "day_changed"
-    if trigger in {"morning", "noon", "afternoon", "evening", "late_night"}:
-        return context.daypart == trigger
-    if trigger == "weekday":
-        return not context.is_weekend
-    if trigger == "weekend":
-        return context.is_weekend
-    if trigger == "holiday":
-        return context.holiday is not None
-    if trigger == "anniversary":
-        return context.anniversary_days > 0
-    if trigger == "long_silence":
-        return elapsed_minutes + _EPSILON >= config.long_silence_minutes
-    if trigger == "ide_foreground":
-        return context.ide_foreground is True
-    if trigger == "long_active":
-        return context.active_minutes is not None and context.active_minutes >= 90
-    if trigger == "idle_return":
-        return context.idle_return is True
-    return False
-
-
 def _outside_cooldown(now: datetime, previous: HistoryRecord | None, hours: float) -> bool:
     return previous is None or _elapsed_minutes(now, previous.played_at) + _EPSILON >= hours * 60
 
@@ -417,7 +427,7 @@ def _score(
     row_weight_bonus = float(row.weight) * 0.5
     interrupt_penalty = row.interrupt_cost * 0.75
     category_repeat_penalty = category_observed * 5.0
-    dry_sharp_target = float(PERSONA_CONTRACT.dry_sharp["playback_target"])
+    dry_sharp_target = float(_persona_contract().dry_sharp["playback_target"])
     dry_sharp_deficit = dry_sharp_target - dry_sharp_observed
     dry_sharp_bonus = dry_sharp_deficit * 200.0 if row.tone == "dry_sharp" else 0.0
     score = (
@@ -470,7 +480,7 @@ def _weighted_scene_choice(
 
 def _coerce_config(value: SchedulerConfig | Mapping[str, object] | None) -> SchedulerConfig:
     if value is None:
-        return DEFAULT_SCHEDULER_CONFIG
+        return get_default_scheduler_config()
     if isinstance(value, SchedulerConfig):
         try:
             normalized = _scheduler_config_mapping(value)
@@ -483,7 +493,7 @@ def _coerce_config(value: SchedulerConfig | Mapping[str, object] | None) -> Sche
 
 
 def _scheduler_config_mapping(config: SchedulerConfig) -> dict[str, object]:
-    return {
+    normalized: dict[str, object] = {
         "schema_version": config.schema_version,
         "category_group_weights": dict(config.category_group_weights),
         "output_mode_targets": dict(config.output_mode_targets),
@@ -511,6 +521,20 @@ def _scheduler_config_mapping(config: SchedulerConfig) -> dict[str, object]:
         "mvp_triggers": sorted(config.mvp_triggers),
         "future_triggers": sorted(config.future_triggers),
     }
+    if config.schema_reference is not None or config.derived_from:
+        if config.schema_reference is None or not config.derived_from:
+            raise SelectorConfigError("typed scheduler provenance must be a complete pair")
+        normalized = {
+            "$schema": config.schema_reference,
+            "schema_version": normalized["schema_version"],
+            "derived_from": dict(config.derived_from),
+            **{
+                key: value
+                for key, value in normalized.items()
+                if key != "schema_version"
+            },
+        }
+    return normalized
 
 
 def _prefer_surface_exposure(
@@ -536,7 +560,7 @@ def _prefer_surface_exposure(
     least_conflicts = min(conflict_counts.values())
     diverse = tuple(row for row, _ in profiled if conflict_counts[row.id] == least_conflicts)
 
-    seasoning = PERSONA_CONTRACT.lexical_exposure["seasoning"]
+    seasoning = _persona_contract().lexical_exposure["seasoning"]
     acceptance = seasoning["playback_acceptance"]
     target = (float(acceptance[0]) + float(acceptance[1])) / 2.0
     score_window = records[-SCORE_HISTORY_WINDOW:]
@@ -545,8 +569,8 @@ def _prefer_surface_exposure(
         if score_window
         else 0.0
     )
-    seasoning_rows = tuple(row for row in diverse if contains_seasoning_marker(row.text))
-    neutral_rows = tuple(row for row in diverse if not contains_seasoning_marker(row.text))
+    seasoning_rows = tuple(row for row in diverse if _contains_seasoning_marker(row.text))
+    neutral_rows = tuple(row for row in diverse if not _contains_seasoning_marker(row.text))
     if observed + _EPSILON < target and seasoning_rows:
         return seasoning_rows
     if observed > target + _EPSILON and neutral_rows:
@@ -600,7 +624,7 @@ def select_line(
         if record.played_at.astimezone(now.tzinfo).date() == local_date:
             today_counts[record.selected_id] += 1
 
-    seasoning_policy = PERSONA_CONTRACT.lexical_exposure["seasoning"]
+    seasoning_policy = _persona_contract().lexical_exposure["seasoning"]
     seasoning_window = int(seasoning_policy["recent_window"])
     seasoning_maximum = int(seasoning_policy["recent_max"])
     seasoning_blocked = (
@@ -634,7 +658,12 @@ def select_line(
         row = scene.representative
         if not _candidate_row_is_safe(row, config):
             continue
-        if not _trigger_matches(row.trigger, context, actual_elapsed, config):
+        if not _trigger_matches(
+            row.trigger,
+            context,
+            actual_elapsed,
+            config.long_silence_minutes,
+        ):
             continue
         required = _context_tokens(row.required_context, config)
         if required is not None and (
@@ -700,11 +729,11 @@ def select_line(
         <= config.user_direct_recent_max
     ]
 
-    dry_sharp_window = int(PERSONA_CONTRACT.dry_sharp["recent_window"])
-    dry_sharp_maximum = int(PERSONA_CONTRACT.dry_sharp["recent_max"])
+    dry_sharp_window = int(_persona_contract().dry_sharp["recent_window"])
+    dry_sharp_maximum = int(_persona_contract().dry_sharp["recent_max"])
     dry_sharp_playback_window = SCORE_HISTORY_WINDOW
     dry_sharp_playback_maximum = math.floor(
-        float(PERSONA_CONTRACT.dry_sharp["playback_acceptance"][1])
+        float(_persona_contract().dry_sharp["playback_acceptance"][1])
         * dry_sharp_playback_window
         + _EPSILON
     )
@@ -813,7 +842,7 @@ def select_line(
                 trigger=chosen_row.trigger,
                 interrupt_cost=chosen_row.interrupt_cost,
                 was_dry_sharp=chosen_row.tone == "dry_sharp",
-                was_seasoning=contains_seasoning_marker(chosen_row.text),
+                was_seasoning=_contains_seasoning_marker(chosen_row.text),
                 surface_opening=surface.opening,
                 surface_ending=surface.ending,
                 surface_template=surface.template,

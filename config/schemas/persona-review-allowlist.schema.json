@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://companiondesktop.pet/schemas/persona-review-allowlist.schema.json",
+  "title": "Companion Desktop Pet validation review allowlist",
+  "type": "object",
+  "required": ["$schema", "schema_version", "corpus_sha256", "exceptions"],
+  "properties": {
+    "$schema": { "const": "./schemas/persona-review-allowlist.schema.json" },
+    "schema_version": { "const": 1 },
+    "corpus_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "exceptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["rule_code", "line_id", "normalized_text_sha256", "reason"],
+        "properties": {
+          "rule_code": { "type": "string", "minLength": 1 },
+          "line_id": { "type": "string", "minLength": 1 },
+          "normalized_text_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "reason": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import math
 import re
+from pathlib import Path
 from typing import Mapping
 
 from ..contract import (
@@ -24,7 +26,7 @@ from .core import (
 
 CONTEXT_TOKEN_PATTERN = re.compile(r"^[a-z][a-z0-9_]*(?::[a-z][a-z0-9_]*)?$")
 
-TOP_LEVEL_CONFIG_KEYS = frozenset(
+CORE_CONFIG_KEYS = frozenset(
     {
         "schema_version",
         "category_group_weights",
@@ -35,6 +37,11 @@ TOP_LEVEL_CONFIG_KEYS = frozenset(
         "future_triggers",
     }
 )
+CONFIG_METADATA_KEYS = frozenset({"$schema", "derived_from"})
+TOP_LEVEL_CONFIG_KEYS = CORE_CONFIG_KEYS | CONFIG_METADATA_KEYS
+SCHEDULER_SCHEMA_REFERENCE = "./schemas/persona-scheduler.schema.json"
+CONTRACT_PROVENANCE_PATH = "config/persona-contract.json"
+_CONTRACT_FILE = Path(__file__).resolve().parents[3] / CONTRACT_PROVENANCE_PATH
 RUNTIME_LIMIT_KEYS = frozenset(
     {
         "minimum_interval_minutes",
@@ -52,6 +59,45 @@ RUNTIME_LIMIT_KEYS = frozenset(
         "interrupt_cost_minimum_intervals_minutes",
     }
 )
+
+
+def _validate_provenance(config: Mapping[str, object], issues: _Issues) -> None:
+    metadata_present = bool(set(config) & CONFIG_METADATA_KEYS)
+    if not metadata_present:
+        return
+    if config.get("$schema") != SCHEDULER_SCHEMA_REFERENCE:
+        issues.error(
+            "config_provenance",
+            f"$schema must be {SCHEDULER_SCHEMA_REFERENCE!r}",
+        )
+    derived = config.get("derived_from")
+    if not isinstance(derived, Mapping) or set(derived) != {
+        "path",
+        "schema_version",
+        "sha256",
+    }:
+        issues.error(
+            "config_provenance",
+            "derived_from must contain exactly path, schema_version and sha256",
+        )
+        return
+    digest = derived.get("sha256")
+    valid = (
+        derived.get("path") == CONTRACT_PROVENANCE_PATH
+        and type(derived.get("schema_version")) is int
+        and derived.get("schema_version") == 1
+        and isinstance(digest, str)
+        and re.fullmatch(r"[0-9a-f]{64}", digest) is not None
+    )
+    try:
+        expected_digest = hashlib.sha256(_CONTRACT_FILE.read_bytes()).hexdigest()
+    except OSError:
+        expected_digest = None
+    if not valid or digest != expected_digest:
+        issues.error(
+            "config_provenance",
+            "derived_from must bind the exact schema-v1 config/persona-contract.json bytes",
+        )
 
 def _validate_weight_map(config: Mapping[str, object], issues: _Issues) -> None:
     expected_raw = PERSONA_CONTRACT.scheduler["category_group_weights"]
@@ -279,10 +325,19 @@ def validate_config(config: object) -> ValidationReport:
     if not isinstance(config, Mapping):
         issues.error("config_format", "scheduler config must be a JSON object")
         return issues.report()
-    if set(config) != TOP_LEVEL_CONFIG_KEYS:
-        issues.error("config_keys", "scheduler config must use the exact documented top-level keys")
+    keys = set(config)
+    metadata_present = bool(keys & CONFIG_METADATA_KEYS)
+    keys_are_valid = CORE_CONFIG_KEYS <= keys <= TOP_LEVEL_CONFIG_KEYS
+    if metadata_present:
+        keys_are_valid &= CONFIG_METADATA_KEYS <= keys
+    if not keys_are_valid:
+        issues.error(
+            "config_keys",
+            "scheduler config must use the documented core keys and complete metadata pair",
+        )
     if config.get("schema_version") != 1 or isinstance(config.get("schema_version"), bool):
         issues.error("config_format", "schema_version must be integer 1")
+    _validate_provenance(config, issues)
     _validate_weight_map(config, issues)
     _validate_output_targets(config, issues)
     _validate_runtime_limits(config, issues)

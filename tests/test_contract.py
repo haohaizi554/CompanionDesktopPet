@@ -76,12 +76,23 @@ class PersonaContractFileTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             CATEGORY_GROUP_BY_CATEGORY["Career"] = "technical"  # type: ignore[index]
 
-    def test_contract_declares_dawn_inside_late_night_runtime_daypart(self) -> None:
+    def test_contract_declares_uniform_half_open_context_ranges(self) -> None:
         payload = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
 
         self.assertIn("temporal", payload)
         temporal = payload["temporal"]
-        self.assertEqual([4, 6], temporal["context_token_hours"]["time:dawn"])
+        self.assertEqual(
+            {
+                "time:dawn": [[4, 6]],
+                "time:morning": [[6, 11]],
+                "time:noon": [[11, 14]],
+                "time:afternoon": [[14, 18]],
+                "time:evening": [[18, 23]],
+                "time:late_night": [[0, 4], [23, 24]],
+            },
+            temporal["context_token_hours"],
+        )
+        self.assertEqual([[0, 6], [23, 24]], temporal["daypart_hours"]["late_night"])
         self.assertEqual("late_night", temporal["context_token_trigger"]["time:dawn"])
 
     def test_scheduler_config_matches_the_shared_contract(self) -> None:

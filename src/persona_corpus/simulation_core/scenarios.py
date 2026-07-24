@@ -11,6 +11,7 @@ from ..context import PersonaContext
 from ..history import SelectionHistory
 from ..models import CorpusLine
 from ..selector import SchedulerConfig, select_line
+from ..trigger_matching import trigger_matches as _trigger_matches
 
 
 SUBSEED_DERIVATION_VERSION = "persona-simulation-v2"
@@ -58,39 +59,6 @@ def derive_subseed(
         )
     ).encode("utf-8")
     return int.from_bytes(hashlib.sha256(identity).digest()[:8], "big", signed=False)
-
-
-def _trigger_matches(
-    trigger: str,
-    context: PersonaContext,
-    elapsed_minutes: float,
-    config: SchedulerConfig,
-) -> bool:
-    if trigger == "any":
-        return True
-    if trigger == "app_start":
-        return context.event == "app_start"
-    if trigger == "day_changed":
-        return context.event == "day_changed"
-    if trigger in {"morning", "noon", "afternoon", "evening", "late_night"}:
-        return context.daypart == trigger
-    if trigger == "weekday":
-        return not context.is_weekend
-    if trigger == "weekend":
-        return context.is_weekend
-    if trigger == "holiday":
-        return context.holiday is not None
-    if trigger == "anniversary":
-        return context.anniversary_days > 0
-    if trigger == "long_silence":
-        return elapsed_minutes >= config.long_silence_minutes
-    if trigger == "ide_foreground":
-        return context.ide_foreground is True
-    if trigger == "long_active":
-        return context.active_minutes is not None and context.active_minutes >= 90
-    if trigger == "idle_return":
-        return context.idle_return is True
-    return False
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,7 +112,12 @@ class CandidateIndex:
         elapsed = float(context.minutes_since_last_output)
         candidates: list[CorpusLine] = []
         for trigger in sorted(self.by_trigger):
-            if not _trigger_matches(trigger, context, elapsed, config):
+            if not _trigger_matches(
+                trigger,
+                context,
+                elapsed,
+                config.long_silence_minutes,
+            ):
                 continue
             for row in self.by_trigger[trigger]:
                 required = tuple(row.required_context.split(","))
@@ -385,7 +358,12 @@ def _matching_context(
                 idle_return=idle,
                 fullscreen=fullscreen,
             )
-            if not _trigger_matches(trigger, context, elapsed, config):
+            if not _trigger_matches(
+                trigger,
+                context,
+                elapsed,
+                config.long_silence_minutes,
+            ):
                 continue
             tokens = context.controlled_tokens(now)
             if required == ("none",) or all(token in tokens for token in required):

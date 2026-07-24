@@ -1,4 +1,5 @@
 {
+  "$schema": "./schemas/persona-editorial-manifest.schema.json",
   "schema_version": 1,
   "catalog_variant_decisions": {
     "adjudicated": [

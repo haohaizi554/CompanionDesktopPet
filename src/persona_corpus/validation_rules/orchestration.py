@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import math
+from collections.abc import Mapping
+from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Sequence
 
@@ -69,6 +73,105 @@ FORMAT_ERROR_CODES = frozenset(
     {"config_format", "config_keys", "allowlist_format", "simulation_format"}
 )
 
+
+def _stable_validation_node(value: object, active: set[int]) -> object:
+    """Encode malformed validation input without process-specific ``repr`` output."""
+
+    if value is None:
+        return ["null"]
+    if type(value) is bool:
+        return ["bool", value]
+    if type(value) is int:
+        return ["int", str(value)]
+    if type(value) is float:
+        if math.isnan(value):
+            rendered = "nan"
+        elif math.isinf(value):
+            rendered = "+inf" if value > 0 else "-inf"
+        else:
+            rendered = value.hex()
+        return ["float", rendered]
+    if type(value) is str:
+        return ["string", value]
+    if type(value) is bytes:
+        return ["bytes", value.hex()]
+
+    identity = id(value)
+    if identity in active:
+        return ["cycle"]
+
+    if isinstance(value, Mapping):
+        active.add(identity)
+        try:
+            entries = [
+                [
+                    _stable_validation_node(key, active),
+                    _stable_validation_node(item, active),
+                ]
+                for key, item in value.items()
+            ]
+        finally:
+            active.remove(identity)
+        entries.sort(
+            key=lambda entry: json.dumps(
+                entry, ensure_ascii=True, separators=(",", ":")
+            )
+        )
+        return ["mapping", entries]
+
+    if isinstance(value, (list, tuple)):
+        active.add(identity)
+        try:
+            items = [_stable_validation_node(item, active) for item in value]
+        finally:
+            active.remove(identity)
+        return ["list" if isinstance(value, list) else "tuple", items]
+
+    if isinstance(value, (set, frozenset)):
+        active.add(identity)
+        try:
+            items = [_stable_validation_node(item, active) for item in value]
+        finally:
+            active.remove(identity)
+        items.sort(
+            key=lambda item: json.dumps(
+                item, ensure_ascii=True, separators=(",", ":")
+            )
+        )
+        return ["set" if isinstance(value, set) else "frozenset", items]
+
+    if is_dataclass(value) and not isinstance(value, type):
+        active.add(identity)
+        try:
+            members = [
+                [field.name, _stable_validation_node(getattr(value, field.name), active)]
+                for field in fields(value)
+            ]
+        finally:
+            active.remove(identity)
+        value_type = type(value)
+        return ["dataclass", value_type.__module__, value_type.__qualname__, members]
+
+    value_type = type(value)
+    return ["unsupported", value_type.__module__, value_type.__qualname__]
+
+
+def _stable_validation_sha256(value: object, *, domain: str) -> str:
+    """Return a deterministic, domain-separated digest for malformed values."""
+
+    try:
+        node = _stable_validation_node(value, set())
+    except Exception as error:  # Defensive sentinel for hostile/custom container implementations.
+        error_type = type(error)
+        node = ["encoding_error", error_type.__module__, error_type.__qualname__]
+    payload = json.dumps(
+        ["persona-validation-fallback-v1", domain, node],
+        ensure_ascii=False,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
 def validate_corpus(
     lines: Sequence[CorpusLine],
     scheduler_config: object,
@@ -115,16 +218,17 @@ def validate_corpus(
 
         try:
             payload = serialize_v2(typed_rows)
-        except ValueError:
-            payload = repr(typed_rows).encode("utf-8", errors="backslashreplace")
-        _corpus_sha256 = hashlib.sha256(payload).hexdigest()
+        except (AttributeError, TypeError, UnicodeError, ValueError):
+            _corpus_sha256 = _stable_validation_sha256(typed_rows, domain="corpus")
+        else:
+            _corpus_sha256 = hashlib.sha256(payload).hexdigest()
     if _scheduler_config_sha256 is None:
         try:
             _scheduler_config_sha256 = scheduler_config_sha256(scheduler_config)
         except (TypeError, ValueError):
-            _scheduler_config_sha256 = hashlib.sha256(
-                repr(scheduler_config).encode("utf-8", errors="backslashreplace")
-            ).hexdigest()
+            _scheduler_config_sha256 = _stable_validation_sha256(
+                scheduler_config, domain="scheduler"
+            )
     _simulation_issues(
         simulation_result,
         typed_rows,

@@ -106,7 +106,6 @@ class PersonaContextTests(unittest.TestCase):
             {
                 "day:weekend",
                 "time:dawn",
-                "time:late_night",
                 "season:spring",
                 "holiday",
                 "date:holiday",

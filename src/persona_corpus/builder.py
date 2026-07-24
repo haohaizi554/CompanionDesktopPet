@@ -15,6 +15,12 @@ from .editorial import is_exact_identity_easter_egg
 from .extraction import SourceMapping
 from .models import CorpusLine, LegacyLine
 from .normalization import normalize_text
+from .privacy import (
+    ENABLED_CONTENT_POLICY,
+    LEGACY_REVIEW_POLICY,
+    contains_pii,
+    pii_kinds,
+)
 from .schema import (
     ARCHIVE_HEADER,
     PII_REVIEW_HEADER,
@@ -45,28 +51,6 @@ SOURCE_MAPPING_HEADER = (
     "extraction_confidence",
 )
 
-PII_MARKERS = (
-    "雷琳玥",
-    "小玥",
-    "湖南",
-    "长沙",
-    "广东",
-    "姓名",
-    "名字",
-    "住在",
-    "地址",
-    "工资",
-    "收入",
-    "月薪",
-    "打零工",
-    "换工作",
-)
-PII_PATTERNS = (
-    re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)"),
-    re.compile(r"(?<!\d)\d{17}[\dXx](?!\d)"),
-    re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"),
-)
-ADJUDICATED_IDENTITY_MARKERS = ("雷琳玥", "小玥", "玥玥")
 FALSE_CONTEXT_MARKERS = (
     "你现在",
     "你今天",
@@ -152,17 +136,20 @@ def catalog_line_id(entry: CatalogEntry) -> str:
 
 
 def _looks_like_pii(text: str) -> bool:
-    return any(marker in text for marker in PII_MARKERS) or any(
-        pattern.search(text) for pattern in PII_PATTERNS
-    )
+    return contains_pii(text, LEGACY_REVIEW_POLICY)
 
 
 def _pii_type(text: str) -> str:
-    if any(marker in text for marker in ("雷琳玥", "小玥", "姓名", "名字")):
+    kinds = pii_kinds(text, LEGACY_REVIEW_POLICY)
+    if kinds & {"known_identity", "person_name", "name_keyword"}:
         return "person_name"
-    if any(marker in text for marker in ("湖南", "长沙", "广东", "住在", "地址")):
+    if kinds & {"personal_location", "location_keyword"}:
         return "location_or_history"
-    if any(marker in text for marker in ("工资", "收入", "月薪", "打零工", "换工作")):
+    if kinds & {
+        "personal_income",
+        "personal_employment",
+        "income_or_employment_keyword",
+    }:
         return "income_or_employment"
     return "direct_identifier"
 
@@ -319,20 +306,13 @@ def _catalog_to_corpus(
         source_reference=source_reference,
         rewrite_reason=entry.rewrite_reason,
     )
-    has_identity = any(marker in entry.text for marker in ADJUDICATED_IDENTITY_MARKERS)
-    if _catalog_has_non_identity_pii(entry.text) or (
+    catalog_pii_kinds = pii_kinds(entry.text, ENABLED_CONTENT_POLICY)
+    has_identity = "known_identity" in catalog_pii_kinds
+    if bool(catalog_pii_kinds - {"known_identity"}) or (
         has_identity and not is_exact_identity_easter_egg(row)
     ):
         raise ValueError(f"enabled catalog entry contains PII risk: {entry.text!r}")
     return row
-
-
-def _catalog_has_non_identity_pii(text: str) -> bool:
-    return any(
-        marker in text
-        for marker in PII_MARKERS
-        if marker not in ADJUDICATED_IDENTITY_MARKERS
-    ) or any(pattern.search(text) for pattern in PII_PATTERNS)
 
 
 def _build_surface_manifest(

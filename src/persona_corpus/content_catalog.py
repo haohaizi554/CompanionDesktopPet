@@ -35,6 +35,37 @@ class CatalogEntry:
     rewrite_reason: str
 
 
+class CatalogIntegrityError(ValueError):
+    """Raised when static editorial or catalog data violates its contract."""
+
+
+def _validate_editorial_manifest_alignment(
+    migrated_adjudicated: tuple[str, ...],
+    migrated_retired: tuple[str, ...],
+    manifest_adjudicated: tuple[str, ...],
+    manifest_retired: tuple[str, ...],
+) -> None:
+    if migrated_adjudicated != manifest_adjudicated:
+        raise CatalogIntegrityError(
+            "migrated adjudicated variants do not match the editorial manifest"
+        )
+    if migrated_retired != manifest_retired:
+        raise CatalogIntegrityError(
+            "migrated retired variants do not match the editorial manifest"
+        )
+
+
+def _validate_catalog_integrity(catalog: tuple[CatalogEntry, ...]) -> None:
+    if not 800 <= len(catalog) <= 1200:
+        raise CatalogIntegrityError("catalog size must be between 800 and 1200 entries")
+    if len({entry.text for entry in catalog}) != len(catalog):
+        raise CatalogIntegrityError("catalog contains duplicate text")
+    if any("?" in entry.text or "？" in entry.text for entry in catalog):
+        raise CatalogIntegrityError("catalog text must not contain question marks")
+    if any("\t" in entry.text or "\n" in entry.text for entry in catalog):
+        raise CatalogIntegrityError("catalog text must not contain tabs or line breaks")
+
+
 _MIGRATED_ADJUDICATED_VARIANTS: tuple[str, ...] = (
     'topic_algorithms_1c77a759bac7.practice',
     'topic_algorithms_22303c70630c.practice',
@@ -139,8 +170,12 @@ _MIGRATED_RETIRED_VARIANTS: tuple[str, ...] = (
 # while downstream branches move to the manifest API.
 EDITORIALLY_ADJUDICATED_VARIANTS = EDITORIAL_MANIFEST.adjudicated_variants
 RETIRED_MECHANICAL_VARIANTS = EDITORIAL_MANIFEST.retired_variants
-assert _MIGRATED_ADJUDICATED_VARIANTS == EDITORIALLY_ADJUDICATED_VARIANTS
-assert _MIGRATED_RETIRED_VARIANTS == RETIRED_MECHANICAL_VARIANTS
+_validate_editorial_manifest_alignment(
+    _MIGRATED_ADJUDICATED_VARIANTS,
+    _MIGRATED_RETIRED_VARIANTS,
+    EDITORIALLY_ADJUDICATED_VARIANTS,
+    RETIRED_MECHANICAL_VARIANTS,
+)
 
 
 CONTENT_CATALOG: tuple[CatalogEntry, ...] = (
@@ -1258,17 +1293,14 @@ CONTENT_CATALOG: tuple[CatalogEntry, ...] = (
 
 )
 
+_validate_catalog_integrity(CONTENT_CATALOG)
+
 CATALOG_BY_SEMANTIC_GROUP = MappingProxyType(
     {
         group: tuple(entry for entry in CONTENT_CATALOG if entry.semantic_group == group)
         for group in tuple(dict.fromkeys(entry.semantic_group for entry in CONTENT_CATALOG))
     }
 )
-
-assert 800 <= len(CONTENT_CATALOG) <= 1200
-assert len({entry.text for entry in CONTENT_CATALOG}) == len(CONTENT_CATALOG)
-assert all('?' not in entry.text and '？' not in entry.text for entry in CONTENT_CATALOG)
-assert all('\t' not in entry.text and '\n' not in entry.text for entry in CONTENT_CATALOG)
 
 __all__ = (
     'CatalogEntry',

@@ -30,15 +30,21 @@ def _apply_allowlist(
         return
     keys = set(allowlist)
     legacy_unbound = keys == {"exceptions"} and not require_corpus_binding
-    bound = keys == {"schema_version", "corpus_sha256", "exceptions"}
+    bound = keys == {"$schema", "schema_version", "corpus_sha256", "exceptions"}
     if not legacy_unbound and not bound:
         issues.error(
             "allowlist_format",
-            "file allowlist must contain exactly schema_version, corpus_sha256 and exceptions",
+            "file allowlist must contain exactly $schema, schema_version, corpus_sha256 and exceptions",
         )
         return
     if bound:
         digest = allowlist.get("corpus_sha256")
+        if allowlist.get("$schema") != "./schemas/persona-review-allowlist.schema.json":
+            issues.error(
+                "allowlist_format",
+                "allowlist $schema must reference ./schemas/persona-review-allowlist.schema.json",
+            )
+            return
         if allowlist.get("schema_version") != 1 or isinstance(
             allowlist.get("schema_version"), bool
         ):

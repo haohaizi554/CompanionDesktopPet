@@ -11,6 +11,10 @@ from typing import Mapping, Sequence
 
 from ..contract import PERSONA_CONTRACT
 from ..models import CorpusLine
+from ..trigger_matching import (
+    time_context_token_matches,
+    trigger_matches as _simulation_trigger_matches,
+)
 from .content_rules import _required_context_tokens
 from .core import _Issues, _is_finite_number, _is_integer
 
@@ -130,43 +134,6 @@ def _simulation_context_valid(
     )
 
 
-def _simulation_trigger_matches(
-    trigger: object,
-    context: Mapping[str, object],
-    timestamp: datetime,
-    elapsed_minutes: float,
-    long_silence_minutes: int,
-) -> bool:
-    if not isinstance(trigger, str):
-        return False
-    if trigger == "any":
-        return True
-    if trigger == "app_start":
-        return context.get("event") == "app_start"
-    if trigger == "day_changed":
-        return context.get("event") == "day_changed"
-    if trigger in SIMULATION_DAYPARTS:
-        return trigger == _expected_daypart(timestamp)
-    if trigger == "weekday":
-        return timestamp.isoweekday() < 6
-    if trigger == "weekend":
-        return timestamp.isoweekday() >= 6
-    if trigger == "holiday":
-        return isinstance(context.get("holiday"), str)
-    if trigger == "anniversary":
-        return _is_integer(context.get("anniversary_days")) and context["anniversary_days"] > 0
-    if trigger == "long_silence":
-        return elapsed_minutes >= long_silence_minutes
-    if trigger == "ide_foreground":
-        return context.get("ide_foreground") is True
-    if trigger == "long_active":
-        return _is_integer(context.get("active_minutes")) and context["active_minutes"] >= 90
-    if trigger == "idle_return":
-        return context.get("idle_return") is True
-    # story_timer has no signal in the documented MVP context and must not be selected.
-    return False
-
-
 def _simulation_context_token_matches(
     token: str,
     context: Mapping[str, object],
@@ -192,10 +159,8 @@ def _simulation_context_token_matches(
         return timestamp.isoweekday() < 6
     if token == "day:weekend":
         return timestamp.isoweekday() >= 6
-    if token == "time:dawn":
-        return 4 <= timestamp.hour < 6
     if token.startswith("time:"):
-        return token.removeprefix("time:") == _expected_daypart(timestamp)
+        return time_context_token_matches(token, timestamp.hour)
     season = (
         "spring" if timestamp.month in {3, 4, 5}
         else "summer" if timestamp.month in {6, 7, 8}
@@ -501,7 +466,6 @@ def _simulation_issues(
             if not _simulation_trigger_matches(
                 row.trigger,
                 attempt.context,
-                timestamp,
                 elapsed_minutes,
                 long_silence,
             ):

@@ -1,0 +1,471 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://companiondesktop.pet/schemas/persona-contract.schema.json",
+  "title": "Companion Desktop Pet persona contract",
+  "type": "object",
+  "required": [
+    "$schema", "schema_version", "inventory", "release_inventory",
+    "category_groups", "categories", "controlled_values", "scheduler",
+    "dry_sharp", "lexical_exposure", "temporal", "lineage"
+  ],
+  "properties": {
+    "$schema": { "const": "./schemas/persona-contract.schema.json" },
+    "schema_version": { "const": 1 },
+    "inventory": {
+      "type": "object",
+      "required": ["curated_core", "expanded_runtime"],
+      "properties": {
+        "curated_core": { "$ref": "#/$defs/positiveIntegerRange" },
+        "expanded_runtime": { "$ref": "#/$defs/positiveIntegerRange" }
+      },
+      "additionalProperties": false
+    },
+    "release_inventory": {
+      "type": "object",
+      "required": ["expanded_runtime_rows", "semantic_scene_count", "legacy_surface_rows"],
+      "properties": {
+        "expanded_runtime_rows": { "type": "integer", "minimum": 1 },
+        "semantic_scene_count": { "type": "integer", "minimum": 1 },
+        "legacy_surface_rows": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "category_groups": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/categoryGroup" },
+      "minItems": 8,
+      "maxItems": 8,
+      "uniqueItems": true
+    },
+    "categories": { "$ref": "#/$defs/categories" },
+    "controlled_values": { "$ref": "#/$defs/controlledValues" },
+    "scheduler": { "$ref": "#/$defs/scheduler" },
+    "dry_sharp": { "$ref": "#/$defs/drySharp" },
+    "lexical_exposure": { "$ref": "#/$defs/lexicalExposure" },
+    "temporal": { "$ref": "#/$defs/temporal" },
+    "lineage": { "$ref": "#/$defs/lineage" }
+  },
+  "$defs": {
+    "positiveIntegerRange": {
+      "type": "array",
+      "prefixItems": [
+        { "type": "integer", "minimum": 1 },
+        { "type": "integer", "minimum": 1 }
+      ],
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "ratioRange": {
+      "type": "array",
+      "prefixItems": [
+        { "type": "number", "minimum": 0, "maximum": 1 },
+        { "type": "number", "minimum": 0, "maximum": 1 }
+      ],
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "weight": { "type": "number", "minimum": 0, "maximum": 1 },
+    "categoryGroup": {
+      "enum": [
+        "technical", "growth", "career", "daily_care", "emotional_reflection",
+        "character_life", "easter_egg", "system_ambient"
+      ]
+    },
+    "outputMode": { "enum": ["self_talk", "ambient", "user_direct", "system_observe"] },
+    "tone": {
+      "enum": [
+        "calm", "gentle", "playful", "dry", "dry_sharp", "serious", "sleepy",
+        "nostalgic", "curious", "intimate", "encouraging"
+      ]
+    },
+    "trigger": {
+      "enum": [
+        "any", "app_start", "morning", "noon", "afternoon", "evening",
+        "late_night", "day_changed", "weekday", "weekend", "holiday",
+        "anniversary", "long_silence", "ide_foreground", "long_active",
+        "idle_return", "story_timer"
+      ]
+    },
+    "categoryGroupWeights": {
+      "type": "object",
+      "required": [
+        "technical", "growth", "career", "daily_care", "emotional_reflection",
+        "character_life", "easter_egg", "system_ambient"
+      ],
+      "properties": {
+        "technical": { "$ref": "#/$defs/weight" },
+        "growth": { "$ref": "#/$defs/weight" },
+        "career": { "$ref": "#/$defs/weight" },
+        "daily_care": { "$ref": "#/$defs/weight" },
+        "emotional_reflection": { "$ref": "#/$defs/weight" },
+        "character_life": { "$ref": "#/$defs/weight" },
+        "easter_egg": { "$ref": "#/$defs/weight" },
+        "system_ambient": { "$ref": "#/$defs/weight" }
+      },
+      "additionalProperties": false
+    },
+    "outputModeWeights": {
+      "type": "object",
+      "required": ["self_talk", "ambient", "user_direct", "system_observe"],
+      "properties": {
+        "self_talk": { "$ref": "#/$defs/weight" },
+        "ambient": { "$ref": "#/$defs/weight" },
+        "user_direct": { "$ref": "#/$defs/weight" },
+        "system_observe": { "$ref": "#/$defs/weight" }
+      },
+      "additionalProperties": false
+    },
+    "categories": {
+      "type": "object",
+      "required": [
+        "Debugging", "Python", "Java", "Cpp", "Frontend", "Backend", "Database",
+        "Algorithms", "Systems", "Networks", "GitDevOps", "Architecture", "Study",
+        "EnglishPractice", "Career", "DailyCare", "EmotionalSupport", "ProactiveChat",
+        "WanderingLife", "DressesHobbies", "CharacterLife", "EasterEgg", "SystemAmbient"
+      ],
+      "properties": {
+        "Debugging": { "const": "technical" },
+        "Python": { "const": "technical" },
+        "Java": { "const": "technical" },
+        "Cpp": { "const": "technical" },
+        "Frontend": { "const": "technical" },
+        "Backend": { "const": "technical" },
+        "Database": { "const": "technical" },
+        "Algorithms": { "const": "technical" },
+        "Systems": { "const": "technical" },
+        "Networks": { "const": "technical" },
+        "GitDevOps": { "const": "technical" },
+        "Architecture": { "const": "technical" },
+        "Study": { "const": "growth" },
+        "EnglishPractice": { "const": "growth" },
+        "Career": { "const": "career" },
+        "DailyCare": { "const": "daily_care" },
+        "EmotionalSupport": { "const": "emotional_reflection" },
+        "ProactiveChat": { "const": "character_life" },
+        "WanderingLife": { "const": "character_life" },
+        "DressesHobbies": { "const": "character_life" },
+        "CharacterLife": { "const": "character_life" },
+        "EasterEgg": { "const": "easter_egg" },
+        "SystemAmbient": { "const": "system_ambient" }
+      },
+      "additionalProperties": false
+    },
+    "controlledValues": {
+      "type": "object",
+      "required": [
+        "output_modes", "tones", "source_kinds", "context_tokens", "mvp_triggers",
+        "future_triggers"
+      ],
+      "properties": {
+        "output_modes": {
+          "type": "array", "items": { "$ref": "#/$defs/outputMode" },
+          "minItems": 4, "maxItems": 4, "uniqueItems": true
+        },
+        "tones": {
+          "type": "array", "items": { "$ref": "#/$defs/tone" },
+          "minItems": 11, "maxItems": 11, "uniqueItems": true
+        },
+        "source_kinds": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "rewritten_topic", "legacy_surface_variant", "curated_standalone",
+              "preserved_easter_egg", "new_ambient", "archived_question", "manual_review"
+            ]
+          },
+          "minItems": 7, "maxItems": 7, "uniqueItems": true
+        },
+        "context_tokens": { "$ref": "#/$defs/contextTokens" },
+        "mvp_triggers": { "$ref": "#/$defs/mvpTriggers" },
+        "future_triggers": { "$ref": "#/$defs/futureTriggers" }
+      },
+      "additionalProperties": false
+    },
+    "contextTokens": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "none", "app_started", "holiday", "anniversary", "ide_foreground",
+          "active_90m", "idle_return", "not_fullscreen", "day:weekday",
+          "day:weekend", "time:dawn", "time:morning", "time:noon", "time:afternoon",
+          "time:evening", "time:late_night", "season:spring", "season:summer",
+          "season:autumn", "season:winter", "date:holiday", "date:month_boundary"
+        ]
+      },
+      "minItems": 22, "maxItems": 22, "uniqueItems": true
+    },
+    "mvpTriggers": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "any", "app_start", "morning", "noon", "afternoon", "evening",
+          "late_night", "day_changed", "weekday", "weekend", "holiday",
+          "anniversary", "long_silence"
+        ]
+      },
+      "minItems": 13, "maxItems": 13, "uniqueItems": true
+    },
+    "futureTriggers": {
+      "type": "array",
+      "items": { "enum": ["ide_foreground", "long_active", "idle_return", "story_timer"] },
+      "minItems": 4, "maxItems": 4, "uniqueItems": true
+    },
+    "runtimeLimits": {
+      "type": "object",
+      "required": [
+        "minimum_interval_minutes", "max_outputs_per_hour",
+        "late_night_max_outputs_per_hour", "semantic_group_no_repeat",
+        "block_adjacent_category_groups", "technical_recent_window",
+        "technical_recent_max", "user_direct_recent_window", "user_direct_recent_max",
+        "easter_egg_recent_window", "easter_egg_recent_max", "long_silence_minutes",
+        "interrupt_cost_minimum_intervals_minutes"
+      ],
+      "properties": {
+        "minimum_interval_minutes": { "type": "integer", "minimum": 1 },
+        "max_outputs_per_hour": { "type": "integer", "minimum": 1 },
+        "late_night_max_outputs_per_hour": { "type": "integer", "minimum": 0 },
+        "semantic_group_no_repeat": { "type": "boolean" },
+        "block_adjacent_category_groups": {
+          "type": "array", "items": { "$ref": "#/$defs/categoryGroup" },
+          "minItems": 1, "uniqueItems": true
+        },
+        "technical_recent_window": { "type": "integer", "minimum": 1 },
+        "technical_recent_max": { "type": "integer", "minimum": 0 },
+        "user_direct_recent_window": { "type": "integer", "minimum": 1 },
+        "user_direct_recent_max": { "type": "integer", "minimum": 0 },
+        "easter_egg_recent_window": { "type": "integer", "minimum": 1 },
+        "easter_egg_recent_max": { "type": "integer", "minimum": 0 },
+        "long_silence_minutes": { "type": "integer", "minimum": 1 },
+        "interrupt_cost_minimum_intervals_minutes": {
+          "type": "object",
+          "required": ["0", "1", "2", "3", "4", "5"],
+          "properties": {
+            "0": { "type": "integer", "minimum": 1 },
+            "1": { "type": "integer", "minimum": 1 },
+            "2": { "type": "integer", "minimum": 1 },
+            "3": { "type": "integer", "minimum": 1 },
+            "4": { "type": "integer", "minimum": 1 },
+            "5": { "type": "integer", "minimum": 1 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "scheduler": {
+      "type": "object",
+      "required": [
+        "category_group_weights", "category_group_output_modes", "output_mode_targets",
+        "runtime_limits", "acceptance"
+      ],
+      "properties": {
+        "category_group_weights": { "$ref": "#/$defs/categoryGroupWeights" },
+        "category_group_output_modes": {
+          "type": "object",
+          "required": [
+            "technical", "growth", "career", "daily_care", "emotional_reflection",
+            "character_life", "easter_egg", "system_ambient"
+          ],
+          "properties": {
+            "technical": { "$ref": "#/$defs/outputMode" },
+            "growth": { "$ref": "#/$defs/outputMode" },
+            "career": { "$ref": "#/$defs/outputMode" },
+            "daily_care": { "$ref": "#/$defs/outputMode" },
+            "emotional_reflection": { "$ref": "#/$defs/outputMode" },
+            "character_life": { "$ref": "#/$defs/outputMode" },
+            "easter_egg": { "$ref": "#/$defs/outputMode" },
+            "system_ambient": { "$ref": "#/$defs/outputMode" }
+          },
+          "additionalProperties": false
+        },
+        "output_mode_targets": { "$ref": "#/$defs/outputModeWeights" },
+        "runtime_limits": { "$ref": "#/$defs/runtimeLimits" },
+        "acceptance": {
+          "type": "object",
+          "required": [
+            "technical_playback_ratio", "easter_egg_playback_ratio",
+            "self_talk_ambient_minimum", "user_direct_maximum"
+          ],
+          "properties": {
+            "technical_playback_ratio": { "$ref": "#/$defs/ratioRange" },
+            "easter_egg_playback_ratio": { "$ref": "#/$defs/ratioRange" },
+            "self_talk_ambient_minimum": { "$ref": "#/$defs/weight" },
+            "user_direct_maximum": { "$ref": "#/$defs/weight" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "drySharp": {
+      "type": "object",
+      "required": [
+        "scene_hash_namespace", "scene_assignment_field", "scene_hash_threshold",
+        "scene_inventory_target", "scene_inventory_acceptance",
+        "scene_inventory_enforcement_profile", "bootstrap_minimum_scenes",
+        "row_inventory_policy", "playback_target", "playback_acceptance",
+        "recent_window", "recent_max", "forbidden_category_groups",
+        "forbidden_triggers", "forbidden_context_tokens"
+      ],
+      "properties": {
+        "scene_hash_namespace": { "type": "string", "minLength": 1 },
+        "scene_assignment_field": { "type": "string", "minLength": 1 },
+        "scene_hash_threshold": { "$ref": "#/$defs/weight" },
+        "scene_inventory_target": { "$ref": "#/$defs/weight" },
+        "scene_inventory_acceptance": { "$ref": "#/$defs/ratioRange" },
+        "scene_inventory_enforcement_profile": { "enum": ["curated_core", "expanded_runtime"] },
+        "bootstrap_minimum_scenes": { "type": "integer", "minimum": 1 },
+        "row_inventory_policy": { "enum": ["observation_only", "maximum"] },
+        "playback_target": { "$ref": "#/$defs/weight" },
+        "playback_acceptance": { "$ref": "#/$defs/ratioRange" },
+        "recent_window": { "type": "integer", "minimum": 1 },
+        "recent_max": { "type": "integer", "minimum": 0 },
+        "forbidden_category_groups": {
+          "type": "array", "items": { "$ref": "#/$defs/categoryGroup" }, "uniqueItems": true
+        },
+        "forbidden_triggers": {
+          "type": "array", "items": { "$ref": "#/$defs/trigger" }, "uniqueItems": true
+        },
+        "forbidden_context_tokens": {
+          "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "lexicalExposure": {
+      "type": "object",
+      "required": ["seasoning"],
+      "properties": {
+        "seasoning": {
+          "type": "object",
+          "required": [
+            "normalization", "substring_markers", "token_patterns",
+            "identity_markers_excluded", "inventory_profiles", "playback_acceptance",
+            "recent_window", "recent_max"
+          ],
+          "properties": {
+            "normalization": { "const": "NFKC_casefold" },
+            "substring_markers": {
+              "type": "array", "items": { "type": "string", "minLength": 1 },
+              "minItems": 1, "uniqueItems": true
+            },
+            "token_patterns": {
+              "type": "object",
+              "required": ["6", "666", "NB"],
+              "properties": {
+                "6": { "type": "string", "minLength": 1 },
+                "666": { "type": "string", "minLength": 1 },
+                "NB": { "type": "string", "minLength": 1 }
+              },
+              "additionalProperties": false
+            },
+            "identity_markers_excluded": {
+              "type": "array", "items": { "type": "string", "minLength": 1 },
+              "uniqueItems": true
+            },
+            "inventory_profiles": {
+              "type": "object",
+              "required": ["curated_core", "expanded_runtime"],
+              "properties": {
+                "curated_core": { "$ref": "#/$defs/inventoryProfile" },
+                "expanded_runtime": { "$ref": "#/$defs/inventoryProfile" }
+              },
+              "additionalProperties": false
+            },
+            "playback_acceptance": { "$ref": "#/$defs/ratioRange" },
+            "recent_window": { "type": "integer", "minimum": 1 },
+            "recent_max": { "type": "integer", "minimum": 0 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "inventoryProfile": {
+      "type": "object",
+      "required": ["policy"],
+      "properties": {
+        "policy": { "enum": ["maximum", "observation_only"] },
+        "maximum": { "$ref": "#/$defs/weight" }
+      },
+      "additionalProperties": false
+    },
+    "temporal": {
+      "type": "object",
+      "required": ["daypart_hours", "context_token_hours", "context_token_trigger"],
+      "properties": {
+        "daypart_hours": {
+          "type": "object",
+          "required": ["morning", "noon", "afternoon", "evening", "late_night"],
+          "properties": {
+            "morning": { "const": [[6, 11]] },
+            "noon": { "const": [[11, 14]] },
+            "afternoon": { "const": [[14, 18]] },
+            "evening": { "const": [[18, 23]] },
+            "late_night": { "const": [[0, 6], [23, 24]] }
+          },
+          "additionalProperties": false
+        },
+        "context_token_hours": {
+          "type": "object",
+          "required": [
+            "time:dawn", "time:morning", "time:noon", "time:afternoon",
+            "time:evening", "time:late_night"
+          ],
+          "properties": {
+            "time:dawn": { "const": [[4, 6]] },
+            "time:morning": { "const": [[6, 11]] },
+            "time:noon": { "const": [[11, 14]] },
+            "time:afternoon": { "const": [[14, 18]] },
+            "time:evening": { "const": [[18, 23]] },
+            "time:late_night": { "const": [[0, 4], [23, 24]] }
+          },
+          "additionalProperties": false
+        },
+        "context_token_trigger": {
+          "type": "object",
+          "required": [
+            "time:dawn", "time:morning", "time:noon", "time:afternoon",
+            "time:evening", "time:late_night"
+          ],
+          "properties": {
+            "time:dawn": { "const": "late_night" },
+            "time:morning": { "const": "morning" },
+            "time:noon": { "const": "noon" },
+            "time:afternoon": { "const": "afternoon" },
+            "time:evening": { "const": "evening" },
+            "time:late_night": { "const": "late_night" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "lineage": {
+      "type": "object",
+      "required": [
+        "topic_id_role", "semantic_group_topic_policy", "editorial_variant_topic_binding",
+        "surface_variant_topic_binding", "catalog_variant_topic_binding",
+        "semantic_scene_signature_fields", "legacy_source_min_line",
+        "legacy_source_max_line", "legacy_reference_pattern", "catalog_reference_pattern"
+      ],
+      "properties": {
+        "topic_id_role": { "type": "string", "minLength": 1 },
+        "semantic_group_topic_policy": { "type": "string", "minLength": 1 },
+        "editorial_variant_topic_binding": { "type": "string", "minLength": 1 },
+        "surface_variant_topic_binding": { "type": "string", "minLength": 1 },
+        "catalog_variant_topic_binding": { "type": "string", "minLength": 1 },
+        "semantic_scene_signature_fields": {
+          "type": "array", "items": { "type": "string", "minLength": 1 },
+          "minItems": 1, "uniqueItems": true
+        },
+        "legacy_source_min_line": { "type": "integer", "minimum": 1 },
+        "legacy_source_max_line": { "type": "integer", "minimum": 1 },
+        "legacy_reference_pattern": { "type": "string", "minLength": 1 },
+        "catalog_reference_pattern": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,4 +1,5 @@
 {
+  "$schema": "./schemas/persona-contract.schema.json",
   "schema_version": 1,
   "inventory": {
     "curated_core": [
@@ -293,12 +294,12 @@
       ]
     },
     "context_token_hours": {
-      "time:dawn": [4, 6],
-      "time:morning": [6, 11],
-      "time:noon": [11, 14],
-      "time:afternoon": [14, 18],
-      "time:evening": [18, 23],
-      "time:late_night": [0, 6]
+      "time:dawn": [[4, 6]],
+      "time:morning": [[6, 11]],
+      "time:noon": [[11, 14]],
+      "time:afternoon": [[14, 18]],
+      "time:evening": [[18, 23]],
+      "time:late_night": [[0, 4], [23, 24]]
     },
     "context_token_trigger": {
       "time:dawn": "late_night",

@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://companiondesktop.pet/schemas/persona-editorial-manifest.schema.json",
+  "title": "Companion Desktop Pet editorial manifest",
+  "type": "object",
+  "required": [
+    "$schema",
+    "schema_version",
+    "catalog_variant_decisions",
+    "identity_policy",
+    "identity_easter_eggs"
+  ],
+  "properties": {
+    "$schema": { "const": "./schemas/persona-editorial-manifest.schema.json" },
+    "schema_version": { "const": 1 },
+    "catalog_variant_decisions": {
+      "type": "object",
+      "required": ["adjudicated", "retired"],
+      "properties": {
+        "adjudicated": { "$ref": "#/$defs/uniqueStrings" },
+        "retired": { "$ref": "#/$defs/uniqueStrings" }
+      },
+      "additionalProperties": false
+    },
+    "identity_policy": {
+      "type": "object",
+      "required": [
+        "allowed_markers",
+        "forbidden_markers",
+        "required_category",
+        "required_category_group",
+        "minimum_cooldown_hours",
+        "max_per_day",
+        "maximum_weight"
+      ],
+      "properties": {
+        "allowed_markers": { "$ref": "#/$defs/uniqueStrings" },
+        "forbidden_markers": { "$ref": "#/$defs/uniqueStrings" },
+        "required_category": { "type": "string", "minLength": 1 },
+        "required_category_group": { "type": "string", "minLength": 1 },
+        "minimum_cooldown_hours": { "type": "number", "minimum": 0 },
+        "max_per_day": { "type": "integer", "minimum": 1 },
+        "maximum_weight": { "type": "number", "exclusiveMinimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "identity_easter_eggs": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/identityEgg" }
+    }
+  },
+  "$defs": {
+    "uniqueStrings": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "identityEgg": {
+      "type": "object",
+      "required": [
+        "variant_id",
+        "source_line",
+        "source_reference",
+        "text_sha256",
+        "allowed_markers",
+        "category",
+        "category_group",
+        "cooldown_hours",
+        "max_per_day",
+        "weight",
+        "text"
+      ],
+      "properties": {
+        "variant_id": { "type": "string", "minLength": 1 },
+        "source_line": { "type": ["integer", "null"], "minimum": 1 },
+        "source_reference": { "type": "string", "minLength": 1 },
+        "topic_id": { "type": "string", "minLength": 1 },
+        "text_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "allowed_markers": { "$ref": "#/$defs/uniqueStrings" },
+        "category": { "type": "string", "minLength": 1 },
+        "category_group": { "type": "string", "minLength": 1 },
+        "cooldown_hours": { "type": "number", "minimum": 0 },
+        "max_per_day": { "type": "integer", "minimum": 1 },
+        "weight": { "type": "number", "exclusiveMinimum": 0 },
+        "text": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

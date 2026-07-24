@@ -17,6 +17,7 @@ DEFAULT_EDITORIAL_MANIFEST_PATH = (
 )
 _TOP_LEVEL_KEYS = frozenset(
     {
+        "$schema",
         "schema_version",
         "catalog_variant_decisions",
         "identity_policy",
@@ -130,6 +131,10 @@ def load_editorial_manifest(
     if not isinstance(raw, dict) or set(raw) != _TOP_LEVEL_KEYS:
         raise EditorialManifestError(
             f"editorial manifest must contain exactly {sorted(_TOP_LEVEL_KEYS)!r}"
+        )
+    if raw.get("$schema") != "./schemas/persona-editorial-manifest.schema.json":
+        raise EditorialManifestError(
+            "$schema must reference ./schemas/persona-editorial-manifest.schema.json"
         )
     if type(raw.get("schema_version")) is not int or raw["schema_version"] != 1:
         raise EditorialManifestError("schema_version must be integer 1")

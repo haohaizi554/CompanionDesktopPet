@@ -5,6 +5,8 @@ import math
 from dataclasses import dataclass
 from datetime import datetime
 
+from .trigger_matching import time_context_token_for_hour
+
 
 EVENTS = frozenset({"tick", "app_start", "day_changed"})
 DAYPARTS = frozenset({"morning", "noon", "afternoon", "evening", "late_night"})
@@ -131,12 +133,13 @@ class PersonaContext:
 
     def controlled_tokens(self, now: datetime) -> set[str]:
         self.validate_for(now)
+        time_token = time_context_token_for_hour(now.hour)
+        if time_token is None:
+            raise ContextError("now hour cannot be mapped to a controlled time token")
         tokens = {
             "day:weekend" if self.is_weekend else "day:weekday",
-            f"time:{self.daypart}",
+            time_token,
         }
-        if 4 <= now.hour < 6:
-            tokens.add("time:dawn")
         season = (
             "spring"
             if now.month in {3, 4, 5}

@@ -180,6 +180,7 @@ def bound_allowlist(
     exceptions: list[dict[str, str]] | None = None,
 ) -> dict[str, object]:
     return {
+        "$schema": "./schemas/persona-review-allowlist.schema.json",
         "schema_version": 1,
         "corpus_sha256": hashlib.sha256(serialize_v2(rows)).hexdigest(),
         "exceptions": [] if exceptions is None else exceptions,
@@ -1692,6 +1693,7 @@ class FileAndCliTests(unittest.TestCase):
             self.write_json(
                 allowlist_path,
                 {
+                    "$schema": "./schemas/persona-review-allowlist.schema.json",
                     "schema_version": 1,
                     "corpus_sha256": hashlib.sha256(unsafe_path.read_bytes()).hexdigest(),
                     "exceptions": [],
@@ -1731,6 +1733,7 @@ class FileAndCliTests(unittest.TestCase):
             self.write_json(
                 allowlist_path,
                 {
+                    "$schema": "./schemas/persona-review-allowlist.schema.json",
                     "schema_version": 1,
                     "corpus_sha256": hashlib.sha256(corpus_path.read_bytes()).hexdigest(),
                     "exceptions": [],

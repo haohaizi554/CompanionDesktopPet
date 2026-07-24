@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 import unicodedata
 from collections import Counter, defaultdict
 from difflib import SequenceMatcher
@@ -8,6 +7,7 @@ from typing import Sequence
 
 from .models import AuditPair, AuditResult, LegacyLine
 from .lexical import SEASONING_MARKERS as CATCHPHRASES, match_seasoning_markers
+from .privacy import LEGACY_AUDIT_POLICY, contains_pii
 
 
 PREFIX_LENGTHS = range(2, 7)
@@ -23,24 +23,6 @@ HIGH_RISK_PATTERNS = (
     "你的工资",
     "你住在",
     "你工作",
-)
-PII_MARKERS = (
-    "湖南",
-    "长沙",
-    "广东",
-    "姓名",
-    "名字",
-    "住在",
-    "地址",
-    "工资",
-    "收入",
-    "月薪",
-    "打零工",
-)
-PII_REGEXES = (
-    re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)"),
-    re.compile(r"(?<!\d)\d{17}[\dXx](?!\d)"),
-    re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"),
 )
 MAX_EXAMPLES = 20
 MAX_RARE_GRAM_FREQUENCY = 256
@@ -80,9 +62,7 @@ def _append_example(examples: dict[str, list[int]], key: str, line: int) -> None
 
 
 def _looks_like_pii(text: str) -> bool:
-    return any(marker in text for marker in PII_MARKERS) or any(
-        pattern.search(text) for pattern in PII_REGEXES
-    )
+    return contains_pii(text, LEGACY_AUDIT_POLICY)
 
 
 def _prior_candidates(posting: list[int], index: int) -> list[int]:

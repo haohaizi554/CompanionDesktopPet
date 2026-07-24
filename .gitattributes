@@ -8,3 +8,7 @@
 /reports/*.tsv text eol=lf
 /reports/*.md text eol=lf
 /reports/*.json text eol=lf
+
+# Provenance hashes bind these JSON files byte-for-byte across platforms.
+/config/*.json text eol=lf
+/config/schemas/*.json text eol=lf
