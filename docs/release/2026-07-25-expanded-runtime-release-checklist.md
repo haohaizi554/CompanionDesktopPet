@@ -187,12 +187,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
 | 发布对象 | SHA-256 |
 | --- | --- |
 | immutable source / byte copy | `3fd7356845df838c652f7a7668013f2b15b0e91ddfa5d784b2b71a514a2c7534` |
-| expanded runtime v2 | `<PENDING_FINAL_INTEGRATION_SHA256>` |
-| archive | `<PENDING_FINAL_INTEGRATION_SHA256>` |
-| review | `<PENDING_FINAL_INTEGRATION_SHA256>` |
-| PII review | `<PENDING_FINAL_INTEGRATION_SHA256>` |
-| surface manifest | `<PENDING_FINAL_INTEGRATION_SHA256>` |
-| final `佳怡桌宠.exe` | `<PENDING_FINAL_RELEASE_SHA256>` |
+| expanded runtime v2 | `3335d72e695528892ddec92076f0f02abacf58fff02ed6bd0aadf67d1cf0cc40` |
+| archive | `b7d9a5f2fd6f4750ea2b688206f77bf45a2b59ca12c09f36281c72efc620721d` |
+| review | `a251b1e01003a078d7912f71099e57c5c6830a75195558ea61428105990b866a` |
+| PII review | `702037759f730759be83fb1c643a8f61382fa1c3f8f2a25e2c0351a177eec6e7` |
+| surface manifest | `bcf9c97be0e4b1d7b7db11fcb46f44de17ef0ade6cb2e79d69f8af69bdbc637d` |
+| simulation report | `6404c028966e6081ea5181781eb502a3076227dc55ca70b3f2d0a56292880d20` |
+| validator-facing simulation events | `dcabfc9f73cc7e4c73b8ce60ce8a5b49eb2439e60892f1e372c2b428b9042df6` |
+| final `佳怡桌宠.exe` | `afec231497158a1ccb71b97b057972d15d3f4ce80e9fa8317f632311a4932e60` |
 
 填入哈希后重新运行计数、可复现比较、验证器、simulation、.NET 测试与 publish verifier。记录最终 commit、EXE 大小、哈希、测试数、simulation 比例、smoke PID/退出码和 cleanup 状态。
 

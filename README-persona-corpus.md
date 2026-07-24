@@ -239,11 +239,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
 | --- | --- |
 | `src/CompanionDesktopPet/Assets/persona-corpus.tsv` | `3fd7356845df838c652f7a7668013f2b15b0e91ddfa5d784b2b71a514a2c7534` |
 | `data/source/persona-corpus.original.tsv` | `3fd7356845df838c652f7a7668013f2b15b0e91ddfa5d784b2b71a514a2c7534` |
-| expanded `data/optimized/persona-corpus-v2.tsv` | `<PENDING_FINAL_INTEGRATION_SHA256>` |
-| `data/optimized/persona-corpus-archive.tsv` | `<PENDING_FINAL_INTEGRATION_SHA256>` |
-| `data/optimized/persona-corpus-review.tsv` | `<PENDING_FINAL_INTEGRATION_SHA256>` |
-| `reports/pii-review.tsv` | `<PENDING_FINAL_INTEGRATION_SHA256>` |
-| `data/optimized/persona-surface-manifest.tsv` | `<PENDING_FINAL_INTEGRATION_SHA256>` |
-| `outputs/CompanionDesktopPet/佳怡桌宠.exe` | `<PENDING_FINAL_RELEASE_SHA256>` |
+| expanded `data/optimized/persona-corpus-v2.tsv` | `3335d72e695528892ddec92076f0f02abacf58fff02ed6bd0aadf67d1cf0cc40` |
+| `data/optimized/persona-corpus-archive.tsv` | `b7d9a5f2fd6f4750ea2b688206f77bf45a2b59ca12c09f36281c72efc620721d` |
+| `data/optimized/persona-corpus-review.tsv` | `a251b1e01003a078d7912f71099e57c5c6830a75195558ea61428105990b866a` |
+| `reports/pii-review.tsv` | `702037759f730759be83fb1c643a8f61382fa1c3f8f2a25e2c0351a177eec6e7` |
+| `data/optimized/persona-surface-manifest.tsv` | `bcf9c97be0e4b1d7b7db11fcb46f44de17ef0ade6cb2e79d69f8af69bdbc637d` |
+| `reports/simulation-report.md` | `6404c028966e6081ea5181781eb502a3076227dc55ca70b3f2d0a56292880d20` |
+| `reports/simulation-events.json` | `dcabfc9f73cc7e4c73b8ce60ce8a5b49eb2439e60892f1e372c2b428b9042df6` |
+| `outputs/CompanionDesktopPet/佳怡桌宠.exe` | `afec231497158a1ccb71b97b057972d15d3f4ce80e9fa8317f632311a4932e60` |
 
-任何 `<PENDING_...>` 占位仍存在时都不得发布。
+任何未填写的哈希占位仍存在时都不得发布。
