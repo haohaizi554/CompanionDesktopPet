@@ -283,7 +283,9 @@ def _score(
         - interrupt_penalty
         - category_repeat_penalty
     )
-    band = math.floor(score / SCORE_BAND_WIDTH)
+    # Row weight chooses among peers; it must not first exclude the lighter peer
+    # by moving otherwise-identical candidates into different score bands.
+    band = math.floor((score - row_weight_bonus) / SCORE_BAND_WIDTH)
     reasons = (
         f"group_deficit={group_deficit:.6f}",
         f"group_target={group_target:.6f}",

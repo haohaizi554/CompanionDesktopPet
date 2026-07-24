@@ -123,6 +123,9 @@ public static class PersonaCorpus
 
     public static IReadOnlyList<DialogueLine> EasterEggs => Snapshot.Value.EasterEggs;
 
+    public static IReadOnlySet<string> EditorialIdentityEasterEggIds { get; } =
+        PersonaContractGenerated.IdentityEasterEggRules.Keys.ToHashSet(StringComparer.Ordinal);
+
     public static IReadOnlyList<DialogueLine> Load(Stream stream)
     {
         ArgumentNullException.ThrowIfNull(stream);
@@ -204,6 +207,14 @@ public static class PersonaCorpus
             var topicId = Required(Value("topic_id"), "topic_id", lineNumber);
             var semanticGroup = Required(Value("semantic_group"), "semantic_group", lineNumber);
             var outputMode = ParseSnakeEnum<DialogueOutputMode>(Value("output_mode"), "output_mode", lineNumber);
+            if (!PersonaContractGenerated.CategoryGroupOutputModes.TryGetValue(
+                    categoryGroup, out var expectedOutputMode)
+                || outputMode != expectedOutputMode)
+            {
+                throw Error(
+                    lineNumber,
+                    $"category_group {categoryGroup} must use output_mode {expectedOutputMode}");
+            }
             var trigger = ParseSnakeEnum<DialogueTrigger>(Value("trigger"), "trigger", lineNumber);
             var requiredContext = ParseContext(Value("required_context"), lineNumber);
             var tone = ParseControlled(
@@ -220,6 +231,34 @@ public static class PersonaCorpus
                 Value("source_kind"), "source_kind", PersonaContractGenerated.ControlledSourceKinds, lineNumber);
             var sourceReference = Required(Value("source_reference"), "source_reference", lineNumber);
             var rewriteReason = Required(Value("rewrite_reason"), "rewrite_reason", lineNumber);
+            var normalized = Normalize(text);
+
+            var identityHits = PersonaContractGenerated.IdentityMarkers
+                .Where(marker => text.Contains(marker, StringComparison.Ordinal))
+                .ToHashSet(StringComparer.Ordinal);
+            var hasIdentityRule = PersonaContractGenerated.IdentityEasterEggRules.TryGetValue(
+                id, out var identityRule);
+            if (identityHits.Count > 0 || hasIdentityRule)
+            {
+                var digest = Convert.ToHexString(
+                        System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(text)))
+                    .ToLowerInvariant();
+                if (!hasIdentityRule
+                    || identityRule is null
+                    || PersonaContractGenerated.ForbiddenIdentityMarkers.Any(marker =>
+                        text.Contains(marker, StringComparison.Ordinal))
+                    || category != DialogueCategory.EasterEgg
+                    || categoryGroup != DialogueCategoryGroup.EasterEgg
+                    || sourceReference != identityRule.SourceReference
+                    || digest != identityRule.TextSha256
+                    || !identityHits.SetEquals(identityRule.AllowedMarkers)
+                    || cooldown != identityRule.CooldownHours
+                    || maxPerDay != identityRule.MaxPerDay
+                    || weight != identityRule.Weight)
+                {
+                    throw Error(lineNumber, "identity EasterEgg does not exactly match the editorial manifest");
+                }
+            }
 
             if (semanticCooldown < cooldown)
             {
@@ -242,7 +281,6 @@ public static class PersonaCorpus
                 throw Error(lineNumber, "enabled rows cannot ask a question or require a reply");
             }
 
-            var normalized = Normalize(text);
             if (!ids.Add(id) || !normalizedTexts.Add(normalized))
             {
                 throw Error(lineNumber, "enabled row duplicates an id or normalized text");

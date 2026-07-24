@@ -82,6 +82,41 @@ class PersonaContractFileTests(unittest.TestCase):
             scheduler["runtime_limits"],
         )
 
+    def test_output_mode_targets_are_derived_from_group_weights(self) -> None:
+        contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
+        scheduler = contract["scheduler"]
+        aggregate = {mode: 0.0 for mode in scheduler["output_mode_targets"]}
+        for group, weight in scheduler["category_group_weights"].items():
+            aggregate[scheduler["category_group_output_modes"][group]] += weight
+
+        expected = {
+            "self_talk": 0.82,
+            "ambient": 0.10,
+            "user_direct": 0.0,
+            "system_observe": 0.08,
+        }
+        for mode, target in expected.items():
+            self.assertAlmostEqual(target, aggregate[mode])
+            self.assertAlmostEqual(target, scheduler["output_mode_targets"][mode])
+
+    def test_inventory_size_policy_is_shared_and_explicit(self) -> None:
+        contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            {
+                "curated_core": [800, 1200],
+                "expanded_runtime": [50000, 60000],
+            },
+            contract["inventory"],
+        )
+
+        from src.persona_corpus.contract import PERSONA_CONTRACT
+
+        self.assertEqual((800, 1200), PERSONA_CONTRACT.inventory["curated_core"])
+        self.assertEqual(
+            (50000, 60000), PERSONA_CONTRACT.inventory["expanded_runtime"]
+        )
+
     def test_csharp_contract_is_generated_and_current(self) -> None:
         generator = ROOT / "tools/generate_persona_contract_cs.py"
         self.assertTrue(generator.is_file(), "C# persona contract generator is missing")

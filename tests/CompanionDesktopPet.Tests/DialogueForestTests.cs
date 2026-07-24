@@ -20,16 +20,22 @@ public sealed class DialogueForestTests
         };
         var expectedModes = new Dictionary<DialogueOutputMode, double>
         {
-            [DialogueOutputMode.SelfTalk] = 0.45,
-            [DialogueOutputMode.Ambient] = 0.25,
-            [DialogueOutputMode.UserDirect] = 0.10,
-            [DialogueOutputMode.SystemObserve] = 0.20
+            [DialogueOutputMode.SelfTalk] = 0.82,
+            [DialogueOutputMode.Ambient] = 0.10,
+            [DialogueOutputMode.UserDirect] = 0.00,
+            [DialogueOutputMode.SystemObserve] = 0.08
         };
 
         Assert.Equal(expectedGroups, DialogueForest.CategoryGroupWeights);
         Assert.Equal(expectedModes, DialogueForest.OutputModeTargets);
         Assert.Equal(1.0, DialogueForest.CategoryGroupWeights.Values.Sum(), 8);
         Assert.Equal(1.0, DialogueForest.OutputModeTargets.Values.Sum(), 8);
+        var aggregatedModes = DialogueForest.OutputModeTargets.Keys.ToDictionary(mode => mode, _ => 0.0);
+        foreach (var (group, weight) in DialogueForest.CategoryGroupWeights)
+        {
+            aggregatedModes[DialogueForest.CategoryGroupOutputModes[group]] += weight;
+        }
+        Assert.All(expectedModes, pair => Assert.Equal(pair.Value, aggregatedModes[pair.Key], 8));
         Assert.Contains(DialogueCategoryGroup.EasterEgg, DialogueForest.BlockAdjacentCategoryGroups);
     }
 

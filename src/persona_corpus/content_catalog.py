@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from types import MappingProxyType
 
+from .editorial import EDITORIAL_MANIFEST
+
 
 @dataclass(frozen=True, slots=True)
 class CatalogEntry:
@@ -33,7 +35,7 @@ class CatalogEntry:
     rewrite_reason: str
 
 
-EDITORIALLY_ADJUDICATED_VARIANTS: tuple[str, ...] = (
+_MIGRATED_ADJUDICATED_VARIANTS: tuple[str, ...] = (
     'topic_algorithms_1c77a759bac7.practice',
     'topic_algorithms_22303c70630c.practice',
     'topic_algorithms_4ad2f0ec587d.practice',
@@ -100,7 +102,7 @@ EDITORIALLY_ADJUDICATED_VARIANTS: tuple[str, ...] = (
 )
 
 
-RETIRED_MECHANICAL_VARIANTS: tuple[str, ...] = (
+_MIGRATED_RETIRED_VARIANTS: tuple[str, ...] = (
     'topic_cpp_7f6778a14a63.practice',
     'topic_networks_ca3dbf9bab24.practice',
     'topic_java_0c686ce39743.practice',
@@ -131,6 +133,14 @@ RETIRED_MECHANICAL_VARIANTS: tuple[str, ...] = (
     'topic_career_cb73e362c71a.practice',
     'topic_career_91a46b9b265d.practice',
 )
+
+# Compatibility facades are derived from the checked manifest.  The migrated
+# literals above remain temporarily as review evidence and are asserted equal
+# while downstream branches move to the manifest API.
+EDITORIALLY_ADJUDICATED_VARIANTS = EDITORIAL_MANIFEST.adjudicated_variants
+RETIRED_MECHANICAL_VARIANTS = EDITORIAL_MANIFEST.retired_variants
+assert _MIGRATED_ADJUDICATED_VARIANTS == EDITORIALLY_ADJUDICATED_VARIANTS
+assert _MIGRATED_RETIRED_VARIANTS == RETIRED_MECHANICAL_VARIANTS
 
 
 CONTENT_CATALOG: tuple[CatalogEntry, ...] = (
@@ -1238,6 +1248,13 @@ CONTENT_CATALOG: tuple[CatalogEntry, ...] = (
     CatalogEntry(category='EmotionalSupport', category_group='emotional_reflection', variant_id='authored.restart_after_stall.03', runtime_topic_id='reflection.authored.restart_after_stall', editorial_role='resume_current_increment', semantic_group='reflection.authored.restart_after_stall', output_mode='self_talk', trigger='idle', required_context='none', tone='gentle_cautious', interrupt_cost=0, cooldown_hours=144.0, semantic_cooldown_hours=168.0, max_per_day=1, weight=1.0, text='不用追回全部，先接住眼前。', source_kind='curated_authored', source_reference='catalog:second-editorial-pass:independent-life-care-reflection', rewrite_reason='human-authored-angle:用短句弱化追赶压力并聚焦当前'),
     CatalogEntry(category='EmotionalSupport', category_group='emotional_reflection', variant_id='authored.quiet_confidence.01', runtime_topic_id='reflection.authored.quiet_confidence', editorial_role='skill_as_quiet_support', semantic_group='reflection.authored.quiet_confidence', output_mode='self_talk', trigger='idle', required_context='none', tone='gentle_cautious', interrupt_cost=0, cooldown_hours=144.0, semantic_cooldown_hours=168.0, max_per_day=1, weight=1.0, text='那些悄悄练熟的本事，总会在关键时候稳稳托住脚步。', source_kind='curated_authored', source_reference='catalog:second-editorial-pass:independent-life-care-reflection', rewrite_reason='human-authored-angle:把熟练写成关键时刻无需声张的支撑'),
     CatalogEntry(category='EmotionalSupport', category_group='emotional_reflection', variant_id='authored.quiet_confidence.02', runtime_topic_id='reflection.authored.quiet_confidence', editorial_role='confidence_without_display', semantic_group='reflection.authored.quiet_confidence', output_mode='self_talk', trigger='idle', required_context='none', tone='gentle_cautious', interrupt_cost=0, cooldown_hours=144.0, semantic_cooldown_hours=168.0, max_per_day=1, weight=1.0, text='有些底气不急着证明，它藏在反复做过的事里，需要的时候会站稳。', source_kind='curated_authored', source_reference='catalog:second-editorial-pass:independent-life-care-reflection', rewrite_reason='human-authored-angle:呈现由反复实践支撑且不依赖展示的底气'),
+
+    CatalogEntry(category='EasterEgg', category_group='easter_egg', variant_id='egg_editorial_full_name_01', runtime_topic_id='easter_egg.editorial_identity.full_name', editorial_role='identity_full_name_easter_egg', semantic_group='easter_egg.editorial_identity.full_name', output_mode='self_talk', trigger='idle', required_context='none', tone='playful_rare', interrupt_cost=0, cooldown_hours=720.0, semantic_cooldown_hours=720.0, max_per_day=1, weight=0.1, text='这枚很少出现的名牌，写着雷琳玥。', source_kind='curated_authored', source_reference='catalog:editorial-easter-egg.identity-v1', rewrite_reason='explicit editorial adjudication: one rare full-name easter egg'),
+    CatalogEntry(category='EasterEgg', category_group='easter_egg', variant_id='egg_editorial_nickname_xiaoyue_01', runtime_topic_id='easter_egg.editorial_identity.nickname', editorial_role='identity_nickname_easter_egg', semantic_group='easter_egg.editorial_identity.nickname', output_mode='self_talk', trigger='idle', required_context='none', tone='playful_rare', interrupt_cost=0, cooldown_hours=720.0, semantic_cooldown_hours=720.0, max_per_day=1, weight=0.1, text='小玥把一句嗯嗯藏进了安静的角落。', source_kind='curated_authored', source_reference='catalog:editorial-easter-egg.identity-v1', rewrite_reason='explicit editorial adjudication: one rare nickname easter egg'),
+    CatalogEntry(category='Debugging', category_group='technical', variant_id='dry_sharp.debugging.logs.01', runtime_topic_id='technical.dry_sharp.debugging_logs', editorial_role='premature_guessing_observation', semantic_group='technical.dry_sharp.debugging_logs', output_mode='self_talk', trigger='idle', required_context='none', tone='dry_sharp', interrupt_cost=1, cooldown_hours=120.0, semantic_cooldown_hours=120.0, max_per_day=1, weight=1.0, text='日志还没看，猜测已经跑满线程了。', source_kind='curated_authored', source_reference='catalog:dry-sharp-bootstrap.v1', rewrite_reason='human-authored dry-sharp sample aimed at debugging habits, not the user'),
+    CatalogEntry(category='Debugging', category_group='technical', variant_id='dry_sharp.code_review.naming.01', runtime_topic_id='technical.dry_sharp.naming', editorial_role='low_information_name_observation', semantic_group='technical.dry_sharp.naming', output_mode='self_talk', trigger='idle', required_context='none', tone='dry_sharp', interrupt_cost=1, cooldown_hours=120.0, semantic_cooldown_hours=120.0, max_per_day=1, weight=1.0, text='变量名叫 data，信息量确实很会省电。', source_kind='curated_authored', source_reference='catalog:dry-sharp-bootstrap.v1', rewrite_reason='human-authored dry-sharp sample about code naming without personal attack'),
+    CatalogEntry(category='Architecture', category_group='technical', variant_id='dry_sharp.architecture.god_class.01', runtime_topic_id='technical.dry_sharp.god_class', editorial_role='oversized_class_observation', semantic_group='technical.dry_sharp.god_class', output_mode='self_talk', trigger='idle', required_context='none', tone='dry_sharp', interrupt_cost=1, cooldown_hours=120.0, semantic_cooldown_hours=120.0, max_per_day=1, weight=1.0, text='全塞进一个类，倒是很团结。', source_kind='curated_authored', source_reference='catalog:dry-sharp-bootstrap.v1', rewrite_reason='human-authored dry-sharp sample about architecture without personal attack'),
+    CatalogEntry(category='Debugging', category_group='technical', variant_id='dry_sharp.life.todo.01', runtime_topic_id='technical.dry_sharp.todo', editorial_role='recursive_todo_observation', semantic_group='technical.dry_sharp.todo', output_mode='self_talk', trigger='idle', required_context='none', tone='dry_sharp', interrupt_cost=1, cooldown_hours=120.0, semantic_cooldown_hours=120.0, max_per_day=1, weight=1.0, text='待办写三页，第一项还是整理待办。', source_kind='curated_authored', source_reference='catalog:dry-sharp-bootstrap.v1', rewrite_reason='human-authored dry-sharp sample about an ordinary habit without targeting the user'),
 
 )
 

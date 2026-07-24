@@ -11,6 +11,7 @@ from typing import Iterable, Mapping, Sequence, TypeVar
 
 from .content_catalog import CONTENT_CATALOG, CatalogEntry
 from .contract import PERSONA_CONTRACT, category_group_for
+from .editorial import is_exact_identity_easter_egg
 from .extraction import SourceMapping
 from .models import CorpusLine, LegacyLine
 from .normalization import normalize_text
@@ -56,6 +57,7 @@ PII_PATTERNS = (
     re.compile(r"(?<!\d)\d{17}[\dXx](?!\d)"),
     re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"),
 )
+ADJUDICATED_IDENTITY_MARKERS = ("雷琳玥", "小玥", "玥玥")
 FALSE_CONTEXT_MARKERS = (
     "你现在",
     "你今天",
@@ -276,11 +278,9 @@ def _catalog_to_corpus(
         )
     if any(mark in entry.text for mark in QUESTION_MARKS):
         raise ValueError(f"enabled catalog entry contains a question mark: {entry.text!r}")
-    if _looks_like_pii(entry.text):
-        raise ValueError(f"enabled catalog entry contains PII risk: {entry.text!r}")
     if "\t" in entry.text or "\r" in entry.text or "\n" in entry.text:
         raise ValueError("catalog text must fit one physical TSV field")
-    return CorpusLine(
+    row = CorpusLine(
         id=catalog_line_id(entry),
         category=entry.category,
         category_group=entry.category_group,
@@ -308,6 +308,20 @@ def _catalog_to_corpus(
         source_reference=source_reference,
         rewrite_reason=entry.rewrite_reason,
     )
+    has_identity = any(marker in entry.text for marker in ADJUDICATED_IDENTITY_MARKERS)
+    if _catalog_has_non_identity_pii(entry.text) or (
+        has_identity and not is_exact_identity_easter_egg(row)
+    ):
+        raise ValueError(f"enabled catalog entry contains PII risk: {entry.text!r}")
+    return row
+
+
+def _catalog_has_non_identity_pii(text: str) -> bool:
+    return any(
+        marker in text
+        for marker in PII_MARKERS
+        if marker not in ADJUDICATED_IDENTITY_MARKERS
+    ) or any(pattern.search(text) for pattern in PII_PATTERNS)
 
 
 def build_v2(

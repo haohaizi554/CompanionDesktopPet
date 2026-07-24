@@ -26,6 +26,7 @@ from src.persona_corpus.validation import (
     validate_corpus,
     validate_file,
 )
+from src.persona_corpus.validation_rules.lineage_rules import build_repository_registry
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -45,10 +46,10 @@ GROUP_WEIGHTS = {
 }
 
 OUTPUT_MODE_TARGETS = {
-    "self_talk": 0.45,
-    "ambient": 0.25,
-    "user_direct": 0.10,
-    "system_observe": 0.20,
+    "self_talk": 0.82,
+    "ambient": 0.10,
+    "user_direct": 0.0,
+    "system_observe": 0.08,
 }
 
 CONTEXT_TOKENS = [
@@ -156,7 +157,7 @@ def valid_line(**overrides: object) -> CorpusLine:
         "enabled": True,
         "text": "窗边的风慢慢绕过书页，房间也安静下来。",
         "source_kind": "curated_standalone",
-        "source_reference": "catalog:test-fixture",
+        "source_reference": "catalog:test-fixture;variant:fixture.window.01",
         "rewrite_reason": "no_rewrite",
     }
     values.update(overrides)
@@ -181,11 +182,11 @@ def bound_allowlist(
 def simulation_rows() -> list[CorpusLine]:
     specifications = (
         ("tech_a", "technical", "self_talk", "通用日志先按时间顺序排查。"),
-        ("tech_b", "technical", "ambient", "边界条件值得单独做一轮验证。"),
+        ("tech_b", "technical", "self_talk", "边界条件值得单独做一轮验证。"),
         ("life_a", "character_life", "self_talk", "窗边的光今天落得很安静。"),
-        ("life_b", "character_life", "ambient", "风从窗缝绕了一圈才离开。"),
+        ("life_b", "character_life", "self_talk", "风从窗缝绕了一圈才离开。"),
         ("life_c", "character_life", "self_talk", "桌角那点光慢慢移到书页上。"),
-        ("growth", "growth", "ambient", "慢一点也算是在认真往前走。"),
+        ("growth", "growth", "self_talk", "慢一点也算是在认真往前走。"),
         ("career", "career", "self_talk", "把今天学会的东西记下来挺好。"),
         ("care", "daily_care", "ambient", "偶尔停一会儿也不算耽误。"),
         ("emotion", "emotional_reflection", "self_talk", "有些心事放一晚会轻一点。"),
@@ -193,11 +194,21 @@ def simulation_rows() -> list[CorpusLine]:
         ("egg", "easter_egg", "self_talk", "这一小段光只在偶然时出现。"),
     )
     rows: list[CorpusLine] = []
+    category_by_group = {
+        "technical": "Debugging",
+        "growth": "Study",
+        "career": "Career",
+        "daily_care": "DailyCare",
+        "emotional_reflection": "EmotionalSupport",
+        "character_life": "WanderingLife",
+        "system_ambient": "SystemAmbient",
+        "easter_egg": "EasterEgg",
+    }
     for suffix, group, mode, text in specifications:
         rows.append(
             valid_line(
                 id=f"sim_{suffix}",
-                category="Debugging" if group == "technical" else "WanderingLife",
+                category=category_by_group[group],
                 category_group=group,
                 topic_id=f"simulation.{suffix}",
                 semantic_group=f"simulation.{suffix}",
@@ -207,7 +218,11 @@ def simulation_rows() -> list[CorpusLine]:
                 max_per_day=1,
                 weight=0.1 if group == "easter_egg" else 0.5,
                 source_kind="preserved_easter_egg" if group == "easter_egg" else "curated_standalone",
-                source_reference=f"catalog:simulation-{suffix}",
+                source_reference=(
+                    f"legacy:1;topic:simulation.{suffix};variant:simulation.{suffix}.01"
+                    if group == "easter_egg"
+                    else f"catalog:simulation-{suffix};variant:simulation.{suffix}.01"
+                ),
                 text=text,
             )
         )
@@ -299,6 +314,128 @@ def clean_simulation() -> tuple[list[CorpusLine], dict[str, object], dict[str, o
 
 
 class ValidationContractTests(unittest.TestCase):
+    def test_category_group_contract_applies_to_enabled_and_disabled_rows(self) -> None:
+        rows = [
+            valid_line(id="enabled", category="Career", category_group="technical"),
+            valid_line(
+                id="disabled",
+                category="Study",
+                category_group="career",
+                enabled=False,
+                text="把笔记按主题收好，之后复习会轻松些。",
+            ),
+        ]
+
+        report = validate_corpus(rows, valid_config(), {"exceptions": []})
+
+        mismatches = [issue for issue in report.errors if issue.code == "category_group_mismatch"]
+        self.assertEqual({"enabled", "disabled"}, {issue.line_id for issue in mismatches})
+
+    def test_semantic_group_requires_identical_runtime_metadata_including_weight(self) -> None:
+        first = valid_line(id="first", semantic_group="shared.semantic", weight=0.5)
+        second = valid_line(
+            id="second",
+            semantic_group="shared.semantic",
+            category="CharacterLife",
+            output_mode="ambient",
+            tone="dry_sharp",
+            cooldown_hours=48.0,
+            semantic_cooldown_hours=72.0,
+            weight=0.25,
+            requires_reply=True,
+            enabled=False,
+            text="风从窗边绕开，屋里只剩一点轻响。",
+        )
+
+        report = validate_corpus([first, second], valid_config(), {"exceptions": []})
+
+        matching = [
+            issue for issue in report.errors if issue.code == "semantic_group_inconsistent"
+        ]
+        self.assertEqual(1, len(matching))
+        issue = matching[0]
+        self.assertIn("output_mode", issue.message)
+        self.assertIn("cooldown_hours", issue.message)
+        self.assertIn("weight", issue.message)
+        self.assertIn("category", issue.message)
+        self.assertIn("tone", issue.message)
+        self.assertIn("requires_reply", issue.message)
+        self.assertIn("enabled", issue.message)
+
+    def test_disabled_rows_receive_full_safety_preflight(self) -> None:
+        row = valid_line(
+            id="disabled-risk",
+            enabled=False,
+            requires_reply=True,
+            text="雷琳玥，你现在很累吗？我永远陪着你。",
+        )
+
+        codes = issue_codes(validate_corpus([row], valid_config(), {"exceptions": []}))
+
+        self.assertTrue(
+            {"requires_reply", "question", "fake_context", "pii_enabled", "unsafe_emotional_claim"}
+            <= codes
+        )
+
+    def test_normalized_text_uniqueness_includes_disabled_rows(self) -> None:
+        rows = [
+            valid_line(id="enabled", text="慢慢来，事情总会清楚。"),
+            valid_line(id="disabled", enabled=False, text="慢慢来, 事情总会清楚!"),
+        ]
+
+        codes = issue_codes(validate_corpus(rows, valid_config(), {"exceptions": []}))
+
+        self.assertIn("duplicate_normalized_text", codes)
+
+    def test_source_reference_grammar_bounds_and_topic_binding_are_strict(self) -> None:
+        rows = [
+            valid_line(id="grammar", source_reference="catalog:missing-variant"),
+            valid_line(
+                id="bounds",
+                topic_id="topic_study_deadbeef0000",
+                source_kind="rewritten_topic",
+                source_reference=(
+                    "legacy:75376;topic:topic_study_deadbeef0000;variant:fixture.bounds"
+                ),
+                text="复习计划拆到每天，执行时会少一点犹豫。",
+            ),
+            valid_line(
+                id="topic",
+                topic_id="topic_study_deadbeef0000",
+                source_kind="rewritten_topic",
+                source_reference="legacy:1;topic:other_topic;variant:fixture.topic",
+                text="把错题归到原因下面，比只抄答案更有用。",
+            ),
+        ]
+
+        codes = issue_codes(validate_corpus(rows, valid_config(), {"exceptions": []}))
+
+        self.assertTrue(
+            {"invalid_source_reference", "legacy_line_out_of_range", "lineage_topic_mismatch"}
+            <= codes
+        )
+
+    def test_repository_lineage_registry_rejects_dangling_in_both_directions(self) -> None:
+        row = load_v2(CORPUS_PATH)[0]
+        broken = replace(
+            row,
+            id="broken-lineage",
+            source_reference=row.source_reference.rsplit(";variant:", 1)[0]
+            + ";variant:missing.variant",
+            text="这条血缘故意指向不存在的变体。",
+        )
+
+        report = validate_corpus(
+            [broken],
+            valid_config(),
+            {"exceptions": []},
+            lineage_registry=build_repository_registry(),
+        )
+        codes = issue_codes(report)
+
+        self.assertIn("dangling_lineage_variant", codes)
+        self.assertIn("unmaterialized_catalog_variant", codes)
+
     def test_dawn_context_is_compatible_with_the_late_night_daypart_trigger(self) -> None:
         report = validate_corpus(
             [
@@ -521,6 +658,113 @@ class ValidationContractTests(unittest.TestCase):
             if issue.code == "pii_enabled"
         }
         self.assertEqual(set(), pii_ids)
+
+    def test_identity_pii_requires_an_exact_editorial_adjudication(self) -> None:
+        from src.persona_corpus.editorial import EDITORIAL_MANIFEST
+
+        item = next(
+            entry
+            for entry in EDITORIAL_MANIFEST.identity_easter_eggs.values()
+            if entry.allowed_markers == ("雷琳玥",)
+        )
+        row = valid_line(
+            id=item.line_id,
+            category="EasterEgg",
+            category_group="easter_egg",
+            topic_id="egg_editorial_full_name_01",
+            semantic_group="easter_egg.editorial_identity.full_name",
+            tone="playful",
+            cooldown_hours=720.0,
+            semantic_cooldown_hours=720.0,
+            max_per_day=1,
+            weight=0.1,
+            text=item.text,
+            source_kind="curated_standalone",
+            source_reference=item.source_reference,
+        )
+
+        exact = validate_corpus([row], valid_config(), bound_allowlist([row]))
+        wrong_id = replace(row, id="v2_unreviewed_identity")
+        forbidden_combo = replace(row, text=f"{row.text} 湖南。")
+        punctuation_edit = replace(row, text=row.text[:-1] + "！")
+        phone_append = replace(row, text=f"{row.text} 13800138000")
+
+        self.assertNotIn("pii_enabled", issue_codes(exact))
+        self.assertIn(
+            "pii_enabled",
+            issue_codes(
+                validate_corpus(
+                    [wrong_id], valid_config(), bound_allowlist([wrong_id])
+                )
+            ),
+        )
+        for changed in (punctuation_edit, phone_append):
+            changed_report = validate_corpus(
+                [changed], valid_config(), bound_allowlist([changed])
+            )
+            self.assertIn("pii_enabled", issue_codes(changed_report), changed.text)
+        self.assertIn(
+            "pii_enabled",
+            issue_codes(
+                validate_corpus(
+                    [forbidden_combo],
+                    valid_config(),
+                    bound_allowlist([forbidden_combo]),
+                )
+            ),
+        )
+
+    def test_dry_sharp_tone_obeys_placement_contract(self) -> None:
+        allowed = valid_line(tone="dry_sharp")
+        forbidden_group = valid_line(
+            id="dry_group",
+            category="DailyCare",
+            category_group="daily_care",
+            tone="dry_sharp",
+        )
+        forbidden_trigger = valid_line(
+            id="dry_trigger", tone="dry_sharp", trigger="late_night"
+        )
+        forbidden_context = valid_line(
+            id="dry_context",
+            tone="dry_sharp",
+            trigger="holiday",
+            required_context="holiday",
+        )
+
+        allowed_report = validate_corpus(
+            [allowed], valid_config(), bound_allowlist([allowed])
+        )
+        self.assertNotIn("dry_sharp_placement", issue_codes(allowed_report))
+        for row in (forbidden_group, forbidden_trigger, forbidden_context):
+            report = validate_corpus([row], valid_config(), bound_allowlist([row]))
+            self.assertIn("dry_sharp_placement", issue_codes(report), row.id)
+
+    def test_category_group_output_mode_mapping_applies_to_enabled_and_disabled(self) -> None:
+        rows = [
+            valid_line(
+                id="enabled-mode",
+                category="DailyCare",
+                category_group="daily_care",
+                output_mode="self_talk",
+            ),
+            valid_line(
+                id="disabled-mode",
+                category="DailyCare",
+                category_group="daily_care",
+                output_mode="self_talk",
+                enabled=False,
+                text="风从杯沿绕开，桌面安静了一点。",
+            ),
+        ]
+
+        report = validate_corpus(rows, valid_config(), {"exceptions": []})
+        mismatches = {
+            issue.line_id
+            for issue in report.errors
+            if issue.code == "category_group_output_mode_mismatch"
+        }
+        self.assertEqual({"enabled-mode", "disabled-mode"}, mismatches)
 
     def test_easter_egg_requires_long_cooldown_one_per_day_and_low_row_weight(self) -> None:
         row = valid_line(

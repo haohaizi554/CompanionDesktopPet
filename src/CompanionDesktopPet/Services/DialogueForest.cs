@@ -40,6 +40,9 @@ public static class DialogueForest
     public static IReadOnlyDictionary<DialogueOutputMode, double> OutputModeTargets { get; } =
         PersonaContractGenerated.OutputModeTargets;
 
+    public static IReadOnlyDictionary<DialogueCategoryGroup, DialogueOutputMode> CategoryGroupOutputModes { get; } =
+        PersonaContractGenerated.CategoryGroupOutputModes;
+
     public static IReadOnlyDictionary<DialogueTreeKind, double> TreeWeights { get; } =
         new Dictionary<DialogueTreeKind, double>
         {

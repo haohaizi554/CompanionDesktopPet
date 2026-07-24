@@ -93,7 +93,7 @@ def fixture_result(seed: int = 20260722) -> BuildResult:
             runtime_topic_id="topic-4",
             editorial_role="easter_egg_scene",
             semantic_group="fixture.easter.safe",
-            output_mode="ambient",
+            output_mode="self_talk",
             trigger="app_start",
             required_context="none",
             tone="playful_rare",
@@ -259,6 +259,24 @@ class BuildContractTests(unittest.TestCase):
         self.assertTrue(
             all(entry.runtime_topic_id != entry.variant_id for entry in authored)
         )
+
+    def test_identity_catalog_adjudication_is_raw_text_exact_and_never_exempts_identifiers(self) -> None:
+        from src.persona_corpus.content_catalog import CONTENT_CATALOG
+
+        entry = next(
+            item for item in CONTENT_CATALOG
+            if item.variant_id == "egg_editorial_full_name_01"
+        )
+        exact = build_v2([], [], 20260722, catalog=(entry,))
+        self.assertEqual(1, len(exact.enabled))
+        edits = (
+            replace(entry, text=entry.text[:-1] + "！"),
+            replace(entry, text=f"{entry.text} 13800138000"),
+        )
+        for edited in edits:
+            with self.subTest(text=edited.text):
+                with self.assertRaisesRegex(ValueError, "PII risk"):
+                    build_v2([], [], 20260722, catalog=(edited,))
 
     def test_legacy_topics_declare_distinct_immutable_editorial_roles(self) -> None:
         from src.persona_corpus.content_catalog import CONTENT_CATALOG
@@ -654,7 +672,7 @@ class RealCorpusBuildTests(unittest.TestCase):
         )
 
     def test_real_build_has_curated_target_size_and_traceability(self) -> None:
-        self.assertEqual(800, len(self.result.enabled))
+        self.assertEqual(806, len(self.result.enabled))
         self.assertEqual(75375, len(self.result.dispositions))
         self.assertTrue(self.result.archive)
         self.assertTrue(self.result.review)

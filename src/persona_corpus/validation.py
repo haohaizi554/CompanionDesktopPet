@@ -23,8 +23,18 @@ from .contract import (
     TRIGGERS,
 )
 from .loader import CorpusFormatError, load_v2
+from .editorial import is_exact_identity_easter_egg
 from .models import CorpusLine
 from .normalization import normalize_text
+from .validation_rules.lineage_rules import (
+    LineageRegistry,
+    build_repository_registry,
+    validate_lineage_registry,
+    validate_lineage_structure,
+)
+from .validation_rules.safety_rules import validate_safety_preflight
+from .validation_rules.schema_rules import validate_schema_contract
+from .validation_rules.editorial_rules import validate_dry_sharp_contract
 
 
 VALIDATION_GROUPS = (
@@ -87,6 +97,8 @@ TECHNICAL_CURRENT_PATTERNS = (
 )
 PII_MARKERS = (
     "雷琳玥",
+    "小玥",
+    "玥玥",
 )
 PII_PATTERNS = (
     re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)"),
@@ -498,6 +510,24 @@ def _validate_output_targets(config: Mapping[str, object], issues: _Issues) -> N
         issues.error("output_mode_targets", "output mode targets must be finite values in [0, 1]")
         return
     targets = {str(name): float(value) for name, value in raw.items()}
+    group_weights = config.get("category_group_weights")
+    group_modes = PERSONA_CONTRACT.scheduler["category_group_output_modes"]
+    if isinstance(group_weights, Mapping) and isinstance(group_modes, Mapping):
+        aggregate = {mode: 0.0 for mode in OUTPUT_MODES}
+        aggregate_valid = True
+        for group, mode in group_modes.items():
+            weight = group_weights.get(group)
+            if not isinstance(mode, str) or mode not in aggregate or not _is_finite_number(weight):
+                aggregate_valid = False
+                break
+            aggregate[mode] += float(weight)
+        if not aggregate_valid or any(
+            abs(aggregate[mode] - targets[mode]) > 1e-9 for mode in OUTPUT_MODES
+        ):
+            issues.error(
+                "output_mode_group_aggregate",
+                "output_mode_targets must exactly equal category_group weight aggregation",
+            )
     if (
         abs(sum(targets.values()) - 1.0) > 1e-9
         or targets["self_talk"] + targets["ambient"]
@@ -645,10 +675,15 @@ def _required_context_tokens(value: object) -> tuple[str, ...] | None:
     return tokens
 
 
-def _looks_like_pii(text: str) -> bool:
-    if any(marker in text for marker in PII_MARKERS) or any(
-        pattern.search(text) for pattern in PII_PATTERNS
-    ) or CONTEXTUAL_CHINESE_NAME_PATTERN.search(text) or LABELED_CHINESE_NAME_PATTERN.search(text):
+def _has_identity_marker(text: str) -> bool:
+    return any(marker in text for marker in PII_MARKERS)
+
+
+def _looks_like_non_identity_pii(text: str) -> bool:
+    if any(pattern.search(text) for pattern in PII_PATTERNS) or (
+        CONTEXTUAL_CHINESE_NAME_PATTERN.search(text)
+        or LABELED_CHINESE_NAME_PATTERN.search(text)
+    ):
         return True
     location = r"(?:湖南|长沙|广东)"
     personal_location = (
@@ -766,7 +801,6 @@ def _validate_line(row: CorpusLine, row_number: int, issues: _Issues) -> None:
             line_id,
             row_number,
         )
-    has_context = tokens is not None and tokens != ("none",)
     text = row.text if isinstance(row.text, str) else ""
     enabled = row.enabled is True
     if isinstance(row.text, str) and not normalize_text(row.text):
@@ -787,61 +821,18 @@ def _validate_line(row: CorpusLine, row_number: int, issues: _Issues) -> None:
         unicoded in text for unicoded in ("\u2028", "\u2029")
     ):
         issues.error("control_character", "text contains a tab or physical line separator", line_id, row_number)
-    if enabled and row.requires_reply is True:
-        issues.error("requires_reply", "enabled text must not require a reply", line_id, row_number)
-    if enabled and ("?" in text or "？" in text):
-        issues.error("question", "enabled original text contains a question mark", line_id, row_number)
-
-    direct_state = next((pattern for pattern in DIRECT_STATE_PATTERNS if pattern in text), None)
-    if enabled and direct_state and not has_context:
-        issues.error(
-            "fake_context",
-            f"text asserts unavailable user context via {direct_state!r}",
-            line_id,
-            row_number,
-        )
-        if row.output_mode == "user_direct":
-            issues.error(
-                "user_direct_context",
-                "user_direct state assertion needs a non-none required_context gate",
-                line_id,
-                row_number,
-            )
-    if (
-        enabled
-        and row.category_group == "technical"
-        and row.output_mode == "user_direct"
-        and (tokens is None or "ide_foreground" not in tokens)
-    ):
-        issues.error(
-            "user_direct_context",
-            "technical user_direct text must be gated by ide_foreground",
-            line_id,
-            row_number,
-        )
-    folded_text = text.casefold()
-    technical_pattern = next(
-        (
-            pattern
-            for pattern in TECHNICAL_CURRENT_PATTERNS
-            if pattern.casefold() in folded_text
-        ),
-        None,
+    validate_safety_preflight(
+        row,
+        row_number,
+        issues,
+        context_tokens=tokens,
+        has_identity_marker=_has_identity_marker,
+        looks_like_non_identity_pii=_looks_like_non_identity_pii,
+        identity_pii_is_adjudicated=is_exact_identity_easter_egg,
+        direct_state_patterns=DIRECT_STATE_PATTERNS,
+        technical_current_patterns=TECHNICAL_CURRENT_PATTERNS,
+        unsafe_emotional_markers=STRONG_EMOTION_MARKERS,
     )
-    if enabled and row.category_group == "technical" and technical_pattern and not has_context:
-        issues.error(
-            "technical_fake_context",
-            f"technical text uses current-object shorthand {technical_pattern!r} without context",
-            line_id,
-            row_number,
-        )
-    if enabled and _looks_like_pii(text):
-        issues.error(
-            "pii_enabled",
-            "enabled text matches a name, location, income, employment or identifier PII heuristic",
-            line_id,
-            row_number,
-        )
 
     if enabled and row.category_group == "easter_egg":
         rare = any(
@@ -910,39 +901,6 @@ def _validate_line(row: CorpusLine, row_number: int, issues: _Issues) -> None:
             line_id,
             row_number,
         )
-
-
-def _duplicate_issues(rows: Sequence[CorpusLine], issues: _Issues) -> None:
-    id_rows: dict[object, list[int]] = defaultdict(list)
-    exact_rows: dict[str, list[str]] = defaultdict(list)
-    normalized_rows: dict[str, list[str]] = defaultdict(list)
-    for index, row in enumerate(rows, start=2):
-        id_rows[row.id].append(index)
-        if row.enabled is True and isinstance(row.text, str):
-            exact_rows[row.text].append(str(row.id))
-            normalized_rows[normalize_text(row.text)].append(str(row.id))
-    for value, positions in id_rows.items():
-        if len(positions) > 1:
-            issues.error(
-                "duplicate_id",
-                f"id {value!r} occurs on {len(positions)} rows",
-                value,
-                min(positions),
-            )
-    for text, ids in exact_rows.items():
-        if len(ids) > 1:
-            issues.error(
-                "duplicate_text",
-                f"enabled text occurs {len(ids)} times: {text!r}",
-                min(ids),
-            )
-    for text, ids in normalized_rows.items():
-        if len(ids) > 1:
-            issues.error(
-                "duplicate_normalized_text",
-                f"normalized enabled text occurs {len(ids)} times: {text!r}",
-                min(ids),
-            )
 
 
 def _cartesian_grid_issues(rows: Sequence[CorpusLine], issues: _Issues) -> None:
@@ -1738,6 +1696,7 @@ def validate_corpus(
     allowlist: object,
     simulation_result: object | None = None,
     *,
+    lineage_registry: LineageRegistry | None = None,
     _corpus_sha256: str | None = None,
     _scheduler_config_sha256: str | None = None,
     _require_allowlist_binding: bool = False,
@@ -1761,7 +1720,12 @@ def validate_corpus(
                 "enabled_count",
                 f"canonical runtime corpus must contain 800-1200 enabled rows; found {enabled_count}",
             )
-    _duplicate_issues(typed_rows, issues)
+    validate_schema_contract(typed_rows, issues)
+    validate_dry_sharp_contract(typed_rows, issues)
+    if lineage_registry is None:
+        validate_lineage_structure(typed_rows, issues)
+    else:
+        validate_lineage_registry(typed_rows, issues, lineage_registry)
     _cartesian_grid_issues(typed_rows, issues)
     _distribution_issues(typed_rows, issues)
     if _corpus_sha256 is None:
@@ -1820,6 +1784,7 @@ def validate_file(
         config,
         allowlist,
         simulation_result=simulation,
+        lineage_registry=build_repository_registry(),
         _corpus_sha256=corpus_sha256,
         _scheduler_config_sha256=scheduler_config_sha256(config),
         _require_allowlist_binding=True,

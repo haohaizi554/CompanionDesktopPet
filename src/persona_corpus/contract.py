@@ -14,6 +14,7 @@ DEFAULT_CONTRACT_PATH = (
 _TOP_LEVEL_KEYS = frozenset(
     {
         "schema_version",
+        "inventory",
         "category_groups",
         "categories",
         "controlled_values",
@@ -67,9 +68,23 @@ def _mapping(value: object, name: str) -> dict[str, Any]:
     return value
 
 
+def _row_range(value: object, name: str) -> tuple[int, int]:
+    if (
+        not isinstance(value, list)
+        or len(value) != 2
+        or any(type(item) is not int or item <= 0 for item in value)
+        or value[0] > value[1]
+    ):
+        raise PersonaContractError(
+            f"{name} must be a two-item positive ascending integer array"
+        )
+    return value[0], value[1]
+
+
 @dataclass(frozen=True, slots=True)
 class PersonaContract:
     schema_version: int
+    inventory: Mapping[str, tuple[int, int]]
     category_groups: tuple[str, ...]
     categories: Mapping[str, str]
     output_modes: frozenset[str]
@@ -101,6 +116,14 @@ def load_persona_contract(path: Path = DEFAULT_CONTRACT_PATH) -> PersonaContract
         )
     if type(raw.get("schema_version")) is not int or raw["schema_version"] != 1:
         raise PersonaContractError("schema_version must be integer 1")
+
+    inventory_raw = _mapping(raw.get("inventory"), "inventory")
+    if set(inventory_raw) != {"curated_core", "expanded_runtime"}:
+        raise PersonaContractError("inventory uses an unexpected key set")
+    inventory = {
+        name: _row_range(value, f"inventory.{name}")
+        for name, value in inventory_raw.items()
+    }
 
     category_groups = _string_tuple(raw.get("category_groups"), "category_groups")
     categories_raw = _mapping(raw.get("categories"), "categories")
@@ -144,6 +167,7 @@ def load_persona_contract(path: Path = DEFAULT_CONTRACT_PATH) -> PersonaContract
     scheduler = _mapping(raw.get("scheduler"), "scheduler")
     if set(scheduler) != {
         "category_group_weights",
+        "category_group_output_modes",
         "output_mode_targets",
         "runtime_limits",
         "acceptance",
@@ -163,6 +187,39 @@ def load_persona_contract(path: Path = DEFAULT_CONTRACT_PATH) -> PersonaContract
     if abs(sum(float(value) for value in group_weights.values()) - 1.0) > 1e-9:
         raise PersonaContractError("scheduler category_group weights must sum to 1.0")
 
+    group_modes = _mapping(
+        scheduler.get("category_group_output_modes"),
+        "scheduler.category_group_output_modes",
+    )
+    if set(group_modes) != set(category_groups) or any(
+        not isinstance(mode, str) or mode not in output_modes
+        for mode in group_modes.values()
+    ):
+        raise PersonaContractError(
+            "scheduler category_group_output_modes must map every group to one output mode"
+        )
+    mode_targets = _mapping(
+        scheduler.get("output_mode_targets"), "scheduler.output_mode_targets"
+    )
+    if set(mode_targets) != set(output_modes) or any(
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+        or float(value) < 0
+        for value in mode_targets.values()
+    ):
+        raise PersonaContractError("scheduler output_mode_targets must cover every mode")
+    aggregated = {mode: 0.0 for mode in output_modes}
+    for group, weight in group_weights.items():
+        aggregated[str(group_modes[group])] += float(weight)
+    if any(
+        abs(aggregated[mode] - float(mode_targets[mode])) > 1e-9
+        for mode in output_modes
+    ):
+        raise PersonaContractError(
+            "scheduler output_mode_targets must equal category-group weight aggregation"
+        )
+
     dry_sharp = _mapping(raw.get("dry_sharp"), "dry_sharp")
     temporal = _mapping(raw.get("temporal"), "temporal")
     lineage = _mapping(raw.get("lineage"), "lineage")
@@ -172,6 +229,7 @@ def load_persona_contract(path: Path = DEFAULT_CONTRACT_PATH) -> PersonaContract
     frozen_raw = _freeze(raw)
     return PersonaContract(
         schema_version=1,
+        inventory=MappingProxyType(inventory),
         category_groups=category_groups,
         categories=MappingProxyType(
             {str(category): str(group) for category, group in categories_raw.items()}
@@ -191,6 +249,8 @@ def load_persona_contract(path: Path = DEFAULT_CONTRACT_PATH) -> PersonaContract
 
 
 PERSONA_CONTRACT = load_persona_contract()
+CURATED_CORE_ROWS = PERSONA_CONTRACT.inventory["curated_core"]
+EXPANDED_RUNTIME_ROWS = PERSONA_CONTRACT.inventory["expanded_runtime"]
 CATEGORY_GROUPS = frozenset(PERSONA_CONTRACT.category_groups)
 CATEGORY_GROUP_BY_CATEGORY = PERSONA_CONTRACT.categories
 OUTPUT_MODES = PERSONA_CONTRACT.output_modes
@@ -213,8 +273,10 @@ __all__ = [
     "ALLOWED_CONTEXT_TOKENS",
     "CATEGORY_GROUP_BY_CATEGORY",
     "CATEGORY_GROUPS",
+    "CURATED_CORE_ROWS",
     "DEFAULT_CONTRACT_PATH",
     "FUTURE_TRIGGERS",
+    "EXPANDED_RUNTIME_ROWS",
     "MVP_TRIGGERS",
     "OUTPUT_MODES",
     "PERSONA_CONTRACT",

@@ -41,22 +41,13 @@ public sealed class PersonaCorpusTests
         Assert.All(lines, line => Assert.False(string.IsNullOrWhiteSpace(line.Text)));
         Assert.Equal(lines.Count, lines.Select(line => Normalize(line.Text)).Distinct().Count());
         Assert.DoesNotContain(lines, line => line.Text.Contains('?') || line.Text.Contains('？'));
-        var piiMarkers = new[] { "雷琳玥", "小玥", "玥玥", "湖南", "长沙", "广东", "月薪", "工资", "打零工" };
-        Assert.DoesNotContain(lines, line => piiMarkers.Any(marker => line.Text.Contains(marker, StringComparison.Ordinal)));
+        Assert.All(lines, line => Assert.False(line.RequiresReply));
     }
 
     [Fact]
-    public void ApplicationAssembly_DoesNotEmbedReviewedPiiMarkers()
+    public void ApplicationAssembly_EmbedsTheExactEditorialIdentityPolicy()
     {
-        var assemblyBytes = File.ReadAllBytes(typeof(PersonaCorpus).Assembly.Location);
-        var piiMarkers = new[] { "雷琳玥", "小玥", "玥玥", "湖南", "长沙", "广东", "月薪", "工资", "打零工" };
-        Encoding[] encodings = [Encoding.UTF8, Encoding.Unicode, Encoding.BigEndianUnicode];
-
-        Assert.All(piiMarkers, marker =>
-            Assert.All(encodings, encoding =>
-                Assert.False(
-                    ContainsBytes(assemblyBytes, encoding.GetBytes(marker)),
-                    $"Application assembly embeds reviewed PII marker bytes ({encoding.WebName}).")));
+        Assert.Equal(29, PersonaCorpus.EditorialIdentityEasterEggIds.Count);
     }
 
     [Fact]
@@ -202,6 +193,41 @@ public sealed class PersonaCorpusTests
     }
 
     [Fact]
+    public void Corpus_IdentityEasterEggsAreExactAndPrivacyScoped()
+    {
+        var fullName = "\u96f7\u7433\u73a5";
+        var nickname = "\u5c0f\u73a5";
+        var repeatedNickname = "\u73a5\u73a5";
+        var identityLines = PersonaCorpus.All
+            .Where(line => line.Text.Contains(fullName, StringComparison.Ordinal)
+                           || line.Text.Contains(nickname, StringComparison.Ordinal)
+                           || line.Text.Contains(repeatedNickname, StringComparison.Ordinal))
+            .ToArray();
+
+        Assert.Equal(29, PersonaCorpus.EditorialIdentityEasterEggIds.Count);
+        Assert.InRange(identityLines.Length, 2, PersonaCorpus.EditorialIdentityEasterEggIds.Count);
+        Assert.All(identityLines, line =>
+            Assert.Contains(line.Id, PersonaCorpus.EditorialIdentityEasterEggIds));
+        Assert.Single(identityLines, line => line.Text.Contains(fullName, StringComparison.Ordinal));
+        Assert.Single(identityLines, line => line.Text.Contains(nickname, StringComparison.Ordinal));
+        Assert.All(identityLines, line =>
+        {
+            Assert.Equal(DialogueCategory.EasterEgg, line.Category);
+            Assert.Equal(DialogueCategoryGroup.EasterEgg, line.CategoryGroup);
+            Assert.Equal(720, line.CooldownHours);
+            Assert.Equal(1, line.MaxPerDay);
+            Assert.Equal(0.1, line.Weight, 8);
+        });
+        var forbidden = new[]
+        {
+            "\u6e56\u5357", "\u957f\u6c99", "\u5e7f\u4e1c", "\u6708\u85aa",
+            "\u5de5\u8d44", "\u6536\u5165", "\u6253\u96f6\u5de5", "\u6362\u5de5\u4f5c"
+        };
+        Assert.DoesNotContain(identityLines, line =>
+            forbidden.Any(marker => line.Text.Contains(marker, StringComparison.Ordinal)));
+    }
+
+    [Fact]
     public void Load_RejectsCategoryGroupMismatchFromTheSharedContract()
     {
         using var stream = CorpusStream(
@@ -210,6 +236,49 @@ public sealed class PersonaCorpusTests
             ("category_group", "technical"));
 
         Assert.Throws<InvalidDataException>(() => PersonaCorpus.Load(stream));
+    }
+
+    [Theory]
+    [InlineData("true")]
+    [InlineData("false")]
+    public void Load_RejectsCategoryGroupOutputModeMismatchEvenWhenDisabled(string enabled)
+    {
+        using var stream = CorpusStream(
+            new UTF8Encoding(false, true),
+            ("category", "DailyCare"),
+            ("category_group", "daily_care"),
+            ("output_mode", "self_talk"),
+            ("enabled", enabled));
+
+        Assert.Throws<InvalidDataException>(() => PersonaCorpus.Load(stream));
+    }
+
+    [Fact]
+    public void Load_RejectsEditedIdentityTextAndAppendedDirectIdentifier()
+    {
+        var exact = "\u8fd9\u679a\u5f88\u5c11\u51fa\u73b0\u7684\u540d\u724c\uff0c\u5199\u7740\u96f7\u7433\u73a5\u3002";
+        var edits = new[] { exact[..^1] + "\uff01", exact + " 13800138000" };
+        foreach (var text in edits)
+        {
+            using var stream = CorpusStream(
+                new UTF8Encoding(false, true),
+                ("id", "v2_egg_editorial_full_name_01_3230a1453d30"),
+                ("category", "EasterEgg"),
+                ("category_group", "easter_egg"),
+                ("topic_id", "easter_egg.editorial_identity.full_name"),
+                ("semantic_group", "easter_egg.editorial_identity.full_name"),
+                ("output_mode", "self_talk"),
+                ("tone", "playful"),
+                ("interrupt_cost", "0"),
+                ("cooldown_hours", "720"),
+                ("semantic_cooldown_hours", "720"),
+                ("weight", "0.1"),
+                ("text", text),
+                ("source_kind", "curated_standalone"),
+                ("source_reference", "catalog:editorial-easter-egg.identity-v1;variant:egg_editorial_full_name_01"));
+
+            Assert.Throws<InvalidDataException>(() => PersonaCorpus.Load(stream));
+        }
     }
 
     [Theory]

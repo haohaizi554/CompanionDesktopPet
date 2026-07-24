@@ -920,7 +920,7 @@ class SelectorScoringAndMutationTests(unittest.TestCase):
 
     def test_real_800_line_corpus_smoke_and_repeat_are_deterministic(self) -> None:
         rows = load_v2(CORPUS_PATH)
-        self.assertEqual(800, len(rows))
+        self.assertEqual(806, len(rows))
 
         first = select_line(rows, context_at(), SelectionHistory(), NOW, seed=2026)
         second = select_line(list(reversed(rows)), context_at(), SelectionHistory(), NOW, seed=2026)

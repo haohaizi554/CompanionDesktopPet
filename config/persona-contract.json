@@ -1,5 +1,15 @@
 {
   "schema_version": 1,
+  "inventory": {
+    "curated_core": [
+      800,
+      1200
+    ],
+    "expanded_runtime": [
+      50000,
+      60000
+    ]
+  },
   "category_groups": [
     "technical",
     "growth",
@@ -121,11 +131,21 @@
       "easter_egg": 0.10,
       "system_ambient": 0.08
     },
+    "category_group_output_modes": {
+      "technical": "self_talk",
+      "growth": "self_talk",
+      "career": "self_talk",
+      "daily_care": "ambient",
+      "emotional_reflection": "self_talk",
+      "character_life": "self_talk",
+      "easter_egg": "self_talk",
+      "system_ambient": "system_observe"
+    },
     "output_mode_targets": {
-      "self_talk": 0.45,
-      "ambient": 0.25,
-      "user_direct": 0.10,
-      "system_observe": 0.20
+      "self_talk": 0.82,
+      "ambient": 0.10,
+      "user_direct": 0.0,
+      "system_observe": 0.08
     },
     "runtime_limits": {
       "minimum_interval_minutes": 8,

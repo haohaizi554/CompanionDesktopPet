@@ -11,10 +11,10 @@
     "system_ambient": 0.08
   },
   "output_mode_targets": {
-    "self_talk": 0.45,
-    "ambient": 0.25,
-    "user_direct": 0.10,
-    "system_observe": 0.20
+    "self_talk": 0.82,
+    "ambient": 0.10,
+    "user_direct": 0.0,
+    "system_observe": 0.08
   },
   "runtime_limits": {
     "minimum_interval_minutes": 8,
