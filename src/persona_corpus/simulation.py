@@ -69,7 +69,7 @@ OUTPUT_MODES = ("self_talk", "ambient", "user_direct", "system_observe")
 LENGTH_BUCKETS = ("<8", "8-16", "17-24", "25-36", ">36")
 PREFIX_WIDTHS = (2, 3, 4, 5, 6)
 SUFFIX_WIDTHS = (4, 6, 8, 10)
-SIMULATION_SCHEMA_VERSION = 1
+SIMULATION_SCHEMA_VERSION = 2
 SIMULATION_STARTS = (
     datetime(2026, 1, 1, tzinfo=timezone(timedelta(hours=8))),
     datetime(2026, 3, 1, tzinfo=timezone(timedelta(hours=8))),

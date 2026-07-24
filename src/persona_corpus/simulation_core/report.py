@@ -49,7 +49,7 @@ TONE_VALUES = tuple(sorted(TONES))
 LENGTH_BUCKETS = ("<8", "8-16", "17-24", "25-36", ">36")
 PREFIX_WIDTHS = (2, 3, 4, 5, 6)
 SUFFIX_WIDTHS = (4, 6, 8, 10)
-SIMULATION_SCHEMA_VERSION = 1
+SIMULATION_SCHEMA_VERSION = 2
 _EPSILON = 1e-9
 
 
@@ -190,6 +190,8 @@ class SimulationReport:
             "schema_version": int(self.schema_version),
             "corpus_sha256": self.corpus_sha256,
             "scheduler_config_sha256": self.scheduler_config_sha256,
+            "subseed_derivation_version": self.subseed_derivation_version,
+            "subseed_derivation_sha256": self.subseed_derivation_sha256,
             "days": self.days,
             "seeds": list(self.seeds),
             "attempts": [attempt.validation_payload() for attempt in self.attempts],

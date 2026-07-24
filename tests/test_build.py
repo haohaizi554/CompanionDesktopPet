@@ -649,6 +649,8 @@ class RealCorpusBuildTests(unittest.TestCase):
                 "/data/intermediate/*.tsv text eol=lf",
                 "/data/optimized/*.tsv text eol=lf",
                 "/reports/*.tsv text eol=lf",
+                "/reports/*.md text eol=lf",
+                "/reports/*.json text eol=lf",
             }.issubset(attributes)
         )
 
@@ -666,6 +668,8 @@ class RealCorpusBuildTests(unittest.TestCase):
         generated = tuple((REPOSITORY_ROOT / "data/intermediate").glob("*.tsv"))
         generated += tuple((REPOSITORY_ROOT / "data/optimized").glob("*.tsv"))
         generated += tuple((REPOSITORY_ROOT / "reports").glob("*.tsv"))
+        generated += tuple((REPOSITORY_ROOT / "reports").glob("*.md"))
+        generated += tuple((REPOSITORY_ROOT / "reports").glob("*.json"))
         self.assertTrue(generated)
         for path in generated:
             self.assertNotIn(b"\r\n", path.read_bytes(), path)

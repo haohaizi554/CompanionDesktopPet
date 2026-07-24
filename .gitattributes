@@ -6,3 +6,5 @@
 /data/intermediate/*.tsv text eol=lf
 /data/optimized/*.tsv text eol=lf
 /reports/*.tsv text eol=lf
+/reports/*.md text eol=lf
+/reports/*.json text eol=lf

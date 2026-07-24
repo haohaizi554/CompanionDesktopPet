@@ -20,6 +20,8 @@ SIMULATION_KEYS = frozenset(
         "schema_version",
         "corpus_sha256",
         "scheduler_config_sha256",
+        "subseed_derivation_version",
+        "subseed_derivation_sha256",
         "days",
         "seeds",
         "attempts",
@@ -216,6 +218,12 @@ def _simulation_issues(
     expected_corpus_sha256: str,
     expected_scheduler_config_sha256: str,
 ) -> None:
+    # Keep scenarios -> selector -> validation import order acyclic.
+    from ..simulation_core.scenarios import (
+        SUBSEED_DERIVATION_SHA256,
+        SUBSEED_DERIVATION_VERSION,
+    )
+
     if simulation is None:
         issues.warning(
             "simulation_missing",
@@ -229,9 +237,9 @@ def _simulation_issues(
         issues.error("simulation_format", "simulation result uses unknown or missing top-level keys")
     if (
         type(simulation.get("schema_version")) is not int
-        or simulation.get("schema_version") != 1
+        or simulation.get("schema_version") != 2
     ):
-        issues.error("simulation_format", "simulation schema_version must be integer 1")
+        issues.error("simulation_format", "simulation schema_version must be integer 2")
     for key, expected in (
         ("corpus_sha256", expected_corpus_sha256),
         ("scheduler_config_sha256", expected_scheduler_config_sha256),
@@ -244,6 +252,33 @@ def _simulation_issues(
                 "simulation_hash_mismatch",
                 f"simulation {key} does not match the inputs under validation",
             )
+
+    derivation_version = simulation.get("subseed_derivation_version")
+    if not isinstance(derivation_version, str):
+        issues.error(
+            "simulation_format",
+            "simulation subseed_derivation_version must be a string",
+        )
+    elif derivation_version != SUBSEED_DERIVATION_VERSION:
+        issues.error(
+            "simulation_replay_binding_mismatch",
+            "simulation subseed_derivation_version does not match the canonical derivation",
+        )
+
+    derivation_sha256 = simulation.get("subseed_derivation_sha256")
+    if (
+        not isinstance(derivation_sha256, str)
+        or re.fullmatch(r"[0-9a-f]{64}", derivation_sha256) is None
+    ):
+        issues.error(
+            "simulation_format",
+            "simulation subseed_derivation_sha256 must be lowercase SHA-256",
+        )
+    elif derivation_sha256 != SUBSEED_DERIVATION_SHA256:
+        issues.error(
+            "simulation_replay_binding_mismatch",
+            "simulation subseed_derivation_sha256 does not match the canonical derivation",
+        )
 
     days = simulation.get("days")
     if not _is_integer(days) or days < 30:

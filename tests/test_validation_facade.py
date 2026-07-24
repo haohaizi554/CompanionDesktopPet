@@ -128,6 +128,22 @@ class ValidationFacadeContractTests(unittest.TestCase):
             with self.subTest(order=order):
                 self.assertEqual(0, completed.returncode, completed.stderr)
 
+    def test_simulation_scenarios_imports_before_validation_in_fresh_process(self) -> None:
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import src.persona_corpus.simulation_core.scenarios; "
+                "import src.persona_corpus.validation",
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_public_symbols_keep_facade_introspection_and_pickle_contract(self) -> None:
         public_callables = (
             validation.ValidationInputError,

@@ -20,6 +20,7 @@ from src.persona_corpus.lexical import (
 )
 from src.persona_corpus.loader import load_v2
 from src.persona_corpus.simulation import (
+    SIMULATION_SCHEMA_VERSION,
     SUBSEED_DERIVATION_VERSION,
     SUBSEED_DERIVATION_SHA256,
     SUBSEED_DERIVATION_SPEC,
@@ -121,6 +122,8 @@ EVENT_KEYS = {
     "schema_version",
     "corpus_sha256",
     "scheduler_config_sha256",
+    "subseed_derivation_version",
+    "subseed_derivation_sha256",
     "days",
     "seeds",
     "attempts",
@@ -261,7 +264,7 @@ class SimulationIntegrationTests(unittest.TestCase):
     def test_validation_event_payload_is_exact_hash_bound_and_context_complete(self) -> None:
         payload = self.report.to_validation_payload()
         self.assertEqual(EVENT_KEYS, set(payload))
-        self.assertEqual(1, payload["schema_version"])
+        self.assertEqual(2, payload["schema_version"])
         self.assertEqual(30, payload["days"])
         self.assertEqual(list(range(10)), payload["seeds"])
         self.assertEqual(
@@ -269,6 +272,8 @@ class SimulationIntegrationTests(unittest.TestCase):
             payload["corpus_sha256"],
         )
         self.assertEqual(scheduler_config_sha256(self.config), payload["scheduler_config_sha256"])
+        self.assertEqual(SUBSEED_DERIVATION_VERSION, payload["subseed_derivation_version"])
+        self.assertEqual(SUBSEED_DERIVATION_SHA256, payload["subseed_derivation_sha256"])
 
         attempts = payload["attempts"]
         self.assertTrue(attempts)
@@ -454,6 +459,9 @@ class SimulationUnitTests(unittest.TestCase):
         second = simulate(self.corpus, self.config, days=2, seeds=(7,))
         self.assertEqual(first.to_validation_json(), second.to_validation_json())
         self.assertEqual(render_simulation_report(first), render_simulation_report(second))
+
+    def test_validator_facing_simulation_schema_is_v2(self) -> None:
+        self.assertEqual(2, SIMULATION_SCHEMA_VERSION)
 
     def test_simulation_builds_one_prepared_corpus_for_every_natural_slot(self) -> None:
         selected_inputs: list[object] = []

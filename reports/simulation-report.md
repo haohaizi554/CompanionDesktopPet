@@ -7,7 +7,7 @@ The validator-facing event stream is stored separately with an exact schema and 
 
 | Field | Value |
 | --- | --- |
-| Schema version | 1 |
+| Schema version | 2 |
 | Days per seed | 30 |
 | Seeds | 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 |
 | Corpus SHA-256 | `3335d72e695528892ddec92076f0f02abacf58fff02ed6bd0aadf67d1cf0cc40` |

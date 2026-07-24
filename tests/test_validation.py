@@ -16,6 +16,10 @@ from src.persona_corpus.builder import serialize_v2
 from src.persona_corpus.loader import load_v2
 from src.persona_corpus.models import CorpusLine
 from src.persona_corpus.schema import V2_HEADER
+from src.persona_corpus.simulation_core.scenarios import (
+    SUBSEED_DERIVATION_SHA256,
+    SUBSEED_DERIVATION_VERSION,
+)
 from src.persona_corpus.validation import (
     VALIDATION_GROUPS,
     ValidationInputError,
@@ -305,9 +309,11 @@ def clean_simulation() -> tuple[list[CorpusLine], dict[str, object], dict[str, o
                 }
             )
     simulation: dict[str, object] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "corpus_sha256": "",
         "scheduler_config_sha256": "",
+        "subseed_derivation_version": SUBSEED_DERIVATION_VERSION,
+        "subseed_derivation_sha256": SUBSEED_DERIVATION_SHA256,
         "days": 30,
         "seeds": list(range(10)),
         "attempts": attempts,
@@ -1318,9 +1324,27 @@ class SimulationGateTests(unittest.TestCase):
         )
         self.assertTrue({"simulation_hash_mismatch", "simulation_format"} <= codes)
 
-    def test_simulation_schema_version_rejects_float_one(self) -> None:
+    def test_subseed_derivation_binding_rejects_version_or_digest_tampering(self) -> None:
         rows, config, simulation = clean_simulation()
-        simulation["schema_version"] = 1.0
+
+        for field, tampered_value in (
+            ("subseed_derivation_version", "persona-simulation-v999"),
+            ("subseed_derivation_sha256", "0" * 64),
+        ):
+            tampered = copy.deepcopy(simulation)
+            tampered[field] = tampered_value
+            with self.subTest(field=field):
+                report = validate_corpus(
+                    rows,
+                    config,
+                    {"exceptions": []},
+                    simulation_result=tampered,
+                )
+                self.assertIn("simulation_replay_binding_mismatch", issue_codes(report))
+
+    def test_simulation_schema_version_rejects_float_two(self) -> None:
+        rows, config, simulation = clean_simulation()
+        simulation["schema_version"] = 2.0
 
         report = validate_corpus(
             rows,
