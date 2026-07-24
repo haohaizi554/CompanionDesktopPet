@@ -1,0 +1,71 @@
+using CompanionDesktopPet.UI;
+
+namespace CompanionDesktopPet.Tests;
+
+public sealed class BubbleCountdownControllerTests
+{
+    [Fact]
+    public void HoverPausesRemainingTimeUntilTheLastTargetLeaves()
+    {
+        var time = new ManualTimeProvider();
+        var countdown = new BubbleCountdownController(time);
+
+        countdown.Show();
+        time.Advance(TimeSpan.FromSeconds(2));
+        countdown.Enter(BubbleHoverTarget.Character);
+        Assert.Equal(BubbleCountdownState.HoverPaused, countdown.State);
+        Assert.Equal(TimeSpan.FromSeconds(3), countdown.Remaining);
+
+        countdown.Enter(BubbleHoverTarget.Bubble);
+        time.Advance(TimeSpan.FromSeconds(100));
+        countdown.Leave(BubbleHoverTarget.Character);
+        Assert.Equal(BubbleCountdownState.HoverPaused, countdown.State);
+        Assert.Equal(TimeSpan.FromSeconds(3), countdown.Remaining);
+
+        countdown.Leave(BubbleHoverTarget.Bubble);
+        Assert.Equal(BubbleCountdownState.CountingDown, countdown.State);
+        time.Advance(TimeSpan.FromSeconds(3));
+        Assert.True(countdown.TryExpire());
+        Assert.Equal(BubbleCountdownState.Hidden, countdown.State);
+    }
+
+    [Fact]
+    public void NewMessageWhileHoveredResetsToPausedFiveSeconds()
+    {
+        var time = new ManualTimeProvider();
+        var countdown = new BubbleCountdownController(time);
+        countdown.Enter(BubbleHoverTarget.Character);
+        countdown.Show();
+        time.Advance(TimeSpan.FromMinutes(1));
+        countdown.Show();
+
+        Assert.Equal(BubbleCountdownState.HoverPaused, countdown.State);
+        Assert.Equal(TimeSpan.FromSeconds(5), countdown.Remaining);
+        Assert.False(countdown.TryExpire());
+    }
+
+    [Fact]
+    public void HideAndCloseCannotBeRevivedByLeaveOrShow()
+    {
+        var time = new ManualTimeProvider();
+        var countdown = new BubbleCountdownController(time);
+        countdown.Enter(BubbleHoverTarget.Character);
+        countdown.Show();
+        countdown.Hide();
+        countdown.Leave(BubbleHoverTarget.Character);
+        Assert.Equal(BubbleCountdownState.Hidden, countdown.State);
+
+        countdown.Close();
+        countdown.Show();
+        Assert.Equal(BubbleCountdownState.Hidden, countdown.State);
+        Assert.False(countdown.TryExpire());
+    }
+
+    private sealed class ManualTimeProvider : TimeProvider
+    {
+        private long _timestamp;
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+        public override long GetTimestamp() => _timestamp;
+        public void Advance(TimeSpan duration) => _timestamp += duration.Ticks;
+    }
+}
