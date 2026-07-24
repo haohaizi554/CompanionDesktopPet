@@ -693,21 +693,44 @@ public partial class MainWindow : Window
         PetImage.ReleaseMouseCapture();
         if (!InteractionFrozen && !_dragged)
         {
-            ReactAndSpeak();
+            var clickPosition = e.GetPosition(PetImage);
+            ReactAndSpeak(ResolveClickSide(clickPosition.X, PetImage.ActualWidth));
         }
 
         _dragged = false;
         e.Handled = true;
     }
 
-    private void ReactAndSpeak()
+    internal static ClickSide ResolveClickSide(double horizontalPosition, double renderedWidth)
+    {
+        if (!double.IsFinite(horizontalPosition)
+            || !double.IsFinite(renderedWidth)
+            || renderedWidth <= 0)
+        {
+            return ClickSide.Left;
+        }
+
+        return horizontalPosition < renderedWidth / 2
+            ? ClickSide.Left
+            : ClickSide.Right;
+    }
+
+    private void ReactAndSpeak(ClickSide? clickSide = null)
     {
         if (InteractionFrozen)
         {
             return;
         }
 
-        _animation.PlayClickReaction();
+        if (clickSide is { } resolvedClickSide)
+        {
+            _animation.PlayClickReaction(resolvedClickSide);
+        }
+        else
+        {
+            _animation.PlayClickReaction();
+        }
+
         ShowEventBubble(CompanionEvent.Click);
         ScheduleNextPhrase();
     }

@@ -121,73 +121,54 @@ public sealed class AnimationControllerTests
     }
 
     [Fact]
-    public void ClickReaction_AlternatesTiltDirection()
+    public void ClickReaction_TiltsAwayFromClickedSideWhenTheSameSideRepeatsQuickly()
     {
-        RunOnStaThread(() =>
+        RunClickReactionScenario((controller, reactionRotation) =>
         {
-            var breathing = new ScaleTransform();
-            var sway = new RotateTransform();
-            var floating = new TranslateTransform();
-            var reactionScale = new ScaleTransform();
-            var reactionRotation = new RotateTransform();
-            var actionScale = new ScaleTransform();
-            var actionRotation = new RotateTransform();
-            var actionOffset = new TranslateTransform();
-            var root = new Grid
-            {
-                RenderTransform = new TransformGroup
-                {
-                    Children =
-                    {
-                        breathing,
-                        sway,
-                        floating,
-                        reactionScale,
-                        reactionRotation,
-                        actionScale,
-                        actionRotation,
-                        actionOffset
-                    }
-                }
-            };
-            var host = new Window { Content = root };
-            var controller = new AnimationController(
-                breathing,
-                sway,
-                floating,
-                reactionScale,
-                reactionRotation,
-                actionScale,
-                actionRotation,
-                actionOffset,
-                []);
-            host.Show();
-            host.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+            controller.PlayClickReaction(ClickSide.Left);
+            var firstLeftClick = SampleFor(
+                () => reactionRotation.Angle,
+                TimeSpan.FromMilliseconds(80));
+            controller.PlayClickReaction(ClickSide.Left);
+            var repeatedLeftClick = SampleFor(
+                () => reactionRotation.Angle,
+                TimeSpan.FromMilliseconds(150));
+            controller.PlayClickReaction(ClickSide.Right);
+            var rightClick = SampleFor(
+                () => reactionRotation.Angle,
+                TimeSpan.FromMilliseconds(150));
 
-            try
-            {
-                controller.PlayClickReaction();
-                var first = SampleFor(
-                    () => reactionRotation.Angle,
-                    TimeSpan.FromMilliseconds(150));
-                controller.PlayClickReaction();
-                var second = SampleFor(
-                    () => reactionRotation.Angle,
-                    TimeSpan.FromMilliseconds(150));
+            Assert.True(firstLeftClick.Max() > 0.3);
+            Assert.True(firstLeftClick.Min() >= -0.001);
+            Assert.True(repeatedLeftClick.Max() > 0.3);
+            Assert.True(repeatedLeftClick.Min() >= -0.001);
+            Assert.True(rightClick.Min() < -0.3);
+            Assert.True(rightClick.Max() <= 0.001);
+            WaitFor(
+                () => Math.Abs(reactionRotation.Angle) < 0.001,
+                TimeSpan.FromMilliseconds(500));
+            Assert.Equal(0, reactionRotation.Angle);
+        });
+    }
 
-                Assert.True(first.Min() < -0.3);
-                Assert.True(first.Max() <= 0.001);
-                Assert.True(second.Max() > 0.3);
-                Assert.True(second.Min() >= -0.001);
-                WaitFor(
-                    () => Math.Abs(reactionRotation.Angle) < 0.001,
-                    TimeSpan.FromMilliseconds(500));
-                Assert.Equal(0, reactionRotation.Angle);
-            }
-            finally
-            {
-                host.Close();
-            }
+    [Fact]
+    public void ClickReaction_WithoutClickSideUsesAStableFallback()
+    {
+        RunClickReactionScenario((controller, reactionRotation) =>
+        {
+            controller.PlayClickReaction();
+            var first = SampleFor(
+                () => reactionRotation.Angle,
+                TimeSpan.FromMilliseconds(80));
+            controller.PlayClickReaction();
+            var second = SampleFor(
+                () => reactionRotation.Angle,
+                TimeSpan.FromMilliseconds(150));
+
+            Assert.True(first.Max() > 0.3);
+            Assert.True(first.Min() >= -0.001);
+            Assert.True(second.Max() > 0.3);
+            Assert.True(second.Min() >= -0.001);
         });
     }
 
@@ -330,6 +311,61 @@ public sealed class AnimationControllerTests
                         Assert.InRange(sample.Opacity, -0.000_001, 1.000_001);
                         Assert.InRange(sample.ScaleY, 0.987_999, 1.006_001);
                     });
+            }
+            finally
+            {
+                host.Close();
+            }
+        });
+    }
+
+    private static void RunClickReactionScenario(
+        Action<AnimationController, RotateTransform> scenario)
+    {
+        RunOnStaThread(() =>
+        {
+            var breathing = new ScaleTransform();
+            var sway = new RotateTransform();
+            var floating = new TranslateTransform();
+            var reactionScale = new ScaleTransform();
+            var reactionRotation = new RotateTransform();
+            var actionScale = new ScaleTransform();
+            var actionRotation = new RotateTransform();
+            var actionOffset = new TranslateTransform();
+            var root = new Grid
+            {
+                RenderTransform = new TransformGroup
+                {
+                    Children =
+                    {
+                        breathing,
+                        sway,
+                        floating,
+                        reactionScale,
+                        reactionRotation,
+                        actionScale,
+                        actionRotation,
+                        actionOffset
+                    }
+                }
+            };
+            var host = new Window { Content = root };
+            var controller = new AnimationController(
+                breathing,
+                sway,
+                floating,
+                reactionScale,
+                reactionRotation,
+                actionScale,
+                actionRotation,
+                actionOffset,
+                []);
+            host.Show();
+            host.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+
+            try
+            {
+                scenario(controller, reactionRotation);
             }
             finally
             {

@@ -22,6 +22,22 @@ public sealed class WindowShellTests
 {
     private static readonly Lazy<StaTestHost> StaHost = new(() => new StaTestHost());
 
+    [Theory]
+    [InlineData(0, 320, ClickSide.Left)]
+    [InlineData(159.99, 320, ClickSide.Left)]
+    [InlineData(160, 320, ClickSide.Right)]
+    [InlineData(320, 320, ClickSide.Right)]
+    [InlineData(100, 0, ClickSide.Left)]
+    public void MainWindow_ClickPosition_ResolvesTheTouchedHalf(
+        double horizontalPosition,
+        double renderedWidth,
+        ClickSide expected)
+    {
+        Assert.Equal(
+            expected,
+            MainWindow.ResolveClickSide(horizontalPosition, renderedWidth));
+    }
+
     [Fact]
     public void MainWindow_ProvidesAmbientLayersAndSchedulesTheFirstGreeting()
     {

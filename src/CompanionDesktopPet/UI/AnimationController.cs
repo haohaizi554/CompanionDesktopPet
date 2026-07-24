@@ -4,6 +4,12 @@ using System.Windows.Media.Animation;
 
 namespace CompanionDesktopPet.UI;
 
+public enum ClickSide
+{
+    Left,
+    Right
+}
+
 public sealed class AnimationController
 {
     private readonly ScaleTransform breathingScale;
@@ -21,7 +27,6 @@ public sealed class AnimationController
     private readonly TranslateTransform _greetingBadgeOffset;
     private bool _started;
     private int _ambientAnimationVersion;
-    private double _nextClickTiltDirection = -1;
 
     public AnimationController(
         ScaleTransform breathingScale,
@@ -121,12 +126,18 @@ public sealed class AnimationController
         IsPaused = false;
     }
 
-    public void PlayClickReaction()
+    public void PlayClickReaction() => PlayClickReaction(ClickSide.Left);
+
+    public void PlayClickReaction(ClickSide clickSide)
     {
         ApplyReaction(reactionScale, ScaleTransform.ScaleXProperty, 1.0, 1.06);
         ApplyReaction(reactionScale, ScaleTransform.ScaleYProperty, 1.0, 0.94);
-        var targetAngle = 2.2 * _nextClickTiltDirection;
-        _nextClickTiltDirection *= -1;
+        var targetAngle = clickSide switch
+        {
+            ClickSide.Left => 2.2,
+            ClickSide.Right => -2.2,
+            _ => throw new ArgumentOutOfRangeException(nameof(clickSide))
+        };
         reactionRotation.BeginAnimation(RotateTransform.AngleProperty, null);
         reactionRotation.Angle = 0;
         ApplyReaction(reactionRotation, RotateTransform.AngleProperty, 0.0, targetAngle);
