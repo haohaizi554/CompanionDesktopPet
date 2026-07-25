@@ -1,6 +1,6 @@
 # 佳怡桌宠（CompanionDesktopPet）
 
-一个完全离线的 Windows x64 WPF 桌宠，以及配套的可审计中文角色语料系统。她不读取输入内容、剪贴板、窗口标题，也不枚举或读取用户文件名、用户目录内容，不依赖网络、数据库或在线模型。正常运行时，角色偏好、冷却历史和剧情状态保存在 `%LOCALAPPDATA%\CompanionDesktopPet`；只有用户主动启用开机自启动时，才会另在当前用户的 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 项保存桌宠自身的 EXE 路径。`--smoke-test` 发布验证使用系统临时目录中的独立状态，并在退出时清理。
+一个完全离线的 Windows x64 WPF 桌宠，以及配套的可审计中文角色语料系统。她不读取输入内容、剪贴板、窗口标题，也不枚举或读取用户文件名、用户目录内容，不依赖网络、数据库或在线模型，也没有热更新、自动更新或联网下载代码的机制；升级版本时由用户手动下载并替换 EXE。正常运行时，角色偏好、冷却历史和剧情状态保存在 `%LOCALAPPDATA%\CompanionDesktopPet`；只有用户主动启用开机自启动时，才会另在当前用户的 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 项保存桌宠自身的 EXE 路径。`--smoke-test` 发布验证使用系统临时目录中的独立状态，并在退出时清理。
 
 > 当前集成基线包含 52,132 条运行时文案：806 条 curated core 加 51,326 条由 manifest 精确批准的安全 legacy surfaces；按唯一 `semantic_group` 聚合后为 533 个语义场景。WPF 离线运行时、异步语料预热、本地 fallback、自包含单文件发布与隔离烟测也已接入。75,375 条无表头源物理数据行仍作为不可变审计证据，不会整体进入运行时。
 

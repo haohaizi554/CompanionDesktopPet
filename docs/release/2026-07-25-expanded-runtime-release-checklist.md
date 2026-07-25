@@ -176,6 +176,7 @@ dotnet test CompanionDesktopPet.sln -c Release --no-restore
 - 程序集版本直接从 tag 去掉前导 `v` 后派生；发布门禁要求 `ProductVersion=<tag version>+<GITHUB_SHA>` 精确相等。因此 `v1.1.0` 不允许继续产出显示为 `1.0.0` 的 EXE。
 - 需要本机代理时，仅用 `git -c http.proxy=http://127.0.0.1:7890 push origin <tag>` 推送小型 tag；质量门禁、EXE/ZIP 构建及 GitHub Release 资产上传均由 GitHub-hosted runner 使用短期 `GITHUB_TOKEN` 完成，不依赖本机 `gh` keyring token，也不复制一套本地上传逻辑。
 - GitHub Release 标题和说明固定为 `zh-CN`：发布亮点、下载与运行、完整性验证、离线/单 EXE/签名说明、构建来源和许可边界均使用中文。禁止 `--generate-notes` 注入英文自动说明；仅逐字保留法律文件要求的英文 `Required Notice`。
+- 当前没有热更新或自动更新通道。打包门禁必须对最终 delivery EXE 执行 `Get-AuthenticodeSignature`，并在尚未配置证书时精确要求 `Status=NotSigned`、Signer/TimeStamper 证书均为空，再把该状态写入 staging 证据与发布说明；未来接入证书后必须显式把策略升级为 `Status=Valid` 和固定主体/指纹，不能静默接受任意签名。
 
 测试全绿后，只删除已验证位于仓库内的 scratch/publish 目录，并只覆盖明确的交付 EXE：
 

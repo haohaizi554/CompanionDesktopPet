@@ -74,6 +74,7 @@
 | smoke 默认超时测试允许 30–120 秒漂移 | **已修复（本轮）** | 可调用策略与行为合同都要求默认值精确等于 30 秒；显式值仍受 1–120 秒参数范围约束。 |
 | 根目录 `LICENSE` 中的 Markdown 被 GitHub 当纯文本展示 | **已修复（本轮）** | 仓库源文件改为 GitHub 可渲染的 `LICENSE.md`，官方原文 SHA-256 保持不变；CI 明确拒绝重新出现无扩展名源文件，并在 ZIP/Release 外层映射回惯用资产名 `LICENSE`。 |
 | GitHub Release 自动说明可能混入英文 | **已修复（本轮）** | 流水线移除 `--generate-notes`，使用带稳定 `zh-CN` 标记的中文标题和六段中文发布说明，并在发布后回读标题、段落、tag、SHA、版本与 ProductVersion；仅法律要求的 `Required Notice` 保留英文原文。 |
+| 离线 EXE 是否存在热更新、签名状态是否只是文档声明 | **已修复（本轮）** | 项目明确不含热更新、自动更新或联网下载代码机制。发布门禁对最终 delivery EXE 实际执行 `Get-AuthenticodeSignature`；当前策略精确要求 `NotSigned` 且 Signer/TimeStamper 证书均为空，并把结果写入证据与中文 Release。未来签名时必须显式切换到 `Valid` 和固定证书身份策略。 |
 
 ## 许可边界
 

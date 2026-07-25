@@ -528,11 +528,19 @@ jobs:
           if ($productVersion -cne $expectedProductVersion) {
             throw "Published EXE ProductVersion is not derived from the ref and commit. Expected=$expectedProductVersion; Actual=$productVersion"
           }
+          $authenticode = Get-AuthenticodeSignature -FilePath $deliveryExe
+          $authenticodeStatus = [string]$authenticode.Status
+          if ($authenticodeStatus -cne 'NotSigned' -or
+              $null -ne $authenticode.SignerCertificate -or
+              $null -ne $authenticode.TimeStamperCertificate) {
+            throw "Unsigned-release policy mismatch. Expected=NotSigned with no certificates; Actual=$authenticodeStatus"
+          }
 
           $metadata = @(
             @{ Pattern = '(?m)^大小：.*$'; Value = "大小：$($exe.Length.ToString('N0', [Globalization.CultureInfo]::InvariantCulture)) 字节" }
             @{ Pattern = '(?m)^SHA-256：.*$'; Value = "SHA-256：$exeSha256" }
             @{ Pattern = '(?m)^built-from：.*$'; Value = "built-from：$gitSha" }
+            @{ Pattern = '(?m)^Authenticode：.*$'; Value = "Authenticode：$authenticodeStatus" }
           )
           foreach ($entry in $metadata) {
             if ($readmeText -notmatch $entry.Pattern) {
@@ -571,6 +579,9 @@ jobs:
             "PackageVersion=$env:PACKAGE_VERSION"
             "ProductVersion=$productVersion"
             "BuiltFrom=$gitSha"
+            "AuthenticodeStatus=$authenticodeStatus"
+            'AuthenticodeSigner=<none>'
+            'AuthenticodeTimeStamper=<none>'
           ) | Set-Content -LiteralPath 'release-work/evidence/staging.txt' -Encoding utf8
 
       - name: Verify publish boundary and real WPF smoke test
@@ -813,7 +824,9 @@ jobs:
           }
 
           $releaseTitle = "佳怡桌宠 $tag（Windows x64）"
-          $descriptionMarker = '<!-- companion-release-description:zh-CN:v1 -->'
+          $descriptionMarker = '<!-- companion-release-description:zh-CN:v2 -->'
+          $noUpdateClaim = '应用不包含热更新、自动更新或联网下载代码的机制'
+          $unsignedClaim = '构建门禁已执行 Get-AuthenticodeSignature，并确认当前 EXE 状态为 NotSigned、无签名证书和时间戳证书'
           $requiredChineseHeadings = @(
             '## 发布亮点'
             '## 下载与运行'
@@ -874,8 +887,9 @@ jobs:
           ## 离线、单 EXE 与签名说明
 
           - 应用完全离线运行，不读取输入内容、剪贴板或窗口标题，也不枚举用户目录。
+          - $noUpdateClaim；升级时需要由用户手动下载新版本并替换 EXE。
           - Jiayi-Desktop-Pet.exe 是 self-contained 的 Windows x64 单 EXE，旁边不需要应用 DLL、JSON 或 PDB。
-          - 当前 EXE 未做 Authenticode 代码签名；从网络下载时，Windows SmartScreen 或安全软件可能显示信誉提示。
+          - $unsignedClaim；从网络下载时，Windows SmartScreen 或安全软件可能显示信誉提示。
 
           ## 构建来源
 
@@ -1003,6 +1017,8 @@ jobs:
           })
           if (-not $publishedBody.Contains($descriptionMarker) -or
               $missingChineseHeadings.Count -ne 0 -or
+              -not $publishedBody.Contains($noUpdateClaim) -or
+              -not $publishedBody.Contains($unsignedClaim) -or
               -not $publishedBody.Contains("标签：$tag") -or
               -not $publishedBody.Contains("提交 SHA：$env:GITHUB_SHA") -or
               -not $publishedBody.Contains("包版本：$env:PACKAGE_VERSION") -or
