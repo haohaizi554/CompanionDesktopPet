@@ -148,7 +148,7 @@ python -m unittest tests.test_selector -v
 
 ## 11. 上下文与未来信号
 
-当前可信信号来自本地时区日期、周末、时段、季节、应用启动、节日、纪念日、月边界和长静默。`ide_foreground`、`active_minutes`、`idle_return`、`fullscreen` 是未来信号：没有可靠采集时必须为 `None`，不能根据窗口标题、文件名、输入内容或主观推断伪造上下文。只有明确为真/假时才生成对应受控 token。
+当前可信信号来自本地时区日期、周末、时段、季节、应用启动、节日、纪念日、月边界和长静默。`ide_foreground`、`active_minutes`、`idle_return`、`fullscreen` 是未来信号：没有可靠采集时必须为 `None`，不能根据窗口标题、用户文件名、输入内容或主观推断伪造上下文。只有明确为真/假时才生成对应受控 token。
 
 ## 12. 历史与确定性
 
@@ -231,7 +231,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
 
 ## 19. 桌宠交互与隐私
 
-保留左键点击爱心、拖拽时倾斜和松手落地回弹；自然闭眼图层叠加式眨眼不压缩整张人物图。启动后会在本地显示一次“嗨♡”，右键菜单也提供 `打个招呼♡`；这两种打招呼都只使用固定的本地 UI，不从语料生成。`暂停动画` 只暂停并复位待机动作、自动眨眼和问候，点击爱心、拖动/落地和台词仍可使用。仍不提供 wink 或假手挥手，没有旧 `GetGreeting`，也没有语料驱动的 `AnimationCue`/`PlayAmbientGesture`。窗口先显示，记忆、语料和场景在后台异步预热；预热期间启动/点击使用不读取个人信息的固定本地 fallback，自动触发保持静默，完整烟测必须等到真实语料回复。桌宠完全离线，不读取键盘输入内容、剪贴板、文件名或窗口标题；本机状态写入 `%LOCALAPPDATA%\CompanionDesktopPet`。身份彩蛋仅可按精确 editorial manifest 审批进入 `PersonaCorpus`；应用启动自校验该 exact manifest，并由 Python validator 与程序集测试阻止未审批内容进入运行时。
+保留左键点击爱心、拖拽时倾斜和松手落地回弹；自然闭眼图层叠加式眨眼不压缩整张人物图。启动后会在本地显示一次“嗨♡”，右键菜单也提供 `打个招呼♡`；这两种打招呼都只使用固定的本地 UI，不从语料生成。`暂停动画` 只暂停并复位待机动作、自动眨眼和问候，点击爱心、拖动/落地和台词仍可使用。仍不提供 wink 或假手挥手，没有旧 `GetGreeting`，也没有语料驱动的 `AnimationCue`/`PlayAmbientGesture`。窗口先显示，记忆、语料和场景在后台异步预热；预热期间启动/点击使用不读取个人信息的固定本地 fallback，自动触发保持静默，完整烟测必须等到真实语料回复。桌宠完全离线，不读取键盘输入内容、剪贴板或窗口标题，也不枚举或读取用户文件名、用户目录内容。正常运行时，角色偏好、冷却历史和剧情状态保存在 `%LOCALAPPDATA%\CompanionDesktopPet`；只有用户主动启用开机自启动时，才会另在当前用户 Run 注册表项保存桌宠自身 EXE 路径；`--smoke-test` 使用并清理系统临时目录中的隔离状态。身份彩蛋仅可按精确 editorial manifest 审批进入 `PersonaCorpus`；应用启动自校验该 exact manifest，并由 Python validator 与程序集测试阻止未审批内容进入运行时。
 
 ## 20. 限制与发布政策
 
@@ -252,8 +252,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
 | `data/optimized/persona-surface-manifest.tsv` | `bcf9c97be0e4b1d7b7db11fcb46f44de17ef0ade6cb2e79d69f8af69bdbc637d` |
 | `reports/simulation-report.md` | `09d67f3b69fb97f871337fc6e2a6b5a4a4c9897c680af3551796091764e090e2` |
 | `reports/simulation-events.json` | `5fddf3a0c05705da9ff97f7a1b339b664ee8dbcf1e81318e09267e815bc1d9da` |
-| `outputs/CompanionDesktopPet/佳怡桌宠.exe` | `b79bf57a94d63387b6d8db288e53f64b06af32a3aa4881e7c069634839442a82` |
+| 历史 `v1.0.0` 的 `outputs/CompanionDesktopPet/佳怡桌宠.exe` | `b79bf57a94d63387b6d8db288e53f64b06af32a3aa4881e7c069634839442a82` |
 
-最终 EXE 从标签 `v1.0.0` 指向的提交 `ad5aa867a06d84d64fc4399cb4d258becce1b8ab` 使用 .NET SDK `10.0.301` 构建，`ProductVersion=1.0.0+ad5aa867a06d84d64fc4399cb4d258becce1b8ab`，大小为 `80,299,750` 字节。云端 publish、delivery、isolated 以及经代理回传后重新下载的本地交付副本 SHA-256 全部等于上表值；加强后的验证器会以 `-Force` 枚举并拒绝隐藏/系统 sidecar，云端 smoke PID `2280` 与最终本地复核 smoke PID `13700` 均自行以退出码 0 结束，随后 `publish/` 与 `outputs/verify/` 已清理。
+上表 EXE 是历史 `v1.0.0` 实证：它从标签指向的提交 `ad5aa867a06d84d64fc4399cb4d258becce1b8ab` 使用 .NET SDK `10.0.301` 构建，`ProductVersion=1.0.0+ad5aa867a06d84d64fc4399cb4d258becce1b8ab`，大小为 `80,299,750` 字节。云端 publish、delivery、isolated 以及经代理回传后重新下载的本地交付副本 SHA-256 全部等于上表值；加强后的验证器会以 `-Force` 枚举并拒绝隐藏/系统 sidecar，云端 smoke PID `2280` 与最终本地复核 smoke PID `13700` 均自行以退出码 0 结束，随后 `publish/` 与 `outputs/verify/` 已清理。该记录不能替代 v1.1.0 最终提交上的重新构建、测试、哈希和 Release 回读。
 
-发布表中任何哈希占位都必须先清零；当前表无未填写占位。
+发布表中任何哈希占位都必须先清零；当前表中的已填写 EXE 证据只属于 v1.0.0。v1.1.0 的 EXE、资产与校验和必须等待最终标签流水线产出，不能预填或沿用旧值。

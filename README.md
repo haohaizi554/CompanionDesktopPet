@@ -1,6 +1,6 @@
 # 佳怡桌宠（CompanionDesktopPet）
 
-一个完全离线的 Windows x64 WPF 桌宠，以及配套的可审计中文角色语料系统。她不读取输入内容、剪贴板、文件名或窗口标题，也不依赖网络、数据库或在线模型。
+一个完全离线的 Windows x64 WPF 桌宠，以及配套的可审计中文角色语料系统。她不读取输入内容、剪贴板、窗口标题，也不枚举或读取用户文件名、用户目录内容，不依赖网络、数据库或在线模型。正常运行时，角色偏好、冷却历史和剧情状态保存在 `%LOCALAPPDATA%\CompanionDesktopPet`；只有用户主动启用开机自启动时，才会另在当前用户的 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 项保存桌宠自身的 EXE 路径。`--smoke-test` 发布验证使用系统临时目录中的独立状态，并在退出时清理。
 
 > 当前集成基线包含 52,132 条运行时文案：806 条 curated core 加 51,326 条由 manifest 精确批准的安全 legacy surfaces；按唯一 `semantic_group` 聚合后为 533 个语义场景。WPF 离线运行时、异步语料预热、本地 fallback、自包含单文件发布与隔离烟测也已接入。75,375 条无表头源物理数据行仍作为不可变审计证据，不会整体进入运行时。
 
@@ -17,7 +17,7 @@ outputs/CompanionDesktopPet/使用说明.txt
 
 `佳怡桌宠.exe` 是 `win-x64` 自包含单文件应用，运行时不需要另行安装 .NET，也不依赖旁置或外部应用 DLL、JSON、PDB 等运行时 sidecar。“自包含单 EXE”不表示进程绝不加载 DLL；作为 Windows 桌面应用，它仍会正常使用操作系统提供的系统 DLL 与系统组件。
 
-当前交付来自 GitHub Release [v1.0.0](https://github.com/haohaizi554/CompanionDesktopPet/releases/tag/v1.0.0)：EXE 从提交 `ad5aa867a06d84d64fc4399cb4d258becce1b8ab` 使用 .NET SDK `10.0.301` 构建，`ProductVersion=1.0.0+ad5aa867a06d84d64fc4399cb4d258becce1b8ab`，大小为 `80,299,750` 字节，SHA-256 为 `b79bf57a94d63387b6d8db288e53f64b06af32a3aa4881e7c069634839442a82`。publish、交付与隔离烟测副本的哈希一致，真实 WPF smoke 自行以退出码 0 结束。GitHub 会清洗非 ASCII 附件名，因此外层资产使用 `Jiayi-Desktop-Pet.exe`、`Jiayi-Desktop-Pet-README-zh-CN.txt` 和 `Jiayi-Desktop-Pet-win-x64.zip`；ZIP 内仍保留 `佳怡桌宠.exe` 与 `使用说明.txt`。完整证据见[发布与清理清单](docs/release/2026-07-25-expanded-runtime-release-checklist.md)。当前 EXE 未做 Authenticode 代码签名，从网络下载时可能出现 Windows SmartScreen/安全软件信誉提示。
+当前公开交付仍是历史 Release [v1.0.0](https://github.com/haohaizi554/CompanionDesktopPet/releases/tag/v1.0.0)：EXE 从提交 `ad5aa867a06d84d64fc4399cb4d258becce1b8ab` 使用 .NET SDK `10.0.301` 构建，`ProductVersion=1.0.0+ad5aa867a06d84d64fc4399cb4d258becce1b8ab`，大小为 `80,299,750` 字节，SHA-256 为 `b79bf57a94d63387b6d8db288e53f64b06af32a3aa4881e7c069634839442a82`。publish、交付与隔离烟测副本的哈希一致，真实 WPF smoke 自行以退出码 0 结束。GitHub 会清洗非 ASCII 附件名，因此外层资产使用 `Jiayi-Desktop-Pet.exe`、`Jiayi-Desktop-Pet-README-zh-CN.txt` 和 `Jiayi-Desktop-Pet-win-x64.zip`；ZIP 内仍保留 `佳怡桌宠.exe` 与 `使用说明.txt`。完整证据见[发布与清理清单](docs/release/2026-07-25-expanded-runtime-release-checklist.md)。该 v1.0.0 EXE 未做 Authenticode 代码签名，从网络下载时可能出现 Windows SmartScreen/安全软件信誉提示。当前源码中的后续修复只有在新的版本标签完成全部门禁、生成新哈希并回读 GitHub Release 后，才属于新的公开交付。
 
 ## 体验与操作
 
@@ -26,6 +26,7 @@ outputs/CompanionDesktopPet/使用说明.txt
 - 气泡与人物之间保持 30 DIP 的视觉距离；鼠标停在人物或气泡上时，只暂停当前气泡剩余的消失倒计时，移开后从剩余时间继续。
 - 右键人物：打开卡哇伊风格控制面板，可说句话、`打个招呼♡`、暂停/继续动画、调整大小、切换置顶、设置开机自启动、恢复位置、藏到托盘或退出。
 - 托盘：双击图标切换显示/隐藏；右键菜单可显示/隐藏、说句话、暂停/继续、切换开机自启动或退出。
+- 当前源码已支持 Windows 高对比度模式：气泡与控制面板会采用系统颜色和无阴影样式，关闭后恢复卡哇伊主题。此能力不在上面的历史 v1.0.0 EXE 中；必须等 v1.1.0 完成最终构建与 Release 实证后，才可作为公开交付能力宣称。
 
 暂停会复位并暂停待机动作、自动眨眼和问候；点击爱心与左右倾斜、拖动/落地、手动说话和托盘操作仍可使用。
 
@@ -44,7 +45,7 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run
 
 它不会写入系统级启动项。若勾选后移动或重命名了 EXE，请先关闭“开机自启动”，再重新开启一次，让保存的路径更新为新位置。
 
-本机偏好、冷却历史和微剧情进度保存在 `%LOCALAPPDATA%\CompanionDesktopPet`。
+正常运行时，本机偏好、冷却历史和微剧情进度保存在 `%LOCALAPPDATA%\CompanionDesktopPet`；开机自启动的当前用户注册表项与发布烟测的临时目录是上文已经明确说明的两个独立边界。
 
 ## 已验证能力
 
@@ -80,7 +81,7 @@ outputs/CompanionDesktopPet/   最终交付
 ## 环境
 
 - Windows x64
-- .NET 9 SDK
+- .NET SDK 9.0.301（由根目录 `global.json` 精确锁定）
 - Python 3.11 或更高版本（只使用标准库）
 
 运行最终 EXE 不需要 Python 或 .NET SDK；这些工具只用于源码验证与重新构建。
@@ -115,6 +116,24 @@ dotnet test CompanionDesktopPet.sln -c Release --no-restore
 ```
 
 校验器合格输出必须是 `Validation: 0 hard errors`。扩展运行时当前只允许一条描述原始库存结构的 `surface_inventory_observation` warning；出现任何其他 warning 都阻断发布。模拟必须为零硬约束违规；.NET 门禁必须显示实际执行的非零测试数，不能只检查 `dotnet test` 的退出码。
+
+## 自动化 CI/CD
+
+`.github/workflows/ci-cd.yml` 会在每个 PR 和推送到 `main` 时执行完整 Python、语料契约、模拟证据和 .NET Release 门禁。手动运行 `workflow_dispatch` 会在门禁通过后生成可下载的 Windows 发布 artifact，但不会创建公开 Release。
+
+正式发布只接受位于 `origin/main` 上、形如 `v1.1.0` 或 `v1.1.0-rc.1` 的全新 annotated tag。流水线从 tag 派生程序集版本，例如 `v1.1.0` 必须生成 `ProductVersion=1.1.0+<40 位提交 SHA>`；随后验证单 EXE、隔离 WPF smoke、法律文件和 SHA-256，再由 GitHub-hosted runner 使用仓库内置 `GITHUB_TOKEN` 创建新的 GitHub Release。这样无需把本机失效的 `gh` keyring 登录用于大文件上传。
+
+在干净且已推送的 `main` 上可用下面的入口发布。若本机访问 GitHub 需要代理，只让这一次 tag push 经过代理；真正的 EXE/ZIP 上传由云端流水线完成：
+
+```powershell
+git fetch origin
+git switch main
+git pull --ff-only origin main
+git tag -a v1.1.0 -m "佳怡桌宠 v1.1.0"
+git -c http.proxy=http://127.0.0.1:7890 push origin v1.1.0
+```
+
+代理端口不同则替换 `7890`。发布入口要求本次 push 是新建且非强推的 annotated tag；普通 push 也不能移动远端已有 tag。已有 GitHub Release 的八项资产保持不可变：同一原始运行的失败重试只有在候选资产逐字节完全相同时才作为无操作成功，任何名称或哈希差异都会失败，流水线不会删除、覆盖或编辑旧资产。不要删除后重建版本 tag；如需在 GitHub 侧禁止这种历史复用，应同时配置受保护 tag/ruleset，新版本始终使用新 tag。
 
 ## 干净发布与隔离烟测
 

@@ -58,9 +58,32 @@ jobs:
           }
 
       - name: Set up .NET
+        id: setup-dotnet
         uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
-          dotnet-version: "9.0.x"
+          global-json-file: global.json
+
+      - name: Verify committed .NET SDK
+        env:
+          SELECTED_DOTNET_SDK: ${{ steps.setup-dotnet.outputs.dotnet-version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $selectedSdk = $env:SELECTED_DOTNET_SDK.Trim()
+          $sdkContract = Get-Content -LiteralPath 'global.json' -Raw -Encoding utf8 |
+            ConvertFrom-Json
+          $expectedSdk = $sdkContract.sdk.version
+          if ($expectedSdk -notmatch '^9\.0\.\d+$' -or
+              $sdkContract.sdk.rollForward -cne 'disable' -or
+              $sdkContract.sdk.allowPrerelease -ne $false) {
+            throw 'Committed global.json must pin one stable .NET 9 SDK with rollForward=disable.'
+          }
+          $actualSdk = ((& dotnet --version 2>&1) -join "`n").Trim()
+          if ($LASTEXITCODE -ne 0 -or
+              $selectedSdk -cne $expectedSdk -or
+              $actualSdk -cne $expectedSdk) {
+            throw "The active .NET SDK differs from the committed contract: expected=$expectedSdk selected=$selectedSdk actual=$actualSdk"
+          }
+          Write-Output "Verified committed .NET SDK $actualSdk for this job."
 
       - name: Record toolchain and committed evidence
         run: |
@@ -89,6 +112,14 @@ jobs:
             "SimulationEventsSHA256=$((Get-FileHash -LiteralPath $trackedSimulation -Algorithm SHA256).Hash.ToLowerInvariant())"
           ) | Set-Content -LiteralPath (Join-Path $evidence 'environment.txt') -Encoding utf8
           & dotnet --info 2>&1 | Set-Content -LiteralPath (Join-Path $evidence 'dotnet-info.txt') -Encoding utf8
+
+      - name: Verify release packaging contract
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $log = Join-Path $env:GITHUB_WORKSPACE 'ci-evidence/release-packaging-contract.txt'
+          $contract = Join-Path $env:GITHUB_WORKSPACE 'tests/Release-Packaging.Contract.ps1'
+          $output = @(& $contract 2>&1)
+          $output | Tee-Object -FilePath $log
 
       - name: Verify licensing contract
         run: |
@@ -319,17 +350,97 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: read
+    outputs:
+      release_artifact_name: ${{ steps.release_artifact.outputs.name }}
 
     steps:
       - name: Check out repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Set up .NET
+        id: setup-dotnet
         uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
-          dotnet-version: "9.0.x"
+          global-json-file: global.json
+
+      - name: Require a release tag from main
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          TAG_PUSH_CREATED: ${{ github.event.created }}
+          TAG_PUSH_FORCED: ${{ github.event.forced }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = $env:GITHUB_REF_NAME
+          if ($env:GITHUB_EVENT_NAME -eq 'push' -and
+              ($env:TAG_PUSH_CREATED -cne 'true' -or $env:TAG_PUSH_FORCED -cne 'false')) {
+            throw "Release tags must be brand-new, non-forced tag pushes: tag=$tag created=$env:TAG_PUSH_CREATED forced=$env:TAG_PUSH_FORCED"
+          }
+
+          Import-Module -Name (Join-Path $env:GITHUB_WORKSPACE 'scripts/Release-Packaging.Core.psm1') -Force
+          $packageVersion = ConvertFrom-ReleaseTag -Tag $tag
+
+          $tagRef = "refs/tags/$tag"
+          $tagObjectType = ((& git cat-file -t $tagRef 2>&1) -join "`n").Trim()
+          if ($LASTEXITCODE -ne 0 -or $tagObjectType -cne 'tag') {
+            throw "Release tag must be an annotated tag: $tag"
+          }
+
+          $tagCommit = ((& git rev-parse "$tagRef^{commit}" 2>&1) -join "`n").Trim()
+          if ($LASTEXITCODE -ne 0 -or $tagCommit -notmatch '^[a-f0-9]{40}$') {
+            throw "Could not resolve release tag commit: $tag"
+          }
+          if ($tagCommit -cne $env:GITHUB_SHA) {
+            throw "Checked-out commit differs from release tag: tag=$tagCommit checkout=$env:GITHUB_SHA"
+          }
+
+          & git merge-base --is-ancestor $tagCommit 'refs/remotes/origin/main'
+          if ($LASTEXITCODE -ne 0) {
+            throw "Release tag $tag does not point to a commit contained in origin/main."
+          }
+          Write-Output "Release source accepted: $tag -> $tagCommit (origin/main), package version $packageVersion."
+
+      - name: Verify committed .NET SDK
+        env:
+          SELECTED_DOTNET_SDK: ${{ steps.setup-dotnet.outputs.dotnet-version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $selectedSdk = $env:SELECTED_DOTNET_SDK.Trim()
+          $sdkContract = Get-Content -LiteralPath 'global.json' -Raw -Encoding utf8 |
+            ConvertFrom-Json
+          $expectedSdk = $sdkContract.sdk.version
+          if ($expectedSdk -notmatch '^9\.0\.\d+$' -or
+              $sdkContract.sdk.rollForward -cne 'disable' -or
+              $sdkContract.sdk.allowPrerelease -ne $false) {
+            throw 'Committed global.json must pin one stable .NET 9 SDK with rollForward=disable.'
+          }
+          $actualSdk = ((& dotnet --version 2>&1) -join "`n").Trim()
+          if ($LASTEXITCODE -ne 0 -or
+              $selectedSdk -cne $expectedSdk -or
+              $actualSdk -cne $expectedSdk) {
+            throw "The active .NET SDK differs from the committed contract: expected=$expectedSdk selected=$selectedSdk actual=$actualSdk"
+          }
+          Write-Output "Verified committed .NET SDK $actualSdk for this job."
+
+      - name: Resolve package version from ref
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_REF -like 'refs/tags/*') {
+            Import-Module -Name (Join-Path $env:GITHUB_WORKSPACE 'scripts/Release-Packaging.Core.psm1') -Force
+            $packageVersion = ConvertFrom-ReleaseTag -Tag $env:GITHUB_REF_NAME
+          }
+          else {
+            $packageVersion = "0.0.0-ci.$env:GITHUB_RUN_NUMBER.$env:GITHUB_RUN_ATTEMPT"
+          }
+
+          if ($packageVersion -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$') {
+            throw "Ref does not resolve to a supported package version: $packageVersion"
+          }
+          "PACKAGE_VERSION=$packageVersion" |
+            Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
+          Write-Output "Package version: $packageVersion"
 
       - name: Initialize clean release directories
         run: |
@@ -379,6 +490,7 @@ jobs:
             -p:DebugType=None `
             -p:DebugSymbols=false `
             -p:ContinuousIntegrationBuild=true `
+            -p:Version=$env:PACKAGE_VERSION `
             -p:SourceRevisionId=$env:GITHUB_SHA `
             -o $publishDir 2>&1)
           $exitCode = $LASTEXITCODE
@@ -405,9 +517,9 @@ jobs:
             throw "GITHUB_SHA is not a full Git commit SHA: $gitSha"
           }
           $productVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($deliveryExe).ProductVersion
-          if ([string]::IsNullOrWhiteSpace($productVersion) -or
-              $productVersion.IndexOf($gitSha, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
-            throw "Published EXE ProductVersion does not contain GITHUB_SHA. ProductVersion=$productVersion; GITHUB_SHA=$gitSha"
+          $expectedProductVersion = "$env:PACKAGE_VERSION+$gitSha"
+          if ($productVersion -cne $expectedProductVersion) {
+            throw "Published EXE ProductVersion is not derived from the ref and commit. Expected=$expectedProductVersion; Actual=$productVersion"
           }
 
           $metadata = @(
@@ -449,6 +561,7 @@ jobs:
             "DeliveryExe=$deliveryExe"
             "DeliveryExeBytes=$($exe.Length)"
             "DeliveryExeSHA256=$exeSha256"
+            "PackageVersion=$env:PACKAGE_VERSION"
             "ProductVersion=$productVersion"
             "BuiltFrom=$gitSha"
           ) | Set-Content -LiteralPath 'release-work/evidence/staging.txt' -Encoding utf8
@@ -482,6 +595,7 @@ jobs:
       - name: Assemble checksummed release assets
         run: |
           $ErrorActionPreference = 'Stop'
+          Import-Module -Name (Join-Path $env:GITHUB_WORKSPACE 'scripts/Release-Packaging.Core.psm1') -Force
           $bundle = Join-Path $env:GITHUB_WORKSPACE 'release-work/bundle'
           $distribution = Join-Path $env:GITHUB_WORKSPACE 'release-work/distribution'
           $zipVerification = Join-Path $env:GITHUB_WORKSPACE 'release-work/zip-verification'
@@ -505,8 +619,10 @@ jobs:
           $releaseReadmeName = 'Jiayi-Desktop-Pet-README-zh-CN.txt'
           $zipName = 'Jiayi-Desktop-Pet-win-x64.zip'
           $zipPath = Join-Path $distribution $zipName
-          $bundlePaths = @($bundleNames | ForEach-Object { Join-Path $bundle $_ })
-          Compress-Archive -LiteralPath $bundlePaths -DestinationPath $zipPath -CompressionLevel Optimal -Force
+          New-DeterministicReleaseZip `
+            -SourceDirectory $bundle `
+            -EntryNames $bundleNames `
+            -DestinationPath $zipPath
 
           New-Item -ItemType Directory -Path $zipVerification -Force | Out-Null
           Expand-Archive -LiteralPath $zipPath -DestinationPath $zipVerification -Force
@@ -566,6 +682,7 @@ jobs:
           @(
             "Ref=$env:GITHUB_REF"
             "Commit=$env:GITHUB_SHA"
+            "PackageVersion=$env:PACKAGE_VERSION"
             "Run=$env:GITHUB_RUN_ID/$env:GITHUB_RUN_ATTEMPT"
             "DotNetSdk=$(& dotnet --version 2>&1)"
             $actualNames | ForEach-Object {
@@ -577,10 +694,18 @@ jobs:
           $checksumLines | ForEach-Object { '- `' + $_ + '`' } |
             Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8
 
+      - name: Select release artifact name
+        id: release_artifact
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $artifactName = "companion-desktop-pet-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          "name=$artifactName" |
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
+
       - name: Upload release assets
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: companion-desktop-pet-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ steps.release_artifact.outputs.name }}
           path: release-work/distribution
           if-no-files-found: error
           compression-level: 0
@@ -597,7 +722,7 @@ jobs:
 
   github-release:
     name: Publish GitHub Release
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: package
     runs-on: windows-latest
     timeout-minutes: 10
@@ -608,7 +733,7 @@ jobs:
       - name: Download verified release assets
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: companion-desktop-pet-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ needs.package.outputs.release_artifact_name }}
           path: release-assets
 
       - name: Verify downloaded checksums
@@ -659,7 +784,7 @@ jobs:
             throw "Checksum coverage does not exactly match uploaded assets: $($actualChecksumNames -join ', ')"
           }
 
-      - name: Create or refresh tag release
+      - name: Create immutable tag release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -705,44 +830,55 @@ jobs:
           "@.Trim()
           $bodyPath = Join-Path $env:RUNNER_TEMP 'companion-release-body.md'
 
-          & gh release view $tag --repo $repository *> $null
-          $releaseExists = $LASTEXITCODE -eq 0
+          $releaseLookupOutput = @(& gh api "repos/$repository/releases/tags/$encodedTag" 2>&1)
+          $releaseLookupExitCode = $LASTEXITCODE
+          $releaseLookupText = $releaseLookupOutput -join "`n"
+          $releaseExists = $releaseLookupExitCode -eq 0
+          if (-not $releaseExists -and $releaseLookupText -notmatch '(?i)HTTP 404') {
+            throw "Could not determine whether GitHub Release $tag exists: $releaseLookupText"
+          }
+
           if ($releaseExists) {
-            # Older runs used non-ASCII outer asset names which GitHub
-            # normalized. Remove only those three known legacy names before
-            # enforcing the exact portable eight-asset contract.
-            $legacySanitizedNames = @('-win-x64.zip', 'default.exe', 'default.txt')
-            $releaseMetadataOutput = @(& gh api "repos/$repository/releases/tags/$tag" 2>&1)
-            if ($LASTEXITCODE -ne 0) {
-              throw "Could not inspect existing GitHub Release assets for $tag."
+            $releaseMetadata = $releaseLookupText | ConvertFrom-Json
+            $existingAssetNames = @(
+              @($releaseMetadata.assets) |
+                ForEach-Object { $_.name } |
+                Sort-Object
+            )
+            $expectedAssetNames = @($assetNames | Sort-Object)
+            if (($existingAssetNames -join "`n") -cne ($expectedAssetNames -join "`n")) {
+              throw "Existing GitHub Release $tag has a different asset manifest and is immutable: $($existingAssetNames -join ', ')"
             }
-            $releaseMetadata = ($releaseMetadataOutput -join "`n") | ConvertFrom-Json
-            foreach ($asset in @($releaseMetadata.assets)) {
-              if ($legacySanitizedNames -ccontains $asset.name) {
-                & gh api --method DELETE "repos/$repository/releases/assets/$($asset.id)"
-                if ($LASTEXITCODE -ne 0) {
-                  throw "Could not delete legacy sanitized Release asset: $($asset.name)"
-                }
+
+            $existingAssetDirectory = Join-Path $env:RUNNER_TEMP 'existing-companion-release-assets'
+            if (Test-Path -LiteralPath $existingAssetDirectory) {
+              Remove-Item -LiteralPath $existingAssetDirectory -Recurse -Force
+            }
+            New-Item -ItemType Directory -Path $existingAssetDirectory | Out-Null
+            & gh release download $tag --repo $repository --dir $existingAssetDirectory
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not download existing immutable GitHub Release assets for $tag."
+            }
+
+            $downloadedDirectories = @(Get-ChildItem -LiteralPath $existingAssetDirectory -Directory -Force -Recurse)
+            $downloadedAssetNames = @(
+              Get-ChildItem -LiteralPath $existingAssetDirectory -File -Force |
+                Select-Object -ExpandProperty Name |
+                Sort-Object
+            )
+            if ($downloadedDirectories.Count -ne 0 -or
+                ($downloadedAssetNames -join "`n") -cne ($expectedAssetNames -join "`n")) {
+              throw "Downloaded existing GitHub Release $tag does not have the exact immutable asset manifest."
+            }
+
+            foreach ($assetName in $assetNames) {
+              $candidateHash = (Get-FileHash -LiteralPath (Join-Path 'release-assets' $assetName) -Algorithm SHA256).Hash
+              $existingHash = (Get-FileHash -LiteralPath (Join-Path $existingAssetDirectory $assetName) -Algorithm SHA256).Hash
+              if ($existingHash -cne $candidateHash) {
+                throw "Existing GitHub Release $tag asset differs from this build and cannot be replaced: $assetName"
               }
             }
-
-            $existingBodyOutput = @(& gh release view $tag --repo $repository --json body --jq '.body' 2>&1)
-            if ($LASTEXITCODE -ne 0) {
-              throw "Could not read existing GitHub Release body for $tag."
-            }
-            $existingBody = $existingBodyOutput -join "`n"
-            $managedPattern = '(?s)\A\s*<!-- release-legal-notice:start -->.*?<!-- release-legal-notice:end -->\s*'
-            $preservedBody = [Regex]::Replace($existingBody, $managedPattern, '').TrimStart()
-            $completeBody = $legalPreamble
-            if (-not [string]::IsNullOrWhiteSpace($preservedBody)) {
-              $completeBody += "`n`n$preservedBody"
-            }
-            [IO.File]::WriteAllText($bodyPath, $completeBody + "`n", [Text.UTF8Encoding]::new($false))
-
-            & gh release upload $tag @assets --clobber --repo $repository
-            if ($LASTEXITCODE -eq 0) {
-              & gh release edit $tag --notes-file $bodyPath --repo $repository
-            }
+            Write-Output "Existing GitHub Release $tag already has the exact immutable assets, including SHA256SUMS.txt; no mutation performed."
           }
           else {
             [IO.File]::WriteAllText($bodyPath, $legalPreamble + "`n", [Text.UTF8Encoding]::new($false))
@@ -752,9 +888,9 @@ jobs:
               --notes-file $bodyPath `
               --title $tag `
               --repo $repository
-          }
-          if ($LASTEXITCODE -ne 0) {
-            throw "GitHub Release publication failed with exit code $LASTEXITCODE."
+            if ($LASTEXITCODE -ne 0) {
+              throw "GitHub Release publication failed with exit code $LASTEXITCODE."
+            }
           }
 
           $publishedAssetNames = @(

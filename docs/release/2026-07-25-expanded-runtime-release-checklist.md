@@ -1,9 +1,9 @@
 # Expanded Runtime 发布与清理清单
 
 日期：2026-07-25
-状态：语料/仿真、单 EXE、CI/CD 与 `v1.0.0` GitHub Release 证据均已完成
+状态：语料/仿真与 `v1.0.0` 历史 Release 证据已完成；`v1.1.0` 的最终测试、单 EXE、哈希、资产上传与 Release 回读仍待目标标签流水线完成
 
-本文是已集成 52,132 条 expanded runtime 的发布门禁。它不授权修改不可变 source；当前计数、可复现重建、模拟、单 EXE 隔离烟测、Release 资产与法律文件证据均已重新核对。`v1.0.0` 交付物从固定且已推送的干净提交构建；artifact/docs commit 与最终 `main` SHA 以远端 Git 结果为准。
+本文是已集成 52,132 条 expanded runtime 的发布门禁。它不授权修改不可变 source；当前语料计数已重新核对，本文登记的单 EXE、隔离烟测和 GitHub Release 资产则是 `v1.0.0` 的历史实证。`v1.1.0` 不得沿用这些二进制或测试数字，必须从固定且已推送的最终 `main` 提交重新构建并由目标标签流水线登记；artifact/docs commit 与最终 `main` SHA 以远端 Git 结果为准。
 
 ## 1. 精确验收常量
 
@@ -33,7 +33,7 @@
 - `source_line` 是冻结 source SHA 下从 1 开始的物理数据行号。source 的任何字节变化、插入、删除或重排都开启新的 lineage epoch，必须重新生成、复核和审批全部派生产物；冻结 SHA 不变时不得重编号当前 51,326 个 surface ID。
 - 问句/回复钩子、未批准身份、非身份 PII、不可用上下文、面向用户的当前状态断言、控制字符、过度命令式文本和规范化重复不得进入运行时。
 - archive/source/review 只提供审计证据，不自动构成运行时许可。不得用宽泛 marker 扫描或 EXE 原始字节搜索代替 manifest 审批。
-- 桌宠继续完全离线，不读取输入内容、剪贴板、文件名或窗口标题；自动规则不能替代人物授权、虚构身份、关系边界和再分发权利的人工批准。
+- 桌宠继续完全离线，不读取输入内容、剪贴板或窗口标题，也不枚举或读取用户文件名、用户目录内容。正常运行时，角色偏好、冷却历史和剧情状态保存在 `%LOCALAPPDATA%\CompanionDesktopPet`；只有用户主动启用开机自启动时，才会另在当前用户 Run 注册表项保存桌宠自身 EXE 路径；`--smoke-test` 使用并清理系统临时目录中的隔离状态。自动规则不能替代人物授权、虚构身份、关系边界和再分发权利的人工批准。
 
 ## 4. 异步预热与 fallback
 
@@ -151,13 +151,13 @@ dotnet test CompanionDesktopPet.sln -c Release --no-restore
 
 `simulation-events.json` 必须使用 schema v3，并为每次尝试记录精确的 `seed/day_index/slot_index`，同时绑定 corpus SHA-256、scheduler config SHA-256、subseed derivation version 与 derivation SHA-256。校验器必须按规范时间、上下文、subseed 和逐 seed 历史重新执行选择器并比对精确 `selected_id`；任一绑定字段、坐标、上下文、顺序或选择结果漂移都必须产生硬错误。校验器必须为 `0 hard errors`，并且 warning 只能精确等于一条 `surface_inventory_observation`，其他 warning 一律阻断发布。
 
-### 6.1 当前新鲜验证记录
+### 6.1 `v1.0.0` 历史验证记录（不得作为 v1.1.0 的新鲜证据）
 
 - 两项 generator `--check` 均通过；隔离重建的 v2、archive、review、PII review 与 surface manifest 五份产物逐字节匹配 canonical。
 - 精确计数：806 core + 51,326 surfaces = 52,132 runtime；533 scenes；75,375 source 数据行；75,375 archive；51,326 surface-manifest 记录。
 - 30 天 × 10 seeds：1,500 attempts / 1,500 outputs；Easter egg 9.87%、seasoning 4.93%、dry-sharp 4.00%；natural、adversarial 与 combined hard violations 均为零。
 - Validator：`0 hard errors / 1 warning`，唯一 warning 为 `surface_inventory_observation`。
-- Python：标签流水线实际执行并通过 311/311；.NET Release：测试项目门禁为 `IsTestProject=true`，实际发现并通过 392/392。
+- `v1.0.0` 标签流水线实际执行并通过 Python 311/311；.NET Release 测试项目门禁为 `IsTestProject=true`，实际发现并通过 392/392。当前源码已新增测试，因此 v1.1.0 必须登记最终标签流水线实际发现的新数量。
 - Release 回归还顺带发现并消除了节日候选断言对 52,132 行重复全表扫描的二次复杂度；修复后完整 Release 套件在 33 秒内完成。
 
 ### 6.2 Phase 5 精确回放与运行时比例门禁
@@ -166,7 +166,15 @@ dotnet test CompanionDesktopPet.sln -c Release --no-restore
 - 四季、04:00–05:59 dawn、`ide_foreground/idle_return/fullscreen` 的 `null/false/true`，以及 `active_minutes` 的 `null/89/90/91` 均有硬覆盖门禁。
 - canonical replay 上限为 3,000 次；声明规模或原始事件数超限、raw/parsed 数量不完整时均在 selector 前拒绝。相同完整输入只复用容量为 2 的规范答案流缓存，每次事件仍逐条重新比对。
 - C# 运行时通过真实 `OfflineCompanionAgent → SceneScheduler → PersonaCorpus` 路径验证：10 seeds × 30 days × 4 slots = 1,200 outputs，Easter egg 为 120/1,200（10.00%），每 seed 均为 10.00%。接受区间由共享 contract 生成，不在测试中另行硬编码。
-- 主代理最终复验：Python `311/311`（140.4 秒）；.NET Release `392/392`、0 跳过；validator 为 `0 hard errors / 1 warning`，唯一 warning 为 `surface_inventory_observation`。
+- `v1.0.0` 发布前主代理复验：Python `311/311`（140.4 秒）；.NET Release `392/392`、0 跳过；validator 为 `0 hard errors / 1 warning`，唯一 warning 为 `surface_inventory_observation`。这些数值是历史证据，不预判 v1.1.0 的最终结果。
+
+### 6.3 后续版本的自动发布入口
+
+- PR 与 `main` push 只运行质量门禁；`workflow_dispatch` 额外生成 30 天保留的 Windows artifact，但不公开发版。
+- GitHub Release 只由形如 `v1.1.0` / `v1.1.0-rc.1`、在本次事件中新建且非强推的 annotated tag 触发。tag 必须精确指向 `origin/main` 中的提交；轻量 tag、非严格语义版本 tag、旁支提交和强制移动均在打包前拒绝。已有 Release 的八项资产不可变：同一原始运行的失败重试仅在八项候选资产逐字节完全一致时无操作成功，任何清单或哈希差异都会失败，不删除、覆盖或编辑旧资产。GitHub push payload 无法证明被删除 tag 的全部历史，因此还应通过仓库 tag ruleset 阻止删除后重建。
+- 根目录提交的 `global.json` 精确锁定 .NET SDK `9.0.301` 并使用 `rollForward=disable`；`setup-dotnet` 从该文件安装 SDK，实际 `dotnet --version`、action 输出与提交版本必须三者精确一致，避免 runner 预装的更高 SDK 静默接管构建，也避免同一 tag 日后 rerun 漂到更新 patch。
+- 程序集版本直接从 tag 去掉前导 `v` 后派生；发布门禁要求 `ProductVersion=<tag version>+<GITHUB_SHA>` 精确相等。因此 `v1.1.0` 不允许继续产出显示为 `1.0.0` 的 EXE。
+- 需要本机代理时，仅用 `git -c http.proxy=http://127.0.0.1:7890 push origin <tag>` 推送小型 tag；质量门禁、EXE/ZIP 构建及 GitHub Release 资产上传均由 GitHub-hosted runner 使用短期 `GITHUB_TOKEN` 完成，不依赖本机 `gh` keyring token，也不复制一套本地上传逻辑。
 
 测试全绿后，只删除已验证位于仓库内的 scratch/publish 目录，并只覆盖明确的交付 EXE：
 
@@ -217,7 +225,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
 | subseed derivation v2 | `e5f6d36ffb5d4936bccca24cb9c7177a63e02d937118342916bd5eea0a83640d` |
 | simulation report | `09d67f3b69fb97f871337fc6e2a6b5a4a4c9897c680af3551796091764e090e2` |
 | validator-facing simulation events | `5fddf3a0c05705da9ff97f7a1b339b664ee8dbcf1e81318e09267e815bc1d9da` |
-| final `佳怡桌宠.exe` | `b79bf57a94d63387b6d8db288e53f64b06af32a3aa4881e7c069634839442a82` |
+| historical `v1.0.0` `佳怡桌宠.exe` | `b79bf57a94d63387b6d8db288e53f64b06af32a3aa4881e7c069634839442a82` |
 
 ### 7.1 `v1.0.0` 正式发布实证
 
@@ -230,6 +238,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
 - GitHub Release：[v1.0.0](https://github.com/haohaizi554/CompanionDesktopPet/releases/tag/v1.0.0) 精确保留 8 个外层资产；`SHA256SUMS.txt` SHA-256 为 `ab88e85b41c23e0fb1ca980581a7b84cd3766b592e80bcead1c506b930ba4d04`，并精确覆盖其余 7 项。GitHub 会清洗非 ASCII 附件名，故外层使用 `Jiayi-Desktop-Pet.exe`、`Jiayi-Desktop-Pet-README-zh-CN.txt`、`Jiayi-Desktop-Pet-win-x64.zip`，ZIP 内仍精确保留两个中文交付名与四个法律文件。最终 8 项已经本机 `http://127.0.0.1:7890` 代理回传/刷新并重新下载复核。
 - 证据登记后已清理 `publish/`、`outputs/verify/`、`outputs/verify-contract-test/` 与 `outputs/verify-contract-helpers/`；交付目录保留。
 - Authenticode 状态为 `NotSigned`。这不改变单文件与离线门禁，但 GitHub/网络下载可能触发 SmartScreen 或安全软件信誉提示；未配置代码签名证书前不得宣称“下载后无安全提示”。
+
+### 7.2 `v1.1.0` 待登记证据
+
+- 当前不得填写 v1.1.0 的 EXE 字节数、SHA-256、ProductVersion、测试数量、SmokePID、Release URL 或资产校验和。
+- 只有最终 `main` 提交通过全部质量门禁、全新的 annotated `v1.1.0` 标签完成云端构建与隔离 smoke、GitHub Release 八项资产上传成功并经 API 回读后，才能新增 v1.1.0 实证。
+- v1.0.0 的 311/311、392/392、EXE 哈希和 Release 资产只能作为历史基线，不能复制为 v1.1.0 结果。
 
 版本化文件不能可靠记录“包含自身的最终提交 SHA”，因为写入该 SHA 会再次改变提交。本节只记录实际产生 EXE 的 built-from source commit；artifact/docs commit 与最终 `main` SHA 以 Git 远端结果为准。
 
@@ -254,5 +268,5 @@ git status --short
 - 已关闭：surface manifest 为 51,326 行，expanded v2 为 52,132 行，唯一 `semantic_group` 精确为 533；五份隔离重建产物与 canonical SHA-256 全部一致。
 - 已关闭：simulation 已用当前 scheduler semantic binding 重放，1,500/1,500 attempts 有输出；Easter egg 9.87%、seasoning 4.93%、dry-sharp 4.00%，natural/adversarial/combined hard violations 全为零，dawn 与四季、nullable signals 均覆盖。
 - 已关闭：scene-first fallback、identity exact set、surface/runtime 一一绑定、旧 seasoning/dry 历史迁移均有自动化测试；900-click retained-memory 门槛已收紧为 256 MiB，不通过缩减 runtime 规避。
-- 已关闭：标签流水线的 Python 311/311 与 .NET Release 392/392 均为实际非零执行结果，不是仅凭进程退出码推断；CI 依赖闭包固定版本、wheel SHA-256 与完整传递依赖。
-- 已关闭：`outputs/CompanionDesktopPet/佳怡桌宠.exe` 已从干净且已推送的 `ad5aa86` 重建；built-from、SDK、ProductVersion、字节数与 SHA-256 均已登记，云端与本地隔离 `--smoke-test` 自行以退出码 0 结束，Release 8 项资产及 7 项校验和经代理回传后复核一致。
+- 已关闭（v1.0.0 历史基线）：标签流水线的 Python 311/311 与 .NET Release 392/392 均为实际非零执行结果，不是仅凭进程退出码推断；CI 依赖闭包固定版本、wheel SHA-256 与完整传递依赖。
+- 已关闭（v1.0.0 历史基线）：`outputs/CompanionDesktopPet/佳怡桌宠.exe` 已从干净且已推送的 `ad5aa86` 重建；built-from、SDK、ProductVersion、字节数与 SHA-256 均已登记，云端与本地隔离 `--smoke-test` 自行以退出码 0 结束，Release 8 项资产及 7 项校验和经代理回传后复核一致。v1.1.0 仍必须完成第 7.2 节的独立实证。
