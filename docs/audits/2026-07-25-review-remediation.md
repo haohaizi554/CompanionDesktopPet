@@ -2,6 +2,8 @@
 
 本文逐项复核外部审查清单。结论按当前 `main` 代码和可执行路径判断，不把旧行号、测试名或历史实现直接当成现状。
 
+2026-07-25 的第二份复审再次引用了部分旧行号，并把“类型自身没有锁”直接等同于“生产路径存在并发”。本轮同时检查了实际构造点、调用线程、对象是否逃逸和快照边界；严重度只以可达运行路径为准。该复审的 P0 表实际列出 16 项，不是文字小结所称的 15 项；“11 已修复 + 3 部分修复 + 2 未修复”本身也合计为 16。
+
 ## 结论口径
 
 - **已修复（本轮）**：复现了当前缺口，先建立失败回归，再修改生产代码。
@@ -14,11 +16,16 @@
 | 审查项 | 结论 | 当前证据/处理 |
 | --- | --- | --- |
 | `DialogueService` 只在锁内取 agent、下游状态并发裸奔 | 不成立 | `GetReply` 在 `_sync` 内完成 `agent.Respond`；快照和剧情到期读取也在同一所有权边界。事件泵、动画回调和二实例恢复都回到 WPF Dispatcher。没有在可变状态内重复叠锁。 |
+| `OfflineCompanionAgent`/`SceneHistory` 没有自己的锁就是确定性并发损坏 | 不成立（生产路径）；API 已加固 | agent 只在 `DialogueService` 内构造且不逃逸，回复、快照和剧情到期均由同一 `_sync` 串行化；源码没有读取 live `agent.State`/`agent.History` 的生产调用者。`SceneHistory.Entries` 此前确实可向下转换到 backing `List`，且 `Restore(history.Entries)` 会先清空自己的输入；`e7d86f7` 已先物化输入、再清空，并只暴露只读 facade。 |
+| `CharacterState.ActiveStories` 为 public `List` 就能越过 agent 所有权 | 字面属实，P0 结论不成立 | `CharacterState` 是持久化 DTO；所有 agent/快照边界都深拷贝列表，`StoryProgress` 为不可变 record。既有回归会修改返回快照并证明 agent 内部状态不受影响。若未来把该 WinExe 的 DTO 作为第三方库 API，再单独收紧集合类型。 |
+| `CompanionEventPump` 无锁会被多个回调并发调用 | 不成立 | 唯一生产调用位于同步 `DispatcherTimer` handler；构造、轮询和字段更新都归属同一 WPF Dispatcher，handler 内没有 `await` 或第二调用者。测试名中的 concurrent 指同一轮逻辑事件，不是多线程。 |
 | 语料/场景静态初始化失败会让服务命名空间永久不可用 | 此前已修复 | `PersonaCorpus` 与场景目录使用 `Lazy<T>`；`SceneCatalog.LoadPersonaScenes` 捕获非致命加载/契约异常并回退到内置本地目录，失败原因可诊断。故事目录在 fallback 不足时返回空集合。 |
 | 设置和记忆固定 `.tmp` 互相覆盖 | 此前已修复 | 两者统一使用 `AtomicJsonFile`：随机临时名、按规范化目标路径的进程内 semaphore、覆盖式原子移动、仅清理本次临时文件，并有并发写回归。 |
 | 52,132 / 51,326 / 533 只在文档脚本里检查 | 此前已修复 | 共享 persona contract 生成 C# 精确常量；程序集加载、.NET 测试、Python validator 与 CI 均要求精确计数。范围常量不替代精确发布常量。 |
 | 哈希登记与“待复核”互相矛盾 | 此前已修复 | 当前 README 和发布清单区分历史已发布证据、tag 构建提交与其后的文档/资产登记提交，不再把具体哈希称作占位。 |
 | fallback 文档说 scene-first，测试却全局先选行 | 此前已修复 | 当前 fallback 先选择语义场景，再在场景内选变体；旧的全局 LRU 测试和实现已经移除。 |
+| `SettingsService.LoadAsync` 静默回退导致设置丢失不可诊断 | **已修复（`e7d86f7`）** | 缺文件仍安静返回默认值；I/O、权限、JSON、unsupported 以及可解析但违反设置契约的内容都会留下异常诊断，同时诊断器自身的非致命失败不会破坏默认值回退。 |
+| `TrayIconService.TryCleanup` 裸 `catch {}` | **已修复（`e7d86f7`）** | 清理仍保持 best-effort，单个 hide/dispose 失败不会阻止后续资源释放；非致命失败交给统一 reporter，reporter 自身失败也不会遮蔽清理，致命异常不再被吞掉。 |
 
 ## C# 服务与桌面运行时
 
@@ -28,7 +35,10 @@
 | `TemporalDialogueService` 每次扫描完整语料 | 此前已修复 | 构建期按时间桶建立索引，运行时不再全表过滤。 |
 | `AgentMemoryService.IsValid` 热路径反复建三张字典 | 此前已修复 | 目录索引使用线程安全 Lazy 缓存。 |
 | Pause 覆盖 Dragging/Landing | **已修复（本轮）** | 暂停请求只记录落地后的目标状态，不破坏拖动/落地瞬态；Resume 可在瞬态中撤销返回 Paused。 |
+| 暂停后在 Landing 中再次开始拖动会丢失返回 Paused 的目标 | **已修复（`e7d86f7`）** | Landing → Dragging 保留 `_returnToPaused`；同时只有 Blink/Greeting/Landing 可以完成，`Complete(Paused/Dragging/Idle)` 不再把状态误改为 Idle，未知 ambient enum 会被明确拒绝。 |
 | 故事节点与普通场景共享 line ID，互相消耗冷却 | **已修复（本轮）** | 保留原始 ID/来源审计，不复制伪造台词；故事来源 `semantic_group` 从普通候选中保留给 story arc，避免普通播放提前消费故事冷却。 |
+| 故事节点应复制/重命名 `DialogueLine.Id` | 不成立 | story scene ID 已有命名空间；复用 canonical line 对象保留来源审计，并让 line 冷却/每日上限跨入口生效。普通入口已排除 story 保留组，复制 ID 反而会绕过配额。 |
+| `DialogueForest.TreeWeights` 与 contract 漂移 | 接受的工程债 | 当前四个值精确等于生成的八组权重聚合：0.18、0.10+0.07、0.10+0.10+0.10+0.08、0.27；不存在当前漂移。后续可直接从 generated group weights 派生以消除维护双写，但不要在本次发布里顺带改变 `PreferredTree` 的选择行为。 |
 | `NotifyIcon` 可在错误线程构造 | **已修复（本轮）** | 在创建任何 WinForms shell 对象前检查目标 Dispatcher 线程；错误线程以明确异常拒绝。 |
 | `MainWindow` 构造函数爆炸 | 此前已修复 | 当前只有少量入口，协作者集中在 `MainWindowDependencies` options 对象；没有再引入 Builder 层。 |
 
@@ -56,14 +66,17 @@
 | 隐式 MenuItem/ContextMenu 样式污染未来控件 | 此前已修复 | 卡哇伊样式使用显式 key，并只在桌宠 `ContextMenu.Resources` 内局部应用。 |
 | 永久动画在托盘隐藏后继续 tick，控制器不释放 | 此前已修复 | `AnimationController` 实现 `IDisposable`，跟踪并移除 clocks；隐藏/暂停会 Suspend，关闭会 Dispose。 |
 | 气泡倒计时跨线程字段可撕裂/关闭后复活 | 此前已修复 | 倒计时使用 `TimeProvider` 和单一 Dispatcher 所有权；悬停 suspend/resume、关闭与过期竞态均有回归。 |
+| `BubbleCountdownController` 没有锁/`IDisposable` 就会泄漏 | 不成立 | controller 不拥有 timer、task、event、CTS 或原生资源；`DispatcherTimer` 由 `MainWindow` 拥有并在隐藏/关闭时停止，controller 的 `Close` 是终态。当前生产调用全部归属 UI Dispatcher。 |
+| `Popup Focusable="False"` 阻断可访问性 | 不成立 | 气泡是只读 live region，不是可交互控件；让独立 Popup 抢焦点会破坏人物和菜单的键盘链。人物 `CharacterStage` 可聚焦，菜单使用标准 `MenuItem` 导航，气泡通过 Automation live region 宣告。 |
+| 已打开气泡拖动人物后偶发漂移 | **已修复（`e7d86f7`）** | 已用真实 WPF 窗口复现：人物窗口移动 210 物理像素时，相对锚定 Popup 的独立 HWND 位移为 0。改用同一 SystemAware 虚拟桌面坐标系下的 `AbsolutePoint`，回归验证已打开气泡在 X/Y 方向与窗口同步移动，同时保留 30-DIP 间距、工作区夹取和最长文案布局。 |
 
 ## 测试与发布工程
 
 | 审查项 | 结论 | 当前证据/处理 |
 | --- | --- | --- |
-| WindowShell 高价值用例依赖反射和真实 `Task.Delay` | **已优化（本轮）** | 环境调度通过内部运行时快照/显式处理入口观测，动画协作者有生产合理接口；关键问候、暂停、拖动/落地测试使用受控时间和完成回调。剩余反射只在尚未形成稳定观察契约的低风险边界。 |
-| 性能预算混在普通测试中 | 此前已修复 | 性能用例带 `Trait(Category=Performance)`，可单独筛选，同时完整 Release 门禁仍会执行。 |
-| PetAction 只有两个 happy-path 测试 | **已扩充（本轮）** | 覆盖暂停中的拖动/落地、恢复、重复 BeginDrag、错误完成状态等转换。 |
+| WindowShell 高价值用例依赖反射和真实 `Task.Delay` | 已明显优化；仍是工程债 | 反射 helper 调用已约减半，真实动画墙钟等待已移除；环境调度通过内部运行时快照/显式处理入口观测，动画协作者有稳定接口。但仍约有 70 处反射访问，部分位于气泡、退出、warmup 和可访问性高价值测试，不能表述为“只剩低风险边界”；继续按能力面迁移，不为测试把字段公开。 |
+| 性能预算混在功能测试中 | 接受的工程债 | 用例已有 `Trait(Category=Performance)` 并可独立筛选，但 900-click 等方法仍同时断言无静默、比例、冷却、延迟和分配量，测量也包含部分测试/LINQ 开销。当前性能组有充足余量且不阻断发布，后续应拆为共享结果 fixture + 独立功能/性能断言。 |
+| PetAction 只有两个 happy-path，非法转换未覆盖 | **已修复（`e7d86f7`）** | 当前覆盖 ambient 互斥、暂停拖动/落地、瞬态 resume、重复拖动、Landing 中重启拖动、错误 `Complete` 和未知 enum；聚焦状态机测试 11/11 通过。 |
 | manual review 数量硬编码 `3265 + 1248` | **已修复（本轮）** | 测试独立读取 review/PII TSV 数据行得到期望值，并要求结果非空。 |
 | 发布 contract 用正则匹配脚本源码 | **已修复（本轮）** | smoke 进程生命周期提取为可调用模块；契约实际运行 helper，验证参数、隐藏窗口、input-idle 不能冒充成功、默认预算、非零退出、超时 PID 清理和同名无关进程不被终止。 |
 | CI 可能由 runner 预装更高 .NET SDK 接管 | **已修复（本轮）** | 根 `global.json` 精确锁定 SDK，CI 从该文件安装并核对实际版本；tag 派生 `ProductVersion=<semver>+<commit>`。 |
