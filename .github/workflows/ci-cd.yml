@@ -498,7 +498,12 @@ jobs:
             Copy-Item -LiteralPath $name -Destination (Join-Path $bundle $name)
           }
 
-          $zipName = '佳怡桌宠-win-x64.zip'
+          # GitHub normalizes non-ASCII release-asset names. Keep the friendly
+          # Chinese filenames inside the ZIP, but use portable outer names so
+          # direct downloads never degrade to default.exe/default.txt.
+          $releaseExeName = 'Jiayi-Desktop-Pet.exe'
+          $releaseReadmeName = 'Jiayi-Desktop-Pet-README-zh-CN.txt'
+          $zipName = 'Jiayi-Desktop-Pet-win-x64.zip'
           $zipPath = Join-Path $distribution $zipName
           $bundlePaths = @($bundleNames | ForEach-Object { Join-Path $bundle $_ })
           Compress-Archive -LiteralPath $bundlePaths -DestinationPath $zipPath -CompressionLevel Optimal -Force
@@ -522,10 +527,18 @@ jobs:
             if ($zipHash -cne $bundleHash) {
               throw "Primary ZIP content differs from staged file: $name"
             }
+          }
+
+          Copy-Item -LiteralPath (Join-Path $bundle '佳怡桌宠.exe') -Destination (Join-Path $distribution $releaseExeName)
+          Copy-Item -LiteralPath (Join-Path $bundle '使用说明.txt') -Destination (Join-Path $distribution $releaseReadmeName)
+          foreach ($name in $legalNames) {
             Copy-Item -LiteralPath (Join-Path $bundle $name) -Destination (Join-Path $distribution $name)
           }
 
-          $checksumTargets = @($bundleNames + $zipName | Sort-Object)
+          $checksumTargets = @(
+            $legalNames + $releaseExeName + $releaseReadmeName + $zipName |
+              Sort-Object
+          )
           $actualPreChecksumNames = @(
             Get-ChildItem -LiteralPath $distribution -File -Force |
               Select-Object -ExpandProperty Name |
@@ -607,9 +620,9 @@ jobs:
             'LICENSE'
             'LICENSE-SCOPE.md'
             'NOTICE'
-            '佳怡桌宠-win-x64.zip'
-            '佳怡桌宠.exe'
-            '使用说明.txt'
+            'Jiayi-Desktop-Pet-README-zh-CN.txt'
+            'Jiayi-Desktop-Pet-win-x64.zip'
+            'Jiayi-Desktop-Pet.exe'
           ) | Sort-Object
           $expectedNames = @($checksumTargets + 'SHA256SUMS.txt' | Sort-Object)
           $actualNames = @(Get-ChildItem -LiteralPath $assetDirectory -File -Force | Select-Object -ExpandProperty Name | Sort-Object)
@@ -659,9 +672,9 @@ jobs:
             'LICENSE-SCOPE.md'
             'NOTICE'
             'SHA256SUMS.txt'
-            '佳怡桌宠-win-x64.zip'
-            '佳怡桌宠.exe'
-            '使用说明.txt'
+            'Jiayi-Desktop-Pet-README-zh-CN.txt'
+            'Jiayi-Desktop-Pet-win-x64.zip'
+            'Jiayi-Desktop-Pet.exe'
           )
           $assets = @($assetNames | ForEach-Object { Join-Path 'release-assets' $_ })
 
@@ -695,6 +708,24 @@ jobs:
           & gh release view $tag --repo $repository *> $null
           $releaseExists = $LASTEXITCODE -eq 0
           if ($releaseExists) {
+            # Older runs used non-ASCII outer asset names which GitHub
+            # normalized. Remove only those three known legacy names before
+            # enforcing the exact portable eight-asset contract.
+            $legacySanitizedNames = @('-win-x64.zip', 'default.exe', 'default.txt')
+            $releaseMetadataOutput = @(& gh api "repos/$repository/releases/tags/$tag" 2>&1)
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not inspect existing GitHub Release assets for $tag."
+            }
+            $releaseMetadata = ($releaseMetadataOutput -join "`n") | ConvertFrom-Json
+            foreach ($asset in @($releaseMetadata.assets)) {
+              if ($legacySanitizedNames -ccontains $asset.name) {
+                & gh api --method DELETE "repos/$repository/releases/assets/$($asset.id)"
+                if ($LASTEXITCODE -ne 0) {
+                  throw "Could not delete legacy sanitized Release asset: $($asset.name)"
+                }
+              }
+            }
+
             $existingBodyOutput = @(& gh release view $tag --repo $repository --json body --jq '.body' 2>&1)
             if ($LASTEXITCODE -ne 0) {
               throw "Could not read existing GitHub Release body for $tag."
@@ -724,6 +755,18 @@ jobs:
           }
           if ($LASTEXITCODE -ne 0) {
             throw "GitHub Release publication failed with exit code $LASTEXITCODE."
+          }
+
+          $publishedAssetNames = @(
+            & gh release view $tag --repo $repository --json assets --jq '.assets[].name' 2>&1 |
+              Sort-Object
+          )
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not verify published GitHub Release assets for $tag."
+          }
+          $expectedAssetNames = @($assetNames | Sort-Object)
+          if (($publishedAssetNames -join "`n") -cne ($expectedAssetNames -join "`n")) {
+            throw "Published GitHub Release assets were renamed or are incomplete: $($publishedAssetNames -join ', ')"
           }
 
           $publishedBodyOutput = @(& gh release view $tag --repo $repository --json body --jq '.body' 2>&1)
