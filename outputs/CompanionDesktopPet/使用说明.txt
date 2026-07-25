@@ -25,8 +25,13 @@
 如需彻底关闭，请右击人物并选择“先休息啦（退出）”，或从托盘菜单退出。
 
 本版本校验信息：
-大小：80,429,415 字节
-SHA-256：cc69d4b555ac438641f805cbe3d51cf8b7d04627d1eda0837dbd089a3bdc6d4e
-built-from：dbc587243f209f785fc57de4da507229a41e0509
+大小：80,299,750 字节
+SHA-256：b79bf57a94d63387b6d8db288e53f64b06af32a3aa4881e7c069634839442a82
+built-from：ad5aa867a06d84d64fc4399cb4d258becce1b8ab
 
 当前 EXE 未做 Authenticode 代码签名，从网络下载时可能出现 Windows SmartScreen 或安全软件信誉提示。
+
+许可与权利：
+Technical Code 按 PolyForm Noncommercial License 1.0.0 提供：
+https://polyformproject.org/licenses/noncommercial/1.0.0
+Required Notice: The PolyForm Noncommercial License 1.0.0 applies only to Technical Code as defined in LICENSE-SCOPE.md. Character Assets and Persona Materials are excluded and all rights are reserved; see ASSET_AND_PERSONA_RIGHTS.md.

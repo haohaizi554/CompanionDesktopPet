@@ -17,7 +17,7 @@ outputs/CompanionDesktopPet/使用说明.txt
 
 `佳怡桌宠.exe` 是 `win-x64` 自包含单文件应用，运行时不需要另行安装 .NET，也不依赖旁置或外部应用 DLL、JSON、PDB 等运行时 sidecar。“自包含单 EXE”不表示进程绝不加载 DLL；作为 Windows 桌面应用，它仍会正常使用操作系统提供的系统 DLL 与系统组件。
 
-当前交付 EXE 从提交 `dbc587243f209f785fc57de4da507229a41e0509` 使用 .NET SDK `9.0.301` 构建，大小为 `80,429,415` 字节，SHA-256 为 `cc69d4b555ac438641f805cbe3d51cf8b7d04627d1eda0837dbd089a3bdc6d4e`。publish、交付与隔离烟测副本的哈希一致，真实 WPF smoke 自行以退出码 0 结束；完整证据见[发布与清理清单](docs/release/2026-07-25-expanded-runtime-release-checklist.md)。当前 EXE 未做 Authenticode 代码签名，从网络下载时可能出现 Windows SmartScreen/安全软件信誉提示。
+当前交付来自 GitHub Release [v1.0.0](https://github.com/haohaizi554/CompanionDesktopPet/releases/tag/v1.0.0)：EXE 从提交 `ad5aa867a06d84d64fc4399cb4d258becce1b8ab` 使用 .NET SDK `10.0.301` 构建，`ProductVersion=1.0.0+ad5aa867a06d84d64fc4399cb4d258becce1b8ab`，大小为 `80,299,750` 字节，SHA-256 为 `b79bf57a94d63387b6d8db288e53f64b06af32a3aa4881e7c069634839442a82`。publish、交付与隔离烟测副本的哈希一致，真实 WPF smoke 自行以退出码 0 结束。GitHub 会清洗非 ASCII 附件名，因此外层资产使用 `Jiayi-Desktop-Pet.exe`、`Jiayi-Desktop-Pet-README-zh-CN.txt` 和 `Jiayi-Desktop-Pet-win-x64.zip`；ZIP 内仍保留 `佳怡桌宠.exe` 与 `使用说明.txt`。完整证据见[发布与清理清单](docs/release/2026-07-25-expanded-runtime-release-checklist.md)。当前 EXE 未做 Authenticode 代码签名，从网络下载时可能出现 Windows SmartScreen/安全软件信誉提示。
 
 ## 体验与操作
 

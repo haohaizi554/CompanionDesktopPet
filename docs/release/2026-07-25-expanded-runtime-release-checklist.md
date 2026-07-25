@@ -1,9 +1,9 @@
 # Expanded Runtime 发布与清理清单
 
 日期：2026-07-25
-状态：Phase 4A 语料/仿真证据与 Phase 4B 单 EXE 发布证据均已完成
+状态：语料/仿真、单 EXE、CI/CD 与 `v1.0.0` GitHub Release 证据均已完成
 
-本文是已集成 52,132 条 expanded runtime 的发布门禁。它不授权修改不可变 source；当前计数、可复现重建、模拟与单 EXE 隔离烟测证据均已重新核对。Phase 4B 交付物已从固定且已推送的干净提交构建；artifact commit 与最终 `main` SHA 以远端 Git 结果为准。
+本文是已集成 52,132 条 expanded runtime 的发布门禁。它不授权修改不可变 source；当前计数、可复现重建、模拟、单 EXE 隔离烟测、Release 资产与法律文件证据均已重新核对。`v1.0.0` 交付物从固定且已推送的干净提交构建；artifact/docs commit 与最终 `main` SHA 以远端 Git 结果为准。
 
 ## 1. 精确验收常量
 
@@ -151,13 +151,13 @@ dotnet test CompanionDesktopPet.sln -c Release --no-restore
 
 `simulation-events.json` 必须使用 schema v3，并为每次尝试记录精确的 `seed/day_index/slot_index`，同时绑定 corpus SHA-256、scheduler config SHA-256、subseed derivation version 与 derivation SHA-256。校验器必须按规范时间、上下文、subseed 和逐 seed 历史重新执行选择器并比对精确 `selected_id`；任一绑定字段、坐标、上下文、顺序或选择结果漂移都必须产生硬错误。校验器必须为 `0 hard errors`，并且 warning 只能精确等于一条 `surface_inventory_observation`，其他 warning 一律阻断发布。
 
-### 6.1 Phase 4A 新鲜验证记录
+### 6.1 当前新鲜验证记录
 
 - 两项 generator `--check` 均通过；隔离重建的 v2、archive、review、PII review 与 surface manifest 五份产物逐字节匹配 canonical。
 - 精确计数：806 core + 51,326 surfaces = 52,132 runtime；533 scenes；75,375 source 数据行；75,375 archive；51,326 surface-manifest 记录。
 - 30 天 × 10 seeds：1,500 attempts / 1,500 outputs；Easter egg 9.87%、seasoning 4.93%、dry-sharp 4.00%；natural、adversarial 与 combined hard violations 均为零。
 - Validator：`0 hard errors / 1 warning`，唯一 warning 为 `surface_inventory_observation`。
-- Python：实际执行并通过 300/300；.NET Release：测试项目门禁为 `IsTestProject=true`，实际执行并通过 389/389。
+- Python：标签流水线实际执行并通过 311/311；.NET Release：测试项目门禁为 `IsTestProject=true`，实际发现并通过 392/392。
 - Release 回归还顺带发现并消除了节日候选断言对 52,132 行重复全表扫描的二次复杂度；修复后完整 Release 套件在 33 秒内完成。
 
 ### 6.2 Phase 5 精确回放与运行时比例门禁
@@ -217,20 +217,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
 | subseed derivation v2 | `e5f6d36ffb5d4936bccca24cb9c7177a63e02d937118342916bd5eea0a83640d` |
 | simulation report | `09d67f3b69fb97f871337fc6e2a6b5a4a4c9897c680af3551796091764e090e2` |
 | validator-facing simulation events | `5fddf3a0c05705da9ff97f7a1b339b664ee8dbcf1e81318e09267e815bc1d9da` |
-| final `佳怡桌宠.exe` | `cc69d4b555ac438641f805cbe3d51cf8b7d04627d1eda0837dbd089a3bdc6d4e` |
+| final `佳怡桌宠.exe` | `b79bf57a94d63387b6d8db288e53f64b06af32a3aa4881e7c069634839442a82` |
 
-### 7.1 Phase 4B 发布实证
+### 7.1 `v1.0.0` 正式发布实证
 
-- built-from source commit：`dbc587243f209f785fc57de4da507229a41e0509`；构建前 tracked worktree 干净且该 SHA 已推送到远端。
-- 工具链：.NET SDK `9.0.301`；EXE `ProductVersion=1.0.0+dbc587243f209f785fc57de4da507229a41e0509`，可从二进制反查 built-from。
-- 最终 EXE：`80,429,415` 字节；publish、delivery、isolated 三份 SHA-256 均为 `cc69d4b555ac438641f805cbe3d51cf8b7d04627d1eda0837dbd089a3bdc6d4e`。
+- built-from source commit：`ad5aa867a06d84d64fc4399cb4d258becce1b8ab`；带注释标签 `v1.0.0` 精确指向该提交，构建前 tracked worktree 干净且该 SHA 已推送到远端。
+- 工具链：GitHub-hosted Windows runner 实际使用 .NET SDK `10.0.301`；EXE `ProductVersion=1.0.0+ad5aa867a06d84d64fc4399cb4d258becce1b8ab`，可从二进制反查 built-from。
+- 最终 EXE：`80,299,750` 字节；云端 publish、delivery、isolated 与经代理回传后重新下载的本地副本 SHA-256 均为 `b79bf57a94d63387b6d8db288e53f64b06af32a3aa4881e7c069634839442a82`。
 - publish 清单精确为一个 `CompanionDesktopPet.exe`；delivery 清单精确为 `佳怡桌宠.exe` 与允许的 `使用说明.txt`，无应用 DLL/JSON/PDB 或额外目录。
-- 最终隔离 smoke：`SmokePID=43416`，`ExitCode=0`，进程自行退出且未按进程名清理；完整发布验证器契约测试通过，包含隐藏 publish DLL、隐藏 delivery JSON 与隐藏目录拒绝用例。
-- Phase 4B 提交前全量复核：Python `300/300`、.NET Release `389/389`，均为 0 失败、0 跳过。
+- 隔离 smoke：云端 `SmokePID=2280`、最终本地复核 `SmokePID=13700`，两次均 `ExitCode=0`，进程自行退出且未按进程名清理；完整发布验证器契约测试通过，包含隐藏 publish DLL、隐藏 delivery JSON、额外 EXE、嵌套依赖、强制终止与非零退出拒绝用例。
+- 标签门禁：Python `311/311`、.NET Release `392/392`，均为 0 失败；validator 为 `0 hard errors` 和唯一允许的 `surface_inventory_observation` warning。
+- GitHub Release：[v1.0.0](https://github.com/haohaizi554/CompanionDesktopPet/releases/tag/v1.0.0) 精确保留 8 个外层资产；`SHA256SUMS.txt` SHA-256 为 `ab88e85b41c23e0fb1ca980581a7b84cd3766b592e80bcead1c506b930ba4d04`，并精确覆盖其余 7 项。GitHub 会清洗非 ASCII 附件名，故外层使用 `Jiayi-Desktop-Pet.exe`、`Jiayi-Desktop-Pet-README-zh-CN.txt`、`Jiayi-Desktop-Pet-win-x64.zip`，ZIP 内仍精确保留两个中文交付名与四个法律文件。最终 8 项已经本机 `http://127.0.0.1:7890` 代理回传/刷新并重新下载复核。
 - 证据登记后已清理 `publish/`、`outputs/verify/`、`outputs/verify-contract-test/` 与 `outputs/verify-contract-helpers/`；交付目录保留。
 - Authenticode 状态为 `NotSigned`。这不改变单文件与离线门禁，但 GitHub/网络下载可能触发 SmartScreen 或安全软件信誉提示；未配置代码签名证书前不得宣称“下载后无安全提示”。
 
-版本化文件不能可靠记录“包含自身的最终提交 SHA”，因为写入该 SHA 会再次改变提交。本节只记录实际产生 EXE 的 built-from source commit；Phase 4B artifact commit 与最终 `main` SHA 以 Git 远端结果为准。
+版本化文件不能可靠记录“包含自身的最终提交 SHA”，因为写入该 SHA 会再次改变提交。本节只记录实际产生 EXE 的 built-from source commit；artifact/docs commit 与最终 `main` SHA 以 Git 远端结果为准。
 
 ## 8. 发布后清理
 
@@ -253,5 +254,5 @@ git status --short
 - 已关闭：surface manifest 为 51,326 行，expanded v2 为 52,132 行，唯一 `semantic_group` 精确为 533；五份隔离重建产物与 canonical SHA-256 全部一致。
 - 已关闭：simulation 已用当前 scheduler semantic binding 重放，1,500/1,500 attempts 有输出；Easter egg 9.87%、seasoning 4.93%、dry-sharp 4.00%，natural/adversarial/combined hard violations 全为零，dawn 与四季、nullable signals 均覆盖。
 - 已关闭：scene-first fallback、identity exact set、surface/runtime 一一绑定、旧 seasoning/dry 历史迁移均有自动化测试；900-click retained-memory 门槛已收紧为 256 MiB，不通过缩减 runtime 规避。
-- 已关闭：Phase 4A 的 Python 300/300 与 .NET Release 389/389 均为实际非零执行结果，不是仅凭进程退出码推断。
-- 已关闭：`outputs/CompanionDesktopPet/佳怡桌宠.exe` 已从干净且已推送的 `dbc5872` 重建；built-from、SDK、ProductVersion、字节数与 SHA-256 均已登记，publish/delivery/isolated 三份哈希一致，隔离 `--smoke-test` 自行以退出码 0 结束，Phase 4B 完成。
+- 已关闭：标签流水线的 Python 311/311 与 .NET Release 392/392 均为实际非零执行结果，不是仅凭进程退出码推断；CI 依赖闭包固定版本、wheel SHA-256 与完整传递依赖。
+- 已关闭：`outputs/CompanionDesktopPet/佳怡桌宠.exe` 已从干净且已推送的 `ad5aa86` 重建；built-from、SDK、ProductVersion、字节数与 SHA-256 均已登记，云端与本地隔离 `--smoke-test` 自行以退出码 0 结束，Release 8 项资产及 7 项校验和经代理回传后复核一致。
