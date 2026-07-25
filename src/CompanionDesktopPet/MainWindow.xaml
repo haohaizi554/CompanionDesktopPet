@@ -30,24 +30,24 @@
                 Width="20"
                 Height="12"
                 HorizontalAlignment="Left"
-                Fill="{StaticResource Pet.Brush.BubbleArrow}"
-                Stroke="{StaticResource Pet.Brush.AccentBorder}"
+                Fill="{DynamicResource Pet.Brush.BubbleArrow}"
+                Stroke="{DynamicResource Pet.Brush.AccentBorder}"
                 StrokeThickness="2"
                 Visibility="Collapsed"
                 Data="M 0,12 L 20,12 L 10,0 Z" />
           <Border Padding="18,13"
                   CornerRadius="25"
-                  Background="{StaticResource Pet.Brush.BubbleSurface}"
-                  BorderBrush="{StaticResource Pet.Brush.AccentBorder}"
+                  Background="{DynamicResource Pet.Brush.BubbleSurface}"
+                  BorderBrush="{DynamicResource Pet.Brush.AccentBorder}"
                   BorderThickness="2">
             <Border.Effect>
-              <DropShadowEffect Color="{StaticResource Pet.Color.Shadow.Bubble}"
+              <DropShadowEffect Color="{DynamicResource Pet.Color.Shadow.Bubble}"
                                 BlurRadius="14"
                                 ShadowDepth="3"
-                                Opacity="0.32" />
+                                Opacity="{DynamicResource Pet.Opacity.Shadow.Bubble}" />
             </Border.Effect>
             <TextBlock x:Name="SpeechText"
-                       Foreground="{StaticResource Pet.Brush.TextPrimary}"
+                       Foreground="{DynamicResource Pet.Brush.TextPrimary}"
                        FontFamily="{StaticResource Pet.FontFamily.Ui}"
                        FontSize="15"
                        FontWeight="SemiBold"
@@ -59,8 +59,8 @@
                 Width="20"
                 Height="12"
                 HorizontalAlignment="Left"
-                Fill="{StaticResource Pet.Brush.BubbleArrow}"
-                Stroke="{StaticResource Pet.Brush.AccentBorder}"
+                Fill="{DynamicResource Pet.Brush.BubbleArrow}"
+                Stroke="{DynamicResource Pet.Brush.AccentBorder}"
                 StrokeThickness="2"
                 Data="M 0,0 L 20,0 L 10,12 Z" />
         </StackPanel>
@@ -151,8 +151,8 @@
               Padding="12,7"
               HorizontalAlignment="Right"
               VerticalAlignment="Top"
-              Background="{StaticResource Pet.Brush.BubbleSurface}"
-              BorderBrush="{StaticResource Pet.Brush.AccentBorder}"
+               Background="{DynamicResource Pet.Brush.BubbleSurface}"
+               BorderBrush="{DynamicResource Pet.Brush.AccentBorder}"
               BorderThickness="2"
               CornerRadius="18"
               Opacity="0"
@@ -161,7 +161,7 @@
           <TranslateTransform x:Name="GreetingBadgeOffset" Y="8" />
         </Border.RenderTransform>
         <TextBlock Text="嗨♡"
-                   Foreground="{StaticResource Pet.Brush.TextPrimary}"
+                   Foreground="{DynamicResource Pet.Brush.TextPrimary}"
                    FontFamily="{StaticResource Pet.FontFamily.Ui}"
                    FontSize="16"
                    FontWeight="SemiBold" />
@@ -175,7 +175,7 @@
                    Canvas.Left="229"
                    Canvas.Top="124"
                    Text="♥"
-                   Foreground="{StaticResource Pet.Brush.HeartPrimary}"
+                   Foreground="{DynamicResource Pet.Brush.HeartPrimary}"
                    FontSize="25"
                    FontWeight="Bold"
                    Opacity="0"
@@ -188,7 +188,7 @@
                    Canvas.Left="257"
                    Canvas.Top="159"
                    Text="♥"
-                   Foreground="{StaticResource Pet.Brush.HeartSecondary}"
+                   Foreground="{DynamicResource Pet.Brush.HeartSecondary}"
                    FontSize="20"
                    FontWeight="Bold"
                    Opacity="0"
@@ -201,7 +201,7 @@
                    Canvas.Left="214"
                    Canvas.Top="184"
                    Text="♥"
-                   Foreground="{StaticResource Pet.Brush.HeartTertiary}"
+                   Foreground="{DynamicResource Pet.Brush.HeartTertiary}"
                    FontSize="17"
                    FontWeight="Bold"
                    Opacity="0"

@@ -303,6 +303,33 @@ public sealed class TrayIconServiceTests
     }
 
     [Fact]
+    public void Constructor_RejectsNonDispatcherThreadBeforeCreatingNativeShell()
+    {
+        using var source = LoadTestIcon();
+        var shellFactoryCalls = 0;
+
+        var error = Assert.Throws<InvalidOperationException>(() => new TrayIconService(
+            StaHost.Value.Dispatcher,
+            source,
+            () => new TrayMenuState(true, false, false, true),
+            () => { },
+            () => { },
+            () => Task.CompletedTask,
+            () => { },
+            () => Task.CompletedTask,
+            publishIcon: false,
+            () =>
+            {
+                shellFactoryCalls++;
+                return new FakeTrayShellIcon();
+            },
+            _ => { }));
+
+        Assert.Contains("dispatcher thread", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, shellFactoryCalls);
+    }
+
+    [Fact]
     public void ServiceClone_RemainsUsableAfterSourceIconAndStreamAreDisposed()
     {
         RunOnStaThread(() =>
@@ -499,6 +526,8 @@ public sealed class TrayIconServiceTests
         }
 
         public void Invoke(Action action) => _dispatcher.Invoke(action);
+
+        public Dispatcher Dispatcher => _dispatcher;
 
         public Task InvokeAsync(Func<Task> action) =>
             _dispatcher.InvokeAsync(action).Task.Unwrap();

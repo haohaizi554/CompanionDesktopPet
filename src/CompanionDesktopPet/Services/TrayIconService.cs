@@ -143,6 +143,12 @@ public sealed class TrayIconService : IDisposable
         Action<Exception> reportCommandException)
     {
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
+        if (!_dispatcher.CheckAccess())
+        {
+            throw new InvalidOperationException(
+                "TrayIconService must be constructed on its dispatcher thread.");
+        }
+
         ArgumentNullException.ThrowIfNull(icon);
         _getState = getState ?? throw new ArgumentNullException(nameof(getState));
         ArgumentNullException.ThrowIfNull(toggleVisibility);

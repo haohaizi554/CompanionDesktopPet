@@ -487,6 +487,27 @@ public sealed class SceneEngineTests
     }
 
     [Fact]
+    public void StoryArcs_ReserveTheirSourcePersonaScenesFromOrdinaryCandidates()
+    {
+        var now = new DateTime(2026, 7, 25, 10, 0, 0, DateTimeKind.Local);
+        var context = new SceneContext(CompanionEvent.Automatic, now, CharacterState.Create(now));
+        var candidates = SceneScheduler.AvailableScenes(context).ToArray();
+        var ordinaryGroups = candidates
+            .Where(scene => scene.StoryArcId is null)
+            .Select(scene => scene.SemanticGroup)
+            .ToHashSet(StringComparer.Ordinal);
+        var storyStarts = candidates
+            .Where(scene => scene.StoryNode == 0)
+            .ToArray();
+
+        Assert.NotEmpty(StoryArcCatalog.ReservedPersonaSemanticGroups);
+        Assert.Empty(ordinaryGroups.Intersect(StoryArcCatalog.ReservedPersonaSemanticGroups));
+        Assert.Equal(StoryArcCatalog.All.Count, storyStarts.Length);
+        Assert.All(storyStarts, scene =>
+            Assert.Contains(scene.SemanticGroup, StoryArcCatalog.ReservedPersonaSemanticGroups));
+    }
+
+    [Fact]
     public void InterruptionBudget_UsesCandidateCostAndLateNightLimit()
     {
         var now = new DateTime(2026, 7, 22, 23, 30, 0, DateTimeKind.Local);

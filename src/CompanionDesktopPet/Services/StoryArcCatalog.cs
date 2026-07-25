@@ -7,8 +7,16 @@ public static class StoryArcCatalog
     private static readonly Lazy<IReadOnlyList<StoryArcDefinition>> Arcs = new(
         () => Build(SceneCatalog.PersonaScenes),
         LazyThreadSafetyMode.ExecutionAndPublication);
+    private static readonly Lazy<IReadOnlySet<string>> ReservedGroups = new(
+        () => Arcs.Value
+            .SelectMany(arc => arc.Nodes)
+            .Select(node => node.SemanticGroup)
+            .ToHashSet(StringComparer.Ordinal),
+        LazyThreadSafetyMode.ExecutionAndPublication);
 
     public static IReadOnlyList<StoryArcDefinition> All => Arcs.Value;
+
+    internal static IReadOnlySet<string> ReservedPersonaSemanticGroups => ReservedGroups.Value;
 
     internal static IReadOnlyList<StoryArcDefinition> Build(
         IReadOnlyList<SceneDefinition> personaScenes)

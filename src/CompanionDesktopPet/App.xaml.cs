@@ -3,6 +3,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Threading;
 using CompanionDesktopPet.Services;
+using CompanionDesktopPet.UI;
 
 namespace CompanionDesktopPet;
 
@@ -12,6 +13,7 @@ public partial class App : System.Windows.Application
     private SingleInstanceGuard? _instanceGuard;
     private IAutoStartService? _autoStartService;
     private TrayIconService? _trayIconService;
+    private PetThemeManager? _themeManager;
     private bool _smokeTest;
     private string? _smokeDirectory;
     private int _exitStarted;
@@ -33,6 +35,10 @@ public partial class App : System.Windows.Application
         DispatcherUnhandledException += HandleDispatcherException;
         try
         {
+            _themeManager = new PetThemeManager(
+                Resources,
+                Dispatcher,
+                new SystemHighContrastProvider());
             if (_smokeTest)
             {
                 _smokeDirectory = Path.Combine(
@@ -79,6 +85,8 @@ public partial class App : System.Windows.Application
     {
         Interlocked.Exchange(ref _exitStarted, 1);
         DispatcherUnhandledException -= HandleDispatcherException;
+        _themeManager?.Dispose();
+        _themeManager = null;
         var trayIconService = _trayIconService;
         _trayIconService = null;
         var instanceGuard = _instanceGuard;

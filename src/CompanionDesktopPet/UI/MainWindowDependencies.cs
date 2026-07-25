@@ -32,4 +32,5 @@ internal sealed class MainWindowDependencies
     internal TimeProvider? TimeProvider { get; init; }
     internal DialogueWarmupCoordinator? WarmupCoordinator { get; init; }
     internal Action<FrameworkElement>? AnnounceLiveRegionChanged { get; init; }
+    internal IPetAnimationController? AnimationController { get; init; }
 }

@@ -40,7 +40,16 @@ public sealed class PetActionCoordinator
         }
     }
 
-    public void Pause() => State = PetActionState.Paused;
+    public void Pause()
+    {
+        if (State is PetActionState.Dragging or PetActionState.Landing)
+        {
+            _returnToPaused = true;
+            return;
+        }
+
+        State = PetActionState.Paused;
+    }
 
     public void Resume()
     {

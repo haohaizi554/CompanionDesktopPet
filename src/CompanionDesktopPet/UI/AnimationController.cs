@@ -10,7 +10,23 @@ public enum ClickSide
     Right
 }
 
-public sealed class AnimationController : IDisposable
+internal interface IPetAnimationController : IDisposable
+{
+    void StartIdle();
+    void PauseIdle();
+    void ResumeIdle();
+    void PlayClickReaction();
+    void PlayClickReaction(ClickSide clickSide);
+    void SetDragLean(double horizontalDelta);
+    void PlayLanding(Action? completed);
+    void PlayBlink(bool doubleBlink, Action completed);
+    void PlayGreeting(Action completed);
+    void CancelAmbientAction();
+    void Suspend();
+    void Resume();
+}
+
+public sealed class AnimationController : IPetAnimationController
 {
     private readonly ScaleTransform breathingScale;
     private readonly RotateTransform swayRotation;

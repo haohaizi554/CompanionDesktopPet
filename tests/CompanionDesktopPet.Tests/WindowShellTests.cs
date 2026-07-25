@@ -56,12 +56,12 @@ public sealed class WindowShellTests
             window.Show();
             window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
 
-            var ambientTimer = GetPrivateField<DispatcherTimer>(window, "_ambientTimer");
-            Assert.True(ambientTimer.IsEnabled);
-            Assert.Equal(TimeSpan.FromMilliseconds(650), ambientTimer.Interval);
+            var ambient = window.CaptureAmbientRuntime();
+            Assert.True(ambient.IsScheduled);
+            Assert.Equal(TimeSpan.FromMilliseconds(650), ambient.ScheduledDelay);
             Assert.Equal(
                 PetAmbientAction.Greeting,
-                GetPrivateField<PetAmbientAction>(window, "_pendingAmbientAction"));
+                ambient.PendingAction);
 
             window.Close();
             DeleteSettingsDirectory(settingsDirectory);
@@ -69,34 +69,37 @@ public sealed class WindowShellTests
     }
 
     [Fact]
-    public async Task MainWindow_StartupGreetingCompletesThenSchedulesOneFreshBlink()
+    public void MainWindow_StartupGreetingCompletesThenSchedulesOneFreshBlink()
     {
-        await RunOnStaThreadAsync(async () =>
+        RunOnStaThread(() =>
         {
             var settingsDirectory = CreateSettingsDirectory();
+            var monotonicTime = new ManualTimeProvider();
+            var animations = new ControlledAnimationController();
             var window = CreateWindowWithScheduler(
                 settingsDirectory,
-                new AmbientActionScheduler(() => 0.5));
+                CreateSchedulerWithTimeProvider(() => 0.5, monotonicTime),
+                animationController: animations);
             window.Show();
             window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
 
-            await Task.Delay(800);
+            monotonicTime.Advance(TimeSpan.FromMilliseconds(650));
+            window.ProcessAmbientSchedule();
 
-            var badge = Assert.IsType<Border>(window.FindName("GreetingBadge"));
-            var coordinator = GetPrivateField<PetActionCoordinator>(window, "_actionCoordinator");
-            Assert.Equal(PetActionState.Greeting, coordinator.State);
-            Assert.True(badge.HasAnimatedProperties);
+            var ambient = window.CaptureAmbientRuntime();
+            Assert.Equal(PetActionState.Greeting, ambient.ActionState);
+            Assert.Equal(StartupGreetingPhase.Running, ambient.StartupGreeting);
 
-            await Task.Delay(1_100);
+            animations.CompleteAmbientAction();
 
-            var ambientTimer = GetPrivateField<DispatcherTimer>(window, "_ambientTimer");
-            Assert.Equal(PetActionState.Idle, coordinator.State);
-            Assert.True(ambientTimer.IsEnabled);
-            Assert.Equal(TimeSpan.FromSeconds(5), ambientTimer.Interval);
+            ambient = window.CaptureAmbientRuntime();
+            Assert.Equal(PetActionState.Idle, ambient.ActionState);
+            Assert.Equal(StartupGreetingPhase.Completed, ambient.StartupGreeting);
+            Assert.True(ambient.IsScheduled);
+            Assert.Equal(TimeSpan.FromSeconds(5), ambient.ScheduledDelay);
             Assert.Equal(
                 PetAmbientAction.Blink,
-                GetPrivateField<PetAmbientAction>(window, "_pendingAmbientAction"));
-            AssertNeutralAmbientVisuals(window);
+                ambient.PendingAction);
 
             window.Close();
             DeleteSettingsDirectory(settingsDirectory);
@@ -110,42 +113,49 @@ public sealed class WindowShellTests
         {
             var settingsDirectory = CreateSettingsDirectory();
             var settings = PetSettings.Default with { AnimationPaused = true };
+            var monotonicTime = new ManualTimeProvider();
+            var animations = new ControlledAnimationController();
             var window = CreateWindowWithScheduler(
                 settingsDirectory,
-                new AmbientActionScheduler(() => 0.5),
-                settings);
+                CreateSchedulerWithTimeProvider(() => 0.5, monotonicTime),
+                settings,
+                animations);
             window.Show();
             window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
-            var timer = GetPrivateField<DispatcherTimer>(window, "_ambientTimer");
-            var coordinator = GetPrivateField<PetActionCoordinator>(window, "_actionCoordinator");
 
-            Assert.False(timer.IsEnabled);
-            Assert.Equal("Pending", GetPrivateFieldValue(window, "_startupGreetingState").ToString());
-            InvokePrivate(window, "AmbientTimer_Tick", null, EventArgs.Empty);
-            Assert.Equal(PetActionState.Paused, coordinator.State);
-            Assert.Equal("Pending", GetPrivateFieldValue(window, "_startupGreetingState").ToString());
-            Assert.False(timer.IsEnabled);
+            var ambient = window.CaptureAmbientRuntime();
+            Assert.False(ambient.IsScheduled);
+            Assert.Equal(StartupGreetingPhase.Pending, ambient.StartupGreeting);
+            window.ProcessAmbientSchedule();
+            ambient = window.CaptureAmbientRuntime();
+            Assert.Equal(PetActionState.Paused, ambient.ActionState);
+            Assert.Equal(StartupGreetingPhase.Pending, ambient.StartupGreeting);
+            Assert.False(ambient.IsScheduled);
 
-            Assert.IsType<MenuItem>(window.FindName("PauseMenuItem"))
-                .RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
-            Assert.True(timer.IsEnabled);
-            Assert.Equal(TimeSpan.FromMilliseconds(650), timer.Interval);
-            Assert.Equal("Scheduled", GetPrivateFieldValue(window, "_startupGreetingState").ToString());
+            await window.ToggleAnimationAsync();
+            ambient = window.CaptureAmbientRuntime();
+            Assert.True(ambient.IsScheduled);
+            Assert.Equal(TimeSpan.FromMilliseconds(650), ambient.ScheduledDelay);
+            Assert.Equal(StartupGreetingPhase.Scheduled, ambient.StartupGreeting);
 
-            await Task.Delay(800);
-            Assert.Equal(PetActionState.Greeting, coordinator.State);
-            Assert.Equal("Running", GetPrivateFieldValue(window, "_startupGreetingState").ToString());
+            monotonicTime.Advance(TimeSpan.FromMilliseconds(650));
+            window.ProcessAmbientSchedule();
+            ambient = window.CaptureAmbientRuntime();
+            Assert.Equal(PetActionState.Greeting, ambient.ActionState);
+            Assert.Equal(StartupGreetingPhase.Running, ambient.StartupGreeting);
 
-            await Task.Delay(1_100);
-            Assert.Equal(PetActionState.Idle, coordinator.State);
-            Assert.Equal("Completed", GetPrivateFieldValue(window, "_startupGreetingState").ToString());
-            Assert.True(timer.IsEnabled);
-            Assert.Equal(TimeSpan.FromSeconds(5), timer.Interval);
-            Assert.Equal(PetAmbientAction.Blink, GetPrivateField<PetAmbientAction>(window, "_pendingAmbientAction"));
+            animations.CompleteAmbientAction();
+            ambient = window.CaptureAmbientRuntime();
+            Assert.Equal(PetActionState.Idle, ambient.ActionState);
+            Assert.Equal(StartupGreetingPhase.Completed, ambient.StartupGreeting);
+            Assert.True(ambient.IsScheduled);
+            Assert.Equal(TimeSpan.FromSeconds(5), ambient.ScheduledDelay);
+            Assert.Equal(PetAmbientAction.Blink, ambient.PendingAction);
 
-            InvokePrivate(window, "Window_ContentRendered", null, EventArgs.Empty);
-            Assert.Equal("Completed", GetPrivateFieldValue(window, "_startupGreetingState").ToString());
-            Assert.Equal(PetAmbientAction.Blink, GetPrivateField<PetAmbientAction>(window, "_pendingAmbientAction"));
+            window.ProcessPresentationRendered();
+            ambient = window.CaptureAmbientRuntime();
+            Assert.Equal(StartupGreetingPhase.Completed, ambient.StartupGreeting);
+            Assert.Equal(PetAmbientAction.Blink, ambient.PendingAction);
 
             window.Close();
             DeleteSettingsDirectory(settingsDirectory);
@@ -153,38 +163,45 @@ public sealed class WindowShellTests
     }
 
     [Fact]
-    public async Task MainWindow_ManualGreetingDoesNotConsumeScheduledStartupGreeting()
+    public void MainWindow_ManualGreetingDoesNotConsumeScheduledStartupGreeting()
     {
-        await RunOnStaThreadAsync(async () =>
+        RunOnStaThread(() =>
         {
             var settingsDirectory = CreateSettingsDirectory();
+            var monotonicTime = new ManualTimeProvider();
+            var animations = new ControlledAnimationController();
             var window = CreateWindowWithScheduler(
                 settingsDirectory,
-                new AmbientActionScheduler(() => 0.5));
+                CreateSchedulerWithTimeProvider(() => 0.5, monotonicTime),
+                animationController: animations);
             window.Show();
             window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
             var startupReply = GetLastReply(window);
-            var timer = GetPrivateField<DispatcherTimer>(window, "_ambientTimer");
 
-            Assert.Equal("Scheduled", GetPrivateFieldValue(window, "_startupGreetingState").ToString());
+            Assert.Equal(
+                StartupGreetingPhase.Scheduled,
+                window.CaptureAmbientRuntime().StartupGreeting);
             Assert.IsType<MenuItem>(window.FindName("GreetingMenuItem"))
                 .RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
 
             Assert.Same(startupReply, GetLastReply(window));
-            Assert.Equal("Pending", GetPrivateFieldValue(window, "_startupGreetingState").ToString());
-            Assert.False(timer.IsEnabled);
+            var ambient = window.CaptureAmbientRuntime();
+            Assert.Equal(StartupGreetingPhase.Pending, ambient.StartupGreeting);
+            Assert.Equal(PetActionState.Greeting, ambient.ActionState);
+            Assert.False(ambient.IsScheduled);
 
-            await Task.Delay(1_200);
+            animations.CompleteAmbientAction();
+            ambient = window.CaptureAmbientRuntime();
+            Assert.Equal(StartupGreetingPhase.Scheduled, ambient.StartupGreeting);
+            Assert.True(ambient.IsScheduled);
+            Assert.Equal(TimeSpan.FromMilliseconds(650), ambient.ScheduledDelay);
+            Assert.Equal(PetAmbientAction.Greeting, ambient.PendingAction);
 
-            Assert.Equal("Scheduled", GetPrivateFieldValue(window, "_startupGreetingState").ToString());
-            Assert.True(timer.IsEnabled);
-            Assert.Equal(TimeSpan.FromMilliseconds(650), timer.Interval);
-            Assert.Equal(PetAmbientAction.Greeting, GetPrivateField<PetAmbientAction>(window, "_pendingAmbientAction"));
-
-            InvokePrivate(window, "AmbientTimer_Tick", null, EventArgs.Empty);
-            Assert.Equal(PetActionState.Idle, GetPrivateField<PetActionCoordinator>(window, "_actionCoordinator").State);
-            Assert.Equal("Scheduled", GetPrivateFieldValue(window, "_startupGreetingState").ToString());
-            Assert.True(timer.IsEnabled);
+            window.ProcessAmbientSchedule();
+            ambient = window.CaptureAmbientRuntime();
+            Assert.Equal(PetActionState.Idle, ambient.ActionState);
+            Assert.Equal(StartupGreetingPhase.Scheduled, ambient.StartupGreeting);
+            Assert.True(ambient.IsScheduled);
 
             window.Close();
             DeleteSettingsDirectory(settingsDirectory);
@@ -203,20 +220,24 @@ public sealed class WindowShellTests
                 CreateSchedulerWithTimeProvider(() => 0.5, monotonicTime));
             window.Show();
             window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
-            var timer = GetPrivateField<DispatcherTimer>(window, "_ambientTimer");
 
             monotonicTime.Advance(TimeSpan.FromMilliseconds(650));
-            InvokePrivate(window, "AmbientTimer_Tick", null, EventArgs.Empty);
-            Assert.Equal("Running", GetPrivateFieldValue(window, "_startupGreetingState").ToString());
+            window.ProcessAmbientSchedule();
+            Assert.Equal(
+                StartupGreetingPhase.Running,
+                window.CaptureAmbientRuntime().StartupGreeting);
 
             var pause = Assert.IsType<MenuItem>(window.FindName("PauseMenuItem"));
             pause.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
-            Assert.Equal("Completed", GetPrivateFieldValue(window, "_startupGreetingState").ToString());
+            Assert.Equal(
+                StartupGreetingPhase.Completed,
+                window.CaptureAmbientRuntime().StartupGreeting);
             pause.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
 
-            Assert.True(timer.IsEnabled);
-            Assert.Equal(TimeSpan.FromSeconds(5), timer.Interval);
-            Assert.Equal(PetAmbientAction.Blink, GetPrivateField<PetAmbientAction>(window, "_pendingAmbientAction"));
+            var ambient = window.CaptureAmbientRuntime();
+            Assert.True(ambient.IsScheduled);
+            Assert.Equal(TimeSpan.FromSeconds(5), ambient.ScheduledDelay);
+            Assert.Equal(PetAmbientAction.Blink, ambient.PendingAction);
 
             window.Close();
         });
@@ -239,22 +260,22 @@ public sealed class WindowShellTests
                 CreateSchedulerWithTimeProvider(() => 0.5, monotonicTime));
             window.Show();
             window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
-            var timer = GetPrivateField<DispatcherTimer>(window, "_ambientTimer");
-            var coordinator = GetPrivateField<PetActionCoordinator>(window, "_actionCoordinator");
 
             monotonicTime.SetUtcNow(new DateTimeOffset(2099, 1, 1, 0, 0, 0, TimeSpan.Zero));
-            InvokePrivate(window, "AmbientTimer_Tick", null, EventArgs.Empty);
+            window.ProcessAmbientSchedule();
 
-            Assert.Equal(PetActionState.Idle, coordinator.State);
-            Assert.Equal("Scheduled", GetPrivateFieldValue(window, "_startupGreetingState").ToString());
-            Assert.True(timer.IsEnabled);
+            var ambient = window.CaptureAmbientRuntime();
+            Assert.Equal(PetActionState.Idle, ambient.ActionState);
+            Assert.Equal(StartupGreetingPhase.Scheduled, ambient.StartupGreeting);
+            Assert.True(ambient.IsScheduled);
 
             monotonicTime.SetUtcNow(new DateTimeOffset(1970, 1, 1, 0, 0, 0, TimeSpan.Zero));
             monotonicTime.Advance(TimeSpan.FromMilliseconds(650));
-            InvokePrivate(window, "AmbientTimer_Tick", null, EventArgs.Empty);
+            window.ProcessAmbientSchedule();
 
-            Assert.Equal(PetActionState.Greeting, coordinator.State);
-            Assert.Equal("Running", GetPrivateFieldValue(window, "_startupGreetingState").ToString());
+            ambient = window.CaptureAmbientRuntime();
+            Assert.Equal(PetActionState.Greeting, ambient.ActionState);
+            Assert.Equal(StartupGreetingPhase.Running, ambient.StartupGreeting);
             window.Close();
             DeleteSettingsDirectory(settingsDirectory);
         });
@@ -280,23 +301,24 @@ public sealed class WindowShellTests
             var badge = Assert.IsType<Border>(window.FindName("GreetingBadge"));
             var badgeOffset = Assert.IsType<TranslateTransform>(
                 window.FindName("GreetingBadgeOffset"));
-            var coordinator = GetPrivateField<PetActionCoordinator>(window, "_actionCoordinator");
             Assert.Same(startupReply, GetLastReply(window));
-            Assert.Equal(PetActionState.Greeting, coordinator.State);
+            Assert.Equal(
+                PetActionState.Greeting,
+                window.CaptureAmbientRuntime().ActionState);
             Assert.True(badge.HasAnimatedProperties);
             Assert.True(badgeOffset.HasAnimatedProperties);
             Assert.True(Assert.IsType<RotateTransform>(window.FindName("ActionRotation"))
                 .HasAnimatedProperties);
 
-            InvokePrivate(window, "AmbientTimer_Tick", null, EventArgs.Empty);
+            window.ProcessAmbientSchedule();
 
-            var ambientTimer = GetPrivateField<DispatcherTimer>(window, "_ambientTimer");
-            Assert.Equal(PetActionState.Greeting, coordinator.State);
-            Assert.False(ambientTimer.IsEnabled);
-            Assert.Equal("Pending", GetPrivateFieldValue(window, "_startupGreetingState").ToString());
+            var ambient = window.CaptureAmbientRuntime();
+            Assert.Equal(PetActionState.Greeting, ambient.ActionState);
+            Assert.False(ambient.IsScheduled);
+            Assert.Equal(StartupGreetingPhase.Pending, ambient.StartupGreeting);
             Assert.Equal(
                 PetAmbientAction.Greeting,
-                GetPrivateField<PetAmbientAction>(window, "_pendingAmbientAction"));
+                ambient.PendingAction);
 
             window.Close();
             DeleteSettingsDirectory(settingsDirectory);
@@ -317,14 +339,12 @@ public sealed class WindowShellTests
             var greeting = Assert.IsType<MenuItem>(window.FindName("GreetingMenuItem"));
             var pause = Assert.IsType<MenuItem>(window.FindName("PauseMenuItem"));
             var say = Assert.IsType<MenuItem>(window.FindName("SayMenuItem"));
-            var ambientTimer = GetPrivateField<DispatcherTimer>(window, "_ambientTimer");
-            var coordinator = GetPrivateField<PetActionCoordinator>(window, "_actionCoordinator");
-
             greeting.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
             pause.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
 
-            Assert.False(ambientTimer.IsEnabled);
-            Assert.Equal(PetActionState.Paused, coordinator.State);
+            var ambient = window.CaptureAmbientRuntime();
+            Assert.False(ambient.IsScheduled);
+            Assert.Equal(PetActionState.Paused, ambient.ActionState);
             AssertNeutralAmbientVisuals(window);
 
             say.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
@@ -333,15 +353,16 @@ public sealed class WindowShellTests
 
             pause.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
 
-            Assert.Equal(PetActionState.Idle, coordinator.State);
-            Assert.True(ambientTimer.IsEnabled);
-            Assert.Equal(TimeSpan.FromMilliseconds(650), ambientTimer.Interval);
+            ambient = window.CaptureAmbientRuntime();
+            Assert.Equal(PetActionState.Idle, ambient.ActionState);
+            Assert.True(ambient.IsScheduled);
+            Assert.Equal(TimeSpan.FromMilliseconds(650), ambient.ScheduledDelay);
             Assert.Equal(
                 PetAmbientAction.Greeting,
-                GetPrivateField<PetAmbientAction>(window, "_pendingAmbientAction"));
+                ambient.PendingAction);
 
             window.Close();
-            Assert.False(ambientTimer.IsEnabled);
+            Assert.False(window.CaptureAmbientRuntime().IsScheduled);
         });
 
         Assert.True(SpinWait.SpinUntil(
@@ -353,51 +374,52 @@ public sealed class WindowShellTests
     [Fact]
     public void MainWindow_DragAndLandingTakePriorityAndRestoreThePriorPauseState()
     {
+        var settingsDirectory = CreateSettingsDirectory();
         RunOnStaThread(() =>
         {
-            var settingsDirectory = CreateSettingsDirectory();
+            var animations = new ControlledAnimationController();
             var window = CreateWindowWithScheduler(
                 settingsDirectory,
-                new AmbientActionScheduler(() => 0.5));
+                new AmbientActionScheduler(() => 0.5),
+                animationController: animations);
             window.Show();
             window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
-            var ambientTimer = GetPrivateField<DispatcherTimer>(window, "_ambientTimer");
-            var coordinator = GetPrivateField<PetActionCoordinator>(window, "_actionCoordinator");
 
             Assert.IsType<MenuItem>(window.FindName("GreetingMenuItem"))
                 .RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
-            InvokePrivate(window, "BeginDragAction");
-            Assert.False(ambientTimer.IsEnabled);
-            Assert.Equal(PetActionState.Dragging, coordinator.State);
+            window.BeginDragAction();
+            var ambient = window.CaptureAmbientRuntime();
+            Assert.False(ambient.IsScheduled);
+            Assert.Equal(PetActionState.Dragging, ambient.ActionState);
             AssertNeutralAmbientVisuals(window);
 
-            InvokePrivate(window, "BeginLandingAction");
-            Assert.Equal(PetActionState.Landing, coordinator.State);
-            WaitForCondition(
-                () => coordinator.State == PetActionState.Idle,
-                TimeSpan.FromSeconds(3),
-                () => $"Landing did not complete to Idle; current state: {coordinator.State}.");
-            Assert.Equal(PetActionState.Idle, coordinator.State);
-            Assert.True(ambientTimer.IsEnabled);
-            Assert.Equal(TimeSpan.FromMilliseconds(650), ambientTimer.Interval);
-            Assert.Equal(PetAmbientAction.Greeting, GetPrivateField<PetAmbientAction>(window, "_pendingAmbientAction"));
+            window.BeginLandingAction();
+            Assert.Equal(PetActionState.Landing, window.CaptureAmbientRuntime().ActionState);
+            animations.CompleteAmbientAction();
+            ambient = window.CaptureAmbientRuntime();
+            Assert.Equal(PetActionState.Idle, ambient.ActionState);
+            Assert.True(ambient.IsScheduled);
+            Assert.Equal(TimeSpan.FromMilliseconds(650), ambient.ScheduledDelay);
+            Assert.Equal(PetAmbientAction.Greeting, ambient.PendingAction);
 
             Assert.IsType<MenuItem>(window.FindName("PauseMenuItem"))
                 .RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
-            InvokePrivate(window, "BeginDragAction");
-            InvokePrivate(window, "BeginLandingAction");
-            WaitForCondition(
-                () => coordinator.State == PetActionState.Paused,
-                TimeSpan.FromSeconds(3),
-                () => $"Landing did not restore Paused; current state: {coordinator.State}.");
+            window.BeginDragAction();
+            window.BeginLandingAction();
+            animations.CompleteAmbientAction();
 
-            Assert.Equal(PetActionState.Paused, coordinator.State);
-            Assert.False(ambientTimer.IsEnabled);
+            ambient = window.CaptureAmbientRuntime();
+            Assert.Equal(PetActionState.Paused, ambient.ActionState);
+            Assert.False(ambient.IsScheduled);
             AssertNeutralAmbientVisuals(window);
 
             window.Close();
-            DeleteSettingsDirectory(settingsDirectory);
         });
+
+        Assert.True(SpinWait.SpinUntil(
+            () => !HasPendingSettingsWrite(settingsDirectory),
+            TimeSpan.FromSeconds(5)));
+        DeleteSettingsDirectory(settingsDirectory);
     }
 
     [Fact]
@@ -406,32 +428,30 @@ public sealed class WindowShellTests
         RunOnStaThread(() =>
         {
             var settingsDirectory = CreateSettingsDirectory();
+            var animations = new ControlledAnimationController();
             var window = CreateWindowWithScheduler(
                 settingsDirectory,
-                new AmbientActionScheduler(() => 0.5));
+                new AmbientActionScheduler(() => 0.5),
+                animationController: animations);
             try
             {
                 window.Show();
                 window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
                 window.SetTrayAvailability(true);
-                var coordinator = GetPrivateField<PetActionCoordinator>(window, "_actionCoordinator");
-                var ambientTimer = GetPrivateField<DispatcherTimer>(window, "_ambientTimer");
 
-                InvokePrivate(window, "BeginDragAction");
-                InvokePrivate(window, "BeginLandingAction");
-                Assert.Equal(PetActionState.Landing, coordinator.State);
+                window.BeginDragAction();
+                window.BeginLandingAction();
+                Assert.Equal(PetActionState.Landing, window.CaptureAmbientRuntime().ActionState);
 
                 window.HideToTray();
-                Assert.Equal(PetActionState.Landing, coordinator.State);
+                Assert.Equal(PetActionState.Landing, window.CaptureAmbientRuntime().ActionState);
 
                 window.ToggleVisibilityFromTray();
-                WaitForCondition(
-                    () => coordinator.State == PetActionState.Idle,
-                    TimeSpan.FromSeconds(3),
-                    () => $"Landing did not complete after tray restore; current state: {coordinator.State}.");
+                animations.CompleteAmbientAction();
 
-                Assert.Equal(PetActionState.Idle, coordinator.State);
-                Assert.True(ambientTimer.IsEnabled);
+                var ambient = window.CaptureAmbientRuntime();
+                Assert.Equal(PetActionState.Idle, ambient.ActionState);
+                Assert.True(ambient.IsScheduled);
             }
             finally
             {
@@ -457,19 +477,18 @@ public sealed class WindowShellTests
             var coordinator = GetPrivateField<PetActionCoordinator>(window, "_actionCoordinator");
             var replyBeforeClose = GetLastReply(window);
 
-            InvokePrivate(window, "BeginDragAction");
+            window.BeginDragAction();
             Assert.Equal(PetActionState.Dragging, coordinator.State);
             window.Close();
             Assert.False(ambientTimer.IsEnabled);
             Assert.False(automaticTimer.IsEnabled);
 
-            InvokePrivate(window, "BeginLandingAction");
+            window.BeginLandingAction();
 
             Assert.Equal(PetActionState.Dragging, coordinator.State);
             AssertNeutralAmbientVisuals(window);
 
             await InvokePrivateAsync(window, "CompleteDragAfterMoveAsync");
-            await Task.Delay(100);
 
             Assert.Same(replyBeforeClose, GetLastReply(window));
             Assert.False(ambientTimer.IsEnabled);
@@ -492,18 +511,13 @@ public sealed class WindowShellTests
                 new AmbientActionScheduler(() => 0.5));
             window.Show();
             window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
-            var timer = GetPrivateField<DispatcherTimer>(window, "_ambientTimer");
-            var coordinator = GetPrivateField<PetActionCoordinator>(window, "_actionCoordinator");
-
             window.Close();
-            var stateAfterClose = coordinator.State;
-            var startupStateAfterClose = GetPrivateFieldValue(window, "_startupGreetingState").ToString();
-            InvokePrivate(window, "AmbientTimer_Tick", null, EventArgs.Empty);
+            var stateAfterClose = window.CaptureAmbientRuntime();
+            window.ProcessAmbientSchedule();
             window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
 
-            Assert.Equal(stateAfterClose, coordinator.State);
-            Assert.Equal(startupStateAfterClose, GetPrivateFieldValue(window, "_startupGreetingState").ToString());
-            Assert.False(timer.IsEnabled);
+            Assert.Equal(stateAfterClose, window.CaptureAmbientRuntime());
+            Assert.False(stateAfterClose.IsScheduled);
             AssertNeutralAmbientVisuals(window);
             DeleteSettingsDirectory(settingsDirectory);
         });
@@ -525,10 +539,10 @@ public sealed class WindowShellTests
 
             Assert.True(completed);
             Assert.InRange(stopwatch.Elapsed, TimeSpan.Zero, TimeSpan.FromSeconds(3));
-            var ambientTimer = GetPrivateField<DispatcherTimer>(window, "_ambientTimer");
-            Assert.True(ambientTimer.IsEnabled);
-            Assert.Equal(TimeSpan.FromMilliseconds(650), ambientTimer.Interval);
-            Assert.Equal("Scheduled", GetPrivateFieldValue(window, "_startupGreetingState").ToString());
+            var ambient = window.CaptureAmbientRuntime();
+            Assert.True(ambient.IsScheduled);
+            Assert.Equal(TimeSpan.FromMilliseconds(650), ambient.ScheduledDelay);
+            Assert.Equal(StartupGreetingPhase.Scheduled, ambient.StartupGreeting);
             AssertNeutralAmbientVisuals(window);
 
             window.Close();
@@ -1554,7 +1568,7 @@ public sealed class WindowShellTests
                 postExitToggle = window.ToggleAnimationAsync();
                 InvokePrivate(window, "AutomaticTimer_Tick", null, EventArgs.Empty);
                 InvokePrivate(window, "EventTimer_Tick", null, EventArgs.Empty);
-                InvokePrivate(window, "AmbientTimer_Tick", null, EventArgs.Empty);
+                window.ProcessAmbientSchedule();
                 InvokePrivate(window, "BubbleHover_MouseEnter", character, null);
                 InvokePrivate(window, "BubbleHover_MouseLeave", character, null);
                 InvokePrivate(window, "BubbleHover_MouseEnter", bubble, null);
@@ -2122,7 +2136,7 @@ public sealed class WindowShellTests
                 var hiddenReply = GetLastReply(window);
                 InvokePrivate(window, "AutomaticTimer_Tick", null, EventArgs.Empty);
                 InvokePrivate(window, "EventTimer_Tick", null, EventArgs.Empty);
-                InvokePrivate(window, "AmbientTimer_Tick", null, EventArgs.Empty);
+                window.ProcessAmbientSchedule();
 
                 Assert.Same(hiddenReply, GetLastReply(window));
                 Assert.False(popup.IsOpen);
@@ -2195,7 +2209,7 @@ public sealed class WindowShellTests
             window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
             SetPrivateField(window, "_dragged", true);
             SetPrivateField(window, "_dragCompletionStarted", false);
-            InvokePrivate(window, "BeginDragAction");
+            window.BeginDragAction();
 
             InvokePrivate(window, "FinishDragOnce");
             InvokePrivate(window, "FinishDragOnce");
@@ -2604,36 +2618,63 @@ public sealed class WindowShellTests
                 Assert.Equal("⌂", Assert.IsType<MenuItem>(window.FindName("RestorePositionMenuItem")).Tag);
                 Assert.Equal("☁", Assert.IsType<MenuItem>(window.FindName("ExitMenuItem")).Tag);
 
-                var hoverBrush = Assert.IsType<SolidColorBrush>(
-                    window.FindResource("Pet.Brush.MenuItemHover"));
-                var innerHighlightBrush = Assert.IsType<SolidColorBrush>(
-                    window.FindResource("Pet.Brush.MenuHighlight"));
+                Assert.IsType<SolidColorBrush>(window.FindResource("Pet.Brush.MenuItemHover"));
+                Assert.IsType<SolidColorBrush>(window.FindResource("Pet.Brush.MenuHighlight"));
                 var hoverTrigger = say.Template.Triggers
                     .OfType<Trigger>()
                     .Single(trigger =>
                         trigger.Property == MenuItem.IsHighlightedProperty
                         && Equals(trigger.Value, true));
                 var hoverSetters = hoverTrigger.Setters.OfType<Setter>().ToArray();
-                Assert.Same(
-                    hoverBrush,
-                    hoverSetters.Single(setter =>
+                Assert.Equal(
+                    "Pet.Brush.MenuItemHover",
+                    Assert.IsType<DynamicResourceExtension>(hoverSetters.Single(setter =>
                         setter.TargetName == "MenuItemChrome"
-                        && setter.Property == Border.BackgroundProperty).Value);
-                Assert.Same(
-                    innerHighlightBrush,
-                    hoverSetters.Single(setter =>
+                        && setter.Property == Border.BackgroundProperty).Value).ResourceKey);
+                Assert.Equal(
+                    "Pet.Brush.MenuHighlight",
+                    Assert.IsType<DynamicResourceExtension>(hoverSetters.Single(setter =>
                         setter.TargetName == "MenuItemChrome"
-                        && setter.Property == Border.BorderBrushProperty).Value);
+                        && setter.Property == Border.BorderBrushProperty).Value).ResourceKey);
+
+                var checkedHighlightTrigger = say.Template.Triggers
+                    .OfType<MultiTrigger>()
+                    .Single(trigger =>
+                        trigger.Conditions.Count == 2
+                        && trigger.Conditions.Cast<System.Windows.Condition>().Any(condition =>
+                            condition.Property == MenuItem.IsHighlightedProperty
+                            && Equals(condition.Value, true))
+                        && trigger.Conditions.Cast<System.Windows.Condition>().Any(condition =>
+                            condition.Property == MenuItem.IsCheckedProperty
+                            && Equals(condition.Value, true)));
+                var checkedHighlightForeground = checkedHighlightTrigger.Setters
+                    .OfType<Setter>()
+                    .Single(setter =>
+                        setter.TargetName == "IconGlyph"
+                        && setter.Property == TextBlock.ForegroundProperty);
+                Assert.Equal(
+                    "Pet.Brush.MenuItemHoverText",
+                    Assert.IsType<DynamicResourceExtension>(
+                        checkedHighlightForeground.Value).ResourceKey);
 
                 var disabledTrigger = say.Template.Triggers
                     .OfType<Trigger>()
                     .Single(trigger =>
                         trigger.Property == UIElement.IsEnabledProperty
                         && Equals(trigger.Value, false));
-                var disabledSetter = Assert.Single(disabledTrigger.Setters.OfType<Setter>());
-                Assert.Equal("MenuItemChrome", disabledSetter.TargetName);
-                Assert.Equal(UIElement.OpacityProperty, disabledSetter.Property);
-                Assert.Equal(0.46, Assert.IsType<double>(disabledSetter.Value));
+                var disabledSetters = disabledTrigger.Setters.OfType<Setter>().ToArray();
+                var disabledOpacity = disabledSetters.Single(setter =>
+                    setter.TargetName == "MenuItemChrome"
+                    && setter.Property == UIElement.OpacityProperty);
+                Assert.Equal(
+                    "Pet.Opacity.Disabled",
+                    Assert.IsType<DynamicResourceExtension>(disabledOpacity.Value).ResourceKey);
+                var disabledForeground = disabledSetters.Single(setter =>
+                    string.IsNullOrEmpty(setter.TargetName)
+                    && setter.Property == Control.ForegroundProperty);
+                Assert.Equal(
+                    "Pet.Brush.TextDisabled",
+                    Assert.IsType<DynamicResourceExtension>(disabledForeground.Value).ResourceKey);
 
                 size = menu.Items
                     .OfType<MenuItem>()
@@ -2776,13 +2817,15 @@ public sealed class WindowShellTests
     private static MainWindow CreateWindowWithScheduler(
         string settingsDirectory,
         AmbientActionScheduler ambientScheduler,
-        PetSettings? settings = null) =>
+        PetSettings? settings = null,
+        IPetAnimationController? animationController = null) =>
         new(new MainWindowDependencies(
             settings ?? PetSettings.Default,
             new SettingsService(settingsDirectory))
         {
             SuppressApplicationShutdownOnClose = true,
-            AmbientScheduler = ambientScheduler
+            AmbientScheduler = ambientScheduler,
+            AnimationController = animationController
         });
 
     private static MainWindow CreateWindowWithAutoStart(
@@ -2852,17 +2895,6 @@ public sealed class WindowShellTests
             TimeProvider = timeProvider,
             WarmupCoordinator = warmupCoordinator
         });
-
-    private static object GetPrivateFieldValue(MainWindow window, string fieldName)
-    {
-        var field = typeof(MainWindow).GetField(
-            fieldName,
-            BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.NotNull(field);
-        var value = field!.GetValue(window);
-        Assert.NotNull(value);
-        return value;
-    }
 
     private static void SetPrivateField<T>(MainWindow window, string fieldName, T value)
     {
@@ -2980,6 +3012,80 @@ public sealed class WindowShellTests
 
     private static string CreateSettingsDirectory() =>
         Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+
+    private sealed class ControlledAnimationController : IPetAnimationController
+    {
+        private Action? _ambientCompletion;
+
+        public void CompleteAmbientAction()
+        {
+            var completion = _ambientCompletion;
+            _ambientCompletion = null;
+            if (completion is null)
+            {
+                throw new InvalidOperationException("No ambient animation is awaiting completion.");
+            }
+
+            completion();
+        }
+
+        public void StartIdle()
+        {
+        }
+
+        public void PauseIdle()
+        {
+        }
+
+        public void ResumeIdle()
+        {
+        }
+
+        public void PlayClickReaction()
+        {
+        }
+
+        public void PlayClickReaction(ClickSide clickSide)
+        {
+        }
+
+        public void SetDragLean(double horizontalDelta)
+        {
+        }
+
+        public void PlayLanding(Action? completed)
+        {
+            _ambientCompletion = completed;
+        }
+
+        public void PlayBlink(bool doubleBlink, Action completed)
+        {
+            _ambientCompletion = completed;
+        }
+
+        public void PlayGreeting(Action completed)
+        {
+            _ambientCompletion = completed;
+        }
+
+        public void CancelAmbientAction()
+        {
+            _ambientCompletion = null;
+        }
+
+        public void Suspend()
+        {
+        }
+
+        public void Resume()
+        {
+        }
+
+        public void Dispose()
+        {
+            _ambientCompletion = null;
+        }
+    }
 
     private static bool HasPendingSettingsWrite(string settingsDirectory) =>
         Directory.Exists(settingsDirectory)

@@ -204,6 +204,30 @@ public sealed class DialogueWarmupCoordinatorTests
         Assert.True(dialogue.IsReady);
     }
 
+    [Fact]
+    public async Task StartAsync_AfterCancelledRunStartsFreshRunWithNewToken()
+    {
+        var factoryCalls = 0;
+        var dialogue = DialogueService.CreateDeferred(snapshot =>
+        {
+            factoryCalls++;
+            return new FixedAgent(snapshot);
+        });
+        var coordinator = new DialogueWarmupCoordinator(dialogue);
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+
+        var cancelledRun = coordinator.StartAsync(cancelled.Token);
+        Assert.Equal(DialogueWarmupOutcome.Cancelled, await cancelledRun);
+        Assert.Equal(0, factoryCalls);
+
+        var replacementRun = coordinator.StartAsync(CancellationToken.None);
+
+        Assert.NotSame(cancelledRun, replacementRun);
+        Assert.Equal(DialogueWarmupOutcome.Ready, await replacementRun);
+        Assert.Equal(1, factoryCalls);
+    }
+
     private sealed class FixedAgent : ICompanionDialogueAgent
     {
         private readonly AgentMemorySnapshot _snapshot;

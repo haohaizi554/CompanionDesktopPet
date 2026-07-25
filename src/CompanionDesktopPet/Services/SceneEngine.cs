@@ -694,9 +694,10 @@ public sealed class SceneScheduler
         return lines[^1];
     }
 
-    private static IEnumerable<SceneDefinition> AvailableScenes(SceneContext context) =>
-        SceneCatalog.All.Where(scene =>
-            scene.StoryArcId is null || (scene.StoryNode == 0 && context.State.ActiveStories.Count == 0));
+    internal static IEnumerable<SceneDefinition> AvailableScenes(SceneContext context) =>
+        SceneCatalog.All.Where(scene => scene.StoryArcId is not null
+            ? scene.StoryNode == 0 && context.State.ActiveStories.Count == 0
+            : !StoryArcCatalog.ReservedPersonaSemanticGroups.Contains(scene.SemanticGroup));
 
     private static bool TriggerAndContextMatch(
         SceneDefinition scene,

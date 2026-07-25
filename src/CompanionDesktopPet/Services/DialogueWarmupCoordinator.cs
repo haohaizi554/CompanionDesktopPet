@@ -64,7 +64,12 @@ internal sealed class DialogueWarmupCoordinator
     {
         lock (_sync)
         {
-            _run ??= StartNewRunLocked(cancellationToken);
+            if (_run is null
+                || (_run.IsCompleted && _lastOutcome == DialogueWarmupOutcome.Cancelled))
+            {
+                _run = StartNewRunLocked(cancellationToken);
+            }
+
             return _run;
         }
     }
@@ -81,7 +86,8 @@ internal sealed class DialogueWarmupCoordinator
             else if (_run.IsCompleted
                 && _lastOutcome is (
                     DialogueWarmupOutcome.PermanentFailure
-                    or DialogueWarmupOutcome.RetriesExhausted))
+                    or DialogueWarmupOutcome.RetriesExhausted
+                    or DialogueWarmupOutcome.Cancelled))
             {
                 _run = StartNewRunLocked(cancellationToken);
             }

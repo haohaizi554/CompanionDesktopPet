@@ -21,7 +21,7 @@ public partial class MainWindow : Window
     private readonly SettingsService _settingsService;
     private readonly Func<AgentMemorySnapshot, Task>? _saveAgentMemoryAsync;
     private readonly Func<PetSettings, Task> _saveSettingsAsync;
-    private readonly AnimationController _animation;
+    private readonly IPetAnimationController _animation;
     private readonly DispatcherTimer _automaticTimer = new();
     private readonly DispatcherTimer _bubbleTimer = new() { Interval = TimeSpan.FromSeconds(5) };
     private readonly DispatcherTimer _memoryTimer = new() { Interval = TimeSpan.FromSeconds(2) };
@@ -48,7 +48,7 @@ public partial class MainWindow : Window
     private bool _paused;
     private bool _dragged;
     private bool _shutdownRequested;
-    private StartupGreetingState _startupGreetingState = StartupGreetingState.Pending;
+    private StartupGreetingPhase _startupGreetingState = StartupGreetingPhase.Pending;
     private bool _runningSmokeProbe;
     private bool _isClosed;
     private bool _lastKnownAutoStart;
@@ -111,7 +111,7 @@ public partial class MainWindow : Window
         _announceLiveRegionChanged = dependencies.AnnounceLiveRegionChanged
             ?? RaiseLiveRegionChanged;
         _scheduler = new DialogueScheduler(_random);
-        _animation = new AnimationController(
+        _animation = dependencies.AnimationController ?? new AnimationController(
             BreathingScale,
             SwayRotation,
             FloatingOffset,
@@ -223,7 +223,10 @@ public partial class MainWindow : Window
         ScheduleNextPhrase();
     }
 
-    private void Window_ContentRendered(object? sender, EventArgs e)
+    private void Window_ContentRendered(object? sender, EventArgs e) =>
+        ProcessPresentationRendered();
+
+    internal void ProcessPresentationRendered()
     {
         if (InteractionFrozen)
         {
@@ -234,7 +237,10 @@ public partial class MainWindow : Window
         ScheduleNextAmbientAction();
     }
 
-    private void AmbientTimer_Tick(object? sender, EventArgs e)
+    private void AmbientTimer_Tick(object? sender, EventArgs e) =>
+        ProcessAmbientSchedule();
+
+    internal void ProcessAmbientSchedule()
     {
         if (PresentationSuspended)
         {
@@ -275,13 +281,13 @@ public partial class MainWindow : Window
 
         var action = _pendingAmbientAction;
         var isStartupGreeting = action == PetAmbientAction.Greeting
-            && _startupGreetingState == StartupGreetingState.Scheduled;
+            && _startupGreetingState == StartupGreetingPhase.Scheduled;
         InvalidateAmbientSchedule();
         if (!_actionCoordinator.TryBeginAmbient(action))
         {
             if (isStartupGreeting)
             {
-                _startupGreetingState = StartupGreetingState.Pending;
+                _startupGreetingState = StartupGreetingPhase.Pending;
             }
 
             return;
@@ -289,11 +295,19 @@ public partial class MainWindow : Window
 
         if (isStartupGreeting)
         {
-            _startupGreetingState = StartupGreetingState.Running;
+            _startupGreetingState = StartupGreetingPhase.Running;
         }
 
         PlayAmbientAction(action, isStartupGreeting);
     }
+
+    internal AmbientRuntimeSnapshot CaptureAmbientRuntime() =>
+        new(
+            _actionCoordinator.State,
+            _startupGreetingState,
+            _ambientTimer.IsEnabled,
+            _ambientTimer.Interval,
+            _pendingAmbientAction);
 
     private void PlayAmbientAction(PetAmbientAction action, bool isStartupGreeting = false)
     {
@@ -312,9 +326,9 @@ public partial class MainWindow : Window
 
     private void CompleteStartupGreeting()
     {
-        if (_startupGreetingState == StartupGreetingState.Running)
+        if (_startupGreetingState == StartupGreetingPhase.Running)
         {
-            _startupGreetingState = StartupGreetingState.Completed;
+            _startupGreetingState = StartupGreetingPhase.Completed;
         }
 
         CompleteAmbientAction(PetActionState.Greeting);
@@ -342,16 +356,16 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (_startupGreetingState == StartupGreetingState.Pending)
+        if (_startupGreetingState == StartupGreetingPhase.Pending)
         {
             ScheduleAmbientAction(
                 PetAmbientAction.Greeting,
                 TimeSpan.FromMilliseconds(650));
-            _startupGreetingState = StartupGreetingState.Scheduled;
+            _startupGreetingState = StartupGreetingPhase.Scheduled;
             return;
         }
 
-        if (_startupGreetingState == StartupGreetingState.Completed)
+        if (_startupGreetingState == StartupGreetingPhase.Completed)
         {
             ScheduleFreshBlink();
         }
@@ -377,9 +391,9 @@ public partial class MainWindow : Window
 
     private void PreserveScheduledStartupGreeting()
     {
-        if (_startupGreetingState == StartupGreetingState.Scheduled)
+        if (_startupGreetingState == StartupGreetingPhase.Scheduled)
         {
-            _startupGreetingState = StartupGreetingState.Pending;
+            _startupGreetingState = StartupGreetingPhase.Pending;
         }
     }
 
@@ -472,9 +486,9 @@ public partial class MainWindow : Window
 
     private void CancelActiveAmbientAction()
     {
-        if (_startupGreetingState == StartupGreetingState.Running)
+        if (_startupGreetingState == StartupGreetingPhase.Running)
         {
-            _startupGreetingState = StartupGreetingState.Completed;
+            _startupGreetingState = StartupGreetingPhase.Completed;
         }
 
         _animation.CancelAmbientAction();
@@ -846,7 +860,7 @@ public partial class MainWindow : Window
         ScheduleNextPhrase();
     }
 
-    private void BeginDragAction()
+    internal void BeginDragAction()
     {
         if (InteractionFrozen)
         {
@@ -859,7 +873,7 @@ public partial class MainWindow : Window
         _actionCoordinator.BeginDrag();
     }
 
-    private void BeginLandingAction()
+    internal void BeginLandingAction()
     {
         if (InteractionFrozen)
         {
@@ -1871,14 +1885,6 @@ public partial class MainWindow : Window
             _shutdownRequested = true;
             _shutdownApplication();
         }
-    }
-
-    private enum StartupGreetingState
-    {
-        Pending,
-        Scheduled,
-        Running,
-        Completed
     }
 
     private enum DialogueWarmupViewState
