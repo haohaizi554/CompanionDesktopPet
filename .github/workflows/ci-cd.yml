@@ -45,6 +45,18 @@ jobs:
           python-version: "3.11"
           architecture: x64
 
+      - name: Install pinned Python CI dependencies
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & python -m pip install `
+            --disable-pip-version-check `
+            --require-hashes `
+            --only-binary=:all: `
+            --requirement .github/requirements-ci.txt
+          if ($LASTEXITCODE -ne 0) {
+            throw "Pinned Python CI dependency installation failed with exit code $LASTEXITCODE."
+          }
+
       - name: Set up .NET
         uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
@@ -62,11 +74,17 @@ jobs:
             throw "$trackedSimulation must be committed."
           }
 
+          $tzdataVersion = & python -c "import importlib.metadata as metadata; print(metadata.version('tzdata'))"
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Unable to record the installed tzdata version.'
+          }
+
           @(
             "Event=$env:GITHUB_EVENT_NAME"
             "Ref=$env:GITHUB_REF"
             "Commit=$env:GITHUB_SHA"
             "Python=$(& python --version 2>&1)"
+            "Tzdata=$tzdataVersion"
             "DotNetSdk=$(& dotnet --version 2>&1)"
             "SimulationEventsSHA256=$((Get-FileHash -LiteralPath $trackedSimulation -Algorithm SHA256).Hash.ToLowerInvariant())"
           ) | Set-Content -LiteralPath (Join-Path $evidence 'environment.txt') -Encoding utf8
