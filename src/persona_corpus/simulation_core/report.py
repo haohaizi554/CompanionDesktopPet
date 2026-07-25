@@ -27,6 +27,7 @@ from .metrics import (
     derive_lexical_exposure_policy,
 )
 from .scenarios import (
+    SIMULATION_SCHEMA_VERSION,
     SUBSEED_DERIVATION_SHA256,
     SUBSEED_DERIVATION_VERSION,
     InventoryCoverage,
@@ -49,7 +50,6 @@ TONE_VALUES = tuple(sorted(TONES))
 LENGTH_BUCKETS = ("<8", "8-16", "17-24", "25-36", ">36")
 PREFIX_WIDTHS = (2, 3, 4, 5, 6)
 SUFFIX_WIDTHS = (4, 6, 8, 10)
-SIMULATION_SCHEMA_VERSION = 2
 _EPSILON = 1e-9
 
 
@@ -68,6 +68,8 @@ class SimulationAttempt:
     attempted_at: datetime
     context: PersonaContext
     row: CorpusLine | None
+    day_index: int = 0
+    slot_index: int = 0
 
     @property
     def selected_id(self) -> str | None:
@@ -91,6 +93,8 @@ class SimulationAttempt:
     def validation_payload(self) -> dict[str, object]:
         return {
             "seed": self.seed,
+            "day_index": self.day_index,
+            "slot_index": self.slot_index,
             "attempted_at": self.attempted_at.isoformat(timespec="seconds"),
             "context": self.context_payload(),
             "selected_id": self.selected_id,

@@ -25,7 +25,7 @@ The inventory share and the simulated playback share are deliberately separate. 
 | user_direct inventory ratio | n/a | 0.00% |
 | system_observe inventory ratio | n/a | 0.27% |
 | Technical enabled-inventory ratio | n/a | 70.97% |
-| Technical simulated-playback ratio | n/a | 18.67% |
+| Technical simulated-playback ratio | n/a | 18.73% |
 | Catchphrase line ratio | 28.58% | 25.92% |
 | PII review rows | 0 | 1248 |
 

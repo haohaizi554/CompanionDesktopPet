@@ -63,6 +63,13 @@ public sealed class PersonaCorpusTests
         Assert.Equal("observation_only", PersonaContractGenerated.SeasoningExpandedRuntimeInventoryPolicy);
     }
 
+    [Fact]
+    public void ApplicationAssembly_EmbedsEasterEggPlaybackAcceptanceBounds()
+    {
+        Assert.Equal(0.08, PersonaContractGenerated.EasterEggPlaybackMinimum, 8);
+        Assert.Equal(0.12, PersonaContractGenerated.EasterEggPlaybackMaximum, 8);
+    }
+
     [Theory]
     [InlineData("嗯嗯，这次可以。")]
     [InlineData("哈？这次可以。")]

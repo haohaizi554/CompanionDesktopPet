@@ -104,6 +104,65 @@ public sealed class OfflineCompanionAgentTests
     }
 
     [Fact]
+    public void Respond_MultiSeedPublishedOutputMeetsEasterEggPlaybackContract()
+    {
+        const int days = 30;
+        var seeds = Enumerable.Range(0, 10).Select(index => 2026072500 + index).ToArray();
+        var publicationHours = new[] { 5, 11, 17, 23 };
+        var start = new DateTime(2026, 8, 1, 0, 0, 0, DateTimeKind.Local);
+        var enabledById = PersonaCorpus.All.ToDictionary(line => line.Id, StringComparer.Ordinal);
+        var sceneById = SceneCatalog.All.ToDictionary(scene => scene.Id, StringComparer.Ordinal);
+        var allPlayback = new List<SceneHistoryEntry>(seeds.Length * days * publicationHours.Length);
+        var seedRatios = new List<double>(seeds.Length);
+
+        foreach (var seed in seeds)
+        {
+            var agent = new OfflineCompanionAgent();
+            var random = new Random(seed);
+            for (var day = 0; day < days; day++)
+            {
+                foreach (var hour in publicationHours)
+                {
+                    var reply = agent.Respond(
+                        CompanionEvent.Automatic,
+                        start.AddDays(day).AddHours(hour),
+                        random);
+                    Assert.True(reply.ShouldDisplayText, $"seed={seed} day={day} hour={hour}");
+                    Assert.NotNull(reply.SourceLine);
+                    Assert.Same(enabledById[reply.SourceLine!.Id], reply.SourceLine);
+                    Assert.Contains(reply.SourceLine, sceneById[reply.SceneId].Lines);
+                }
+            }
+
+            var seedPlayback = agent.History.Entries.ToArray();
+            Assert.Equal(days * publicationHours.Length, seedPlayback.Length);
+            AssertEasterEggRecentQuota(seedPlayback, seed);
+            var seedEasterEggRatio = seedPlayback.Count(entry =>
+                entry.CategoryGroup == DialogueCategoryGroup.EasterEgg) / (double)seedPlayback.Length;
+            Assert.InRange(
+                seedEasterEggRatio,
+                PersonaContractGenerated.EasterEggPlaybackMinimum,
+                PersonaContractGenerated.EasterEggPlaybackMaximum);
+            seedRatios.Add(seedEasterEggRatio);
+            allPlayback.AddRange(seedPlayback);
+        }
+
+        var easterEggCount = allPlayback.Count(entry =>
+            entry.CategoryGroup == DialogueCategoryGroup.EasterEgg);
+        var easterEggRatio = easterEggCount / (double)allPlayback.Count;
+        Console.WriteLine(
+            $"C# runtime EasterEgg exposure: {easterEggCount}/{allPlayback.Count} "
+            + $"({easterEggRatio:P2}); seeds={seeds.Length}; "
+            + $"seed_range={seedRatios.Min():P2}-{seedRatios.Max():P2}; "
+            + $"publication_hours={string.Join(',', publicationHours)}");
+
+        Assert.InRange(
+            easterEggRatio,
+            PersonaContractGenerated.EasterEggPlaybackMinimum,
+            PersonaContractGenerated.EasterEggPlaybackMaximum);
+    }
+
+    [Fact]
     public void Respond_NeverRepeatsBlockedGroupsAdjacentlyOrInsideSemanticCooldown()
     {
         var agent = new OfflineCompanionAgent();
@@ -362,6 +421,26 @@ public sealed class OfflineCompanionAgentTests
             }
         }
         return entries.Count == 0 ? 0 : repeats / (double)entries.Count;
+    }
+
+    private static void AssertEasterEggRecentQuota(
+        IReadOnlyList<SceneHistoryEntry> playback,
+        int seed)
+    {
+        for (var index = 0; index < playback.Count; index++)
+        {
+            var windowStart = Math.Max(
+                0,
+                index - PersonaContractGenerated.EasterEggRecentWindow + 1);
+            var easterEggCount = playback
+                .Skip(windowStart)
+                .Take(index - windowStart + 1)
+                .Count(entry => entry.CategoryGroup == DialogueCategoryGroup.EasterEgg);
+            Assert.True(
+                easterEggCount <= PersonaContractGenerated.EasterEggRecentMaximum,
+                $"seed={seed} output={index} EasterEggs={easterEggCount} "
+                + $"in recent {PersonaContractGenerated.EasterEggRecentWindow}");
+        }
     }
 
     [Fact]

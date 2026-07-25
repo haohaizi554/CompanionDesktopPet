@@ -3,20 +3,32 @@
 from __future__ import annotations
 
 import calendar
+import json
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from functools import lru_cache
 from typing import Mapping, Sequence
 
+from ..context import PersonaContext
 from ..contract import PERSONA_CONTRACT
+from ..history import SelectionHistory
 from ..models import CorpusLine
+from ..selector import SchedulerConfig, prepare_corpus, select_line
+from ..simulation_core.scenarios import (
+    ATTEMPT_SLOTS,
+    SIMULATION_SCHEMA_VERSION,
+    build_natural_attempt,
+    derive_subseed,
+)
 from ..trigger_matching import (
     time_context_token_matches,
     trigger_matches as _simulation_trigger_matches,
 )
 from .content_rules import _required_context_tokens
 from .core import _Issues, _is_finite_number, _is_integer
+from .simulation_coverage_rules import validate_simulation_coverage
 
 
 SIMULATION_KEYS = frozenset(
@@ -32,7 +44,7 @@ SIMULATION_KEYS = frozenset(
     }
 )
 SIMULATION_ATTEMPT_KEYS = frozenset(
-    {"seed", "attempted_at", "context", "selected_id"}
+    {"seed", "day_index", "slot_index", "attempted_at", "context", "selected_id"}
 )
 SIMULATION_CONTEXT_KEYS = frozenset(
     {
@@ -53,11 +65,16 @@ SIMULATION_EVENTS = frozenset({"tick", "app_start", "day_changed"})
 SIMULATION_DAYPARTS = frozenset(
     {"morning", "noon", "afternoon", "evening", "late_night"}
 )
+MAX_CANONICAL_REPLAY_ATTEMPTS = 3_000
+
 
 @dataclass(frozen=True, slots=True)
 class _SimulationAttempt:
     source_index: int
     seed: int
+    day_index: int
+    slot_index: int
+    attempted_at_text: str
     attempted_at: datetime
     context: Mapping[str, object]
     selected_id: str | None
@@ -67,6 +84,16 @@ class _SimulationAttempt:
 class _SimulationOutput:
     attempt: _SimulationAttempt
     row: CorpusLine
+
+
+@dataclass(frozen=True, slots=True)
+class _CanonicalReplayAttempt:
+    seed: int
+    day_index: int
+    slot_index: int
+    attempted_at_text: str
+    context: PersonaContext
+    selected_id: str | None
 
 
 def _expected_daypart(timestamp: datetime) -> str:
@@ -174,6 +201,195 @@ def _simulation_context_token_matches(
     return False
 
 
+def _context_payload(context: PersonaContext) -> dict[str, object]:
+    return {
+        "event": context.event,
+        "daypart": context.daypart,
+        "weekday": context.weekday,
+        "is_weekend": context.is_weekend,
+        "holiday": context.holiday,
+        "anniversary_days": context.anniversary_days,
+        "minutes_since_last_output": float(context.minutes_since_last_output),
+        "ide_foreground": context.ide_foreground,
+        "active_minutes": context.active_minutes,
+        "idle_return": context.idle_return,
+        "fullscreen": context.fullscreen,
+    }
+
+
+def _matches_canonical_context(
+    recorded: Mapping[str, object],
+    expected: PersonaContext,
+) -> bool:
+    expected_payload = _context_payload(expected)
+    return set(recorded) == set(expected_payload) and all(
+        type(recorded[key]) is type(expected_value)
+        and recorded[key] == expected_value
+        for key, expected_value in expected_payload.items()
+    )
+
+
+@lru_cache(maxsize=2)
+def _canonical_replay_stream(
+    rows: tuple[CorpusLine, ...],
+    scheduler_config_json: str,
+    days: int,
+    seeds: tuple[int, ...],
+    corpus_sha256: str,
+    scheduler_config_sha256: str,
+    derivation_version: str,
+    derivation_sha256: str,
+) -> tuple[_CanonicalReplayAttempt, ...]:
+    """Build an immutable exact replay stream for one complete input identity."""
+
+    # The derivation digest is intentionally part of the cache key even though
+    # the derivation function consumes the version directly. This prevents a
+    # changed published derivation contract from reusing an older decision stream.
+    del derivation_sha256
+    scheduler_mapping = json.loads(scheduler_config_json)
+    if not isinstance(scheduler_mapping, Mapping):
+        raise TypeError("scheduler config must decode to an object")
+    scheduler = SchedulerConfig.from_mapping(scheduler_mapping)
+    prepared = prepare_corpus(rows)
+    canonical: list[_CanonicalReplayAttempt] = []
+    for seed in seeds:
+        history = SelectionHistory()
+        for day_index in range(days):
+            for slot_index in range(len(ATTEMPT_SLOTS)):
+                last_output_at = history.records[-1].played_at if history.records else None
+                natural_attempt = build_natural_attempt(
+                    seed=seed,
+                    day_index=day_index,
+                    slot_index=slot_index,
+                    scheduler_config=scheduler,
+                    last_output_at=last_output_at,
+                )
+                selected = select_line(
+                    prepared,
+                    natural_attempt.context,
+                    history,
+                    natural_attempt.attempted_at,
+                    seed=derive_subseed(
+                        seed=seed,
+                        day_index=day_index,
+                        slot_index=slot_index,
+                        corpus_sha256=corpus_sha256,
+                        scheduler_config_sha256=scheduler_config_sha256,
+                        scenario=natural_attempt.scenario,
+                        derivation_version=derivation_version,
+                    ),
+                    scheduler_config=scheduler,
+                )
+                canonical.append(
+                    _CanonicalReplayAttempt(
+                        seed=seed,
+                        day_index=day_index,
+                        slot_index=slot_index,
+                        attempted_at_text=natural_attempt.attempted_at.isoformat(
+                            timespec="seconds"
+                        ),
+                        context=natural_attempt.context,
+                        selected_id=selected.row.id if selected is not None else None,
+                    )
+                )
+    return tuple(canonical)
+
+
+def _validate_simulation_replay(
+    attempts: Sequence[_SimulationAttempt],
+    rows: Sequence[CorpusLine],
+    scheduler_config: object,
+    issues: _Issues,
+    *,
+    days: int,
+    seeds: Sequence[int],
+    corpus_sha256: str,
+    scheduler_config_sha256: str,
+) -> None:
+    """Replay every canonical selector call and compare the exact recorded decision."""
+
+    try:
+        scheduler_config_json = json.dumps(
+            scheduler_config,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        from ..simulation_core.scenarios import (
+            SUBSEED_DERIVATION_SHA256,
+            SUBSEED_DERIVATION_VERSION,
+        )
+
+        canonical_attempts = _canonical_replay_stream(
+            tuple(rows),
+            scheduler_config_json,
+            days,
+            tuple(sorted(seeds)),
+            corpus_sha256,
+            scheduler_config_sha256,
+            SUBSEED_DERIVATION_VERSION,
+            SUBSEED_DERIVATION_SHA256,
+        )
+    except (AttributeError, TypeError, ValueError, json.JSONDecodeError) as error:
+        issues.error(
+            "simulation_format",
+            f"simulation replay cannot build canonical selector inputs: {error}",
+        )
+        return
+
+    mismatch_count = 0
+    first_mismatch: tuple[int, str, str | None] | None = None
+
+    def record_mismatch(
+        source_index: int,
+        reason: str,
+        selected_id: str | None = None,
+    ) -> None:
+        nonlocal mismatch_count, first_mismatch
+        mismatch_count += 1
+        if first_mismatch is None:
+            first_mismatch = (source_index, reason, selected_id)
+
+    canonical_seeds = tuple(sorted(seeds))
+    if tuple(seeds) != canonical_seeds:
+        record_mismatch(-1, "declared seeds are not in canonical ascending order")
+
+    for recorded, expected in zip(attempts, canonical_attempts, strict=True):
+        reasons: list[str] = []
+        if (
+            recorded.seed,
+            recorded.day_index,
+            recorded.slot_index,
+        ) != (expected.seed, expected.day_index, expected.slot_index):
+            reasons.append("seed/day_index/slot_index differs")
+        if recorded.attempted_at_text != expected.attempted_at_text:
+            reasons.append("attempted_at differs")
+        if not _matches_canonical_context(recorded.context, expected.context):
+            reasons.append("context differs")
+        if recorded.selected_id != expected.selected_id:
+            reasons.append(
+                "selected_id differs "
+                f"(expected {expected.selected_id!r}, got {recorded.selected_id!r})"
+            )
+        if reasons:
+            record_mismatch(
+                recorded.source_index,
+                "; ".join(reasons),
+                recorded.selected_id,
+            )
+
+    if mismatch_count and first_mismatch is not None:
+        source_index, reason, selected_id = first_mismatch
+        location = "top level" if source_index < 0 else f"attempt {source_index}"
+        issues.error(
+            "simulation_replay_mismatch",
+            f"{mismatch_count} simulation replay decision(s) differ from canonical inputs; "
+            f"first mismatch at {location}: {reason}",
+            selected_id,
+        )
+
+
 def _simulation_issues(
     simulation: object | None,
     rows: Sequence[CorpusLine],
@@ -202,9 +418,12 @@ def _simulation_issues(
         issues.error("simulation_format", "simulation result uses unknown or missing top-level keys")
     if (
         type(simulation.get("schema_version")) is not int
-        or simulation.get("schema_version") != 2
+        or simulation.get("schema_version") != SIMULATION_SCHEMA_VERSION
     ):
-        issues.error("simulation_format", "simulation schema_version must be integer 2")
+        issues.error(
+            "simulation_format",
+            f"simulation schema_version must be integer {SIMULATION_SCHEMA_VERSION}",
+        )
     for key, expected in (
         ("corpus_sha256", expected_corpus_sha256),
         ("scheduler_config_sha256", expected_scheduler_config_sha256),
@@ -263,6 +482,33 @@ def _simulation_issues(
     if not isinstance(attempts_value, list):
         issues.error("simulation_format", "simulation attempts must be an array")
         return
+    if len(attempts_value) > MAX_CANONICAL_REPLAY_ATTEMPTS:
+        issues.error(
+            "simulation_replay_limit",
+            "simulation event stream exceeds the bounded replay limit of "
+            f"{MAX_CANONICAL_REPLAY_ATTEMPTS} attempts",
+        )
+        return
+    expected_attempt_count: int | None = None
+    replay_shape_valid = False
+    if seeds_structurally_valid and _is_integer(days) and days > 0:
+        expected_attempt_count = len(seeds) * days * len(ATTEMPT_SLOTS)
+        if expected_attempt_count > MAX_CANONICAL_REPLAY_ATTEMPTS:
+            issues.error(
+                "simulation_replay_limit",
+                "declared simulation coordinates require "
+                f"{expected_attempt_count} canonical attempts, above the bounded "
+                f"limit of {MAX_CANONICAL_REPLAY_ATTEMPTS}",
+            )
+            return
+        elif len(attempts_value) != expected_attempt_count:
+            issues.error(
+                "simulation_replay_mismatch",
+                "simulation event count differs from the canonical coordinate set "
+                f"(expected {expected_attempt_count}, got {len(attempts_value)})",
+            )
+        else:
+            replay_shape_valid = True
     runtime_limits = (
         scheduler_config.get("runtime_limits")
         if isinstance(scheduler_config, Mapping)
@@ -278,6 +524,7 @@ def _simulation_issues(
     parsed_attempts: list[_SimulationAttempt] = []
     covered_dates: dict[int, set[object]] = defaultdict(set)
     seen_attempt_times: set[tuple[int, datetime]] = set()
+    seen_attempt_coordinates: set[tuple[int, int, int]] = set()
     for index, attempt in enumerate(attempts_value):
         if not isinstance(attempt, Mapping) or set(attempt) != SIMULATION_ATTEMPT_KEYS:
             issues.error(
@@ -286,11 +533,19 @@ def _simulation_issues(
             )
             continue
         seed = attempt.get("seed")
-        timestamp = _parse_simulation_timestamp(attempt.get("attempted_at"))
+        day_index = attempt.get("day_index")
+        slot_index = attempt.get("slot_index")
+        attempted_at_text = attempt.get("attempted_at")
+        timestamp = _parse_simulation_timestamp(attempted_at_text)
         selected_id = attempt.get("selected_id")
         if (
             not _is_integer(seed)
             or (seeds_structurally_valid and seed not in seed_set)
+            or not _is_integer(day_index)
+            or day_index < 0
+            or (_is_integer(days) and days > 0 and day_index >= days)
+            or not _is_integer(slot_index)
+            or not 0 <= slot_index < len(ATTEMPT_SLOTS)
             or timestamp is None
             or (selected_id is not None and (not isinstance(selected_id, str) or not selected_id))
             or (timestamp is not None and not _simulation_context_valid(attempt.get("context"), timestamp))
@@ -300,7 +555,13 @@ def _simulation_issues(
                 f"simulation attempt {index} has invalid seed, timestamp, context or selected_id",
             )
             continue
-        assert timestamp is not None and _is_integer(seed)
+        assert (
+            timestamp is not None
+            and isinstance(attempted_at_text, str)
+            and _is_integer(seed)
+            and _is_integer(day_index)
+            and _is_integer(slot_index)
+        )
         key = (seed, timestamp)
         if key in seen_attempt_times:
             issues.error(
@@ -309,12 +570,53 @@ def _simulation_issues(
             )
             continue
         seen_attempt_times.add(key)
+        coordinate = (seed, day_index, slot_index)
+        if coordinate in seen_attempt_coordinates:
+            issues.error(
+                "simulation_format",
+                "simulation repeats a seed/day_index/slot_index coordinate",
+            )
+        seen_attempt_coordinates.add(coordinate)
         context = attempt.get("context")
         assert isinstance(context, Mapping)
         parsed_attempts.append(
-            _SimulationAttempt(index, seed, timestamp, context, selected_id)
+            _SimulationAttempt(
+                index,
+                seed,
+                day_index,
+                slot_index,
+                attempted_at_text,
+                timestamp,
+                context,
+                selected_id,
+            )
         )
         covered_dates[seed].add(timestamp.date())
+
+    validate_simulation_coverage(parsed_attempts, issues)
+    if (
+        replay_shape_valid
+        and expected_attempt_count is not None
+        and len(parsed_attempts) != expected_attempt_count
+    ):
+        issues.error(
+            "simulation_replay_mismatch",
+            "malformed simulation attempts leave the canonical coordinate set incomplete "
+            f"(expected {expected_attempt_count}, parsed {len(parsed_attempts)})",
+        )
+        replay_shape_valid = False
+    if replay_shape_valid:
+        assert isinstance(days, int) and isinstance(seeds, list)
+        _validate_simulation_replay(
+            parsed_attempts,
+            rows,
+            scheduler_config,
+            issues,
+            days=days,
+            seeds=seeds,
+            corpus_sha256=expected_corpus_sha256,
+            scheduler_config_sha256=expected_scheduler_config_sha256,
+        )
 
     incomplete_seeds: list[int] = []
     if seeds_structurally_valid:

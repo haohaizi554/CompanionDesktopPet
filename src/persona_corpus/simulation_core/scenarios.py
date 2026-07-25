@@ -14,6 +14,7 @@ from ..selector import SchedulerConfig, select_line
 from ..trigger_matching import trigger_matches as _trigger_matches
 
 
+SIMULATION_SCHEMA_VERSION = 3
 SUBSEED_DERIVATION_VERSION = "persona-simulation-v2"
 SUBSEED_DERIVATION_SPEC = (
     "encoding=utf-8;separator=U+001F;"
@@ -25,6 +26,22 @@ SUBSEED_DERIVATION_SHA256 = hashlib.sha256(
 ).hexdigest()
 _LOCAL_TIMEZONE = timezone(timedelta(hours=8))
 _SEARCH_START = datetime(2026, 1, 1, tzinfo=_LOCAL_TIMEZONE)
+SIMULATION_STARTS = (
+    datetime(2026, 1, 1, tzinfo=_LOCAL_TIMEZONE),
+    datetime(2026, 3, 1, tzinfo=_LOCAL_TIMEZONE),
+    datetime(2026, 6, 1, tzinfo=_LOCAL_TIMEZONE),
+    datetime(2026, 9, 1, tzinfo=_LOCAL_TIMEZONE),
+)
+ATTEMPT_SLOTS = (
+    (5, 0, "day_changed"),
+    (7, 20, "app_start"),
+    (11, 40, "tick"),
+    (15, 15, "tick"),
+    (19, 30, "tick"),
+)
+SIMULATED_HOLIDAYS = {(1, 1): "元旦"}
+ANNIVERSARY_DAY_INDEX = 14
+ANNIVERSARY_DAYS = 365
 NULLABLE_SIGNAL_COMBINATIONS = tuple(
     product(
         (None, False, True),
@@ -33,6 +50,78 @@ NULLABLE_SIGNAL_COMBINATIONS = tuple(
         (None, False, True),
     )
 )
+
+
+@dataclass(frozen=True, slots=True)
+class NaturalAttempt:
+    """Canonical identity and context for one natural simulation selector call."""
+
+    attempted_at: datetime
+    context: PersonaContext
+    scenario: str
+
+
+def build_natural_attempt(
+    *,
+    seed: int,
+    day_index: int,
+    slot_index: int,
+    scheduler_config: SchedulerConfig,
+    last_output_at: datetime | None,
+) -> NaturalAttempt:
+    """Build one replayable natural attempt from its canonical coordinates."""
+
+    if type(seed) is not int:
+        raise ValueError("seed must be an exact integer")
+    if type(day_index) is not int or day_index < 0:
+        raise ValueError("day_index must be a non-negative exact integer")
+    if type(slot_index) is not int or not 0 <= slot_index < len(ATTEMPT_SLOTS):
+        raise ValueError("slot_index is outside the canonical attempt schedule")
+    if not isinstance(scheduler_config, SchedulerConfig):
+        raise TypeError("scheduler_config must be a SchedulerConfig")
+
+    hour, minute, event = ATTEMPT_SLOTS[slot_index]
+    now = SIMULATION_STARTS[seed % len(SIMULATION_STARTS)] + timedelta(
+        days=day_index,
+        hours=hour,
+        minutes=minute,
+    )
+    if last_output_at is None:
+        elapsed = max(1440.0, float(scheduler_config.long_silence_minutes))
+    else:
+        if (
+            not isinstance(last_output_at, datetime)
+            or last_output_at.tzinfo is None
+            or last_output_at.utcoffset() is None
+            or last_output_at > now
+        ):
+            raise ValueError("last_output_at must be an aware prior timestamp")
+        elapsed = (now - last_output_at).total_seconds() / 60
+
+    signal_index = (
+        day_index * len(ATTEMPT_SLOTS) + slot_index
+    ) % len(NULLABLE_SIGNAL_COMBINATIONS)
+    ide_foreground, active_minutes, idle_return, fullscreen = (
+        NULLABLE_SIGNAL_COMBINATIONS[signal_index]
+    )
+    context = PersonaContext.from_datetime(
+        now,
+        event=event,
+        holiday=SIMULATED_HOLIDAYS.get((now.month, now.day)),
+        anniversary_days=(
+            ANNIVERSARY_DAYS if day_index == ANNIVERSARY_DAY_INDEX else 0
+        ),
+        minutes_since_last_output=elapsed,
+        ide_foreground=ide_foreground,
+        active_minutes=active_minutes,
+        idle_return=idle_return,
+        fullscreen=fullscreen,
+    )
+    return NaturalAttempt(
+        attempted_at=now,
+        context=context,
+        scenario=f"natural:{event}:{hour:02d}:{minute:02d}",
+    )
 
 
 def derive_subseed(

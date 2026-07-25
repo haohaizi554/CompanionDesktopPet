@@ -347,6 +347,40 @@ public sealed class SceneEngineTests
     }
 
     [Fact]
+    public void Scheduler_WeightCannotMovePeersAcrossTheScoreBandFloor()
+    {
+        var basis = PersonaCorpus.All.First(line =>
+            line.CategoryGroup == DialogueCategoryGroup.CharacterLife
+            && line.OutputMode == DialogueOutputMode.SelfTalk
+            && line.InterruptionCost == 0
+            && line.Tone != "dry_sharp"
+            && line.Weight == 1);
+        var lightLine = basis with
+        {
+            Id = basis.Id + ".score-band-light",
+            SemanticGroup = basis.SemanticGroup + ".score-band-light",
+            Weight = 0.1,
+            Text = basis.Text + " light"
+        };
+        var heavyLine = basis with
+        {
+            Id = basis.Id + ".score-band-heavy",
+            SemanticGroup = basis.SemanticGroup + ".score-band-heavy",
+            Text = basis.Text + " heavy"
+        };
+        var light = SceneCatalog.CreateScene("a-score-band-light", [lightLine]);
+        var heavy = SceneCatalog.CreateScene("z-score-band-heavy", [heavyLine]);
+
+        var selection = new SceneScheduler().SelectReusableClickFallback(
+            [light, heavy],
+            new SceneHistory(),
+            new Random(14));
+
+        Assert.NotNull(selection);
+        Assert.Equal(light.Id, selection!.Scene.Id);
+    }
+
+    [Fact]
     public void SceneWeight_RejectsInconsistentSemanticVariants()
     {
         var line = PersonaCorpus.All.First(item => item.CategoryGroup == DialogueCategoryGroup.Technical);

@@ -128,7 +128,14 @@ EVENT_KEYS = {
     "seeds",
     "attempts",
 }
-ATTEMPT_KEYS = {"seed", "attempted_at", "context", "selected_id"}
+ATTEMPT_KEYS = {
+    "seed",
+    "day_index",
+    "slot_index",
+    "attempted_at",
+    "context",
+    "selected_id",
+}
 CONTEXT_KEYS = {
     "event",
     "daypart",
@@ -150,6 +157,19 @@ class SimulationIntegrationTests(unittest.TestCase):
         cls.corpus = load_v2(CORPUS_PATH)
         cls.config = load_json_object(CONFIG_PATH)
         cls.report = simulate(cls.corpus, cls.config, days=30, seeds=range(10))
+        enabled_by_scene: dict[str, list[object]] = {}
+        for row in cls.corpus:
+            if row.enabled:
+                enabled_by_scene.setdefault(row.semantic_group, []).append(row)
+        cls.replay_corpus = tuple(
+            next(rows for rows in enabled_by_scene.values() if len(rows) >= 2)
+        )
+        cls.replay_report = simulate(
+            cls.replay_corpus,
+            cls.config,
+            days=30,
+            seeds=range(10),
+        )
 
     def test_thirty_days_ten_seeds_have_no_hard_violations(self) -> None:
         report = self.report
@@ -264,7 +284,7 @@ class SimulationIntegrationTests(unittest.TestCase):
     def test_validation_event_payload_is_exact_hash_bound_and_context_complete(self) -> None:
         payload = self.report.to_validation_payload()
         self.assertEqual(EVENT_KEYS, set(payload))
-        self.assertEqual(2, payload["schema_version"])
+        self.assertEqual(3, payload["schema_version"])
         self.assertEqual(30, payload["days"])
         self.assertEqual(list(range(10)), payload["seeds"])
         self.assertEqual(
@@ -279,6 +299,18 @@ class SimulationIntegrationTests(unittest.TestCase):
         self.assertTrue(attempts)
         self.assertTrue(all(set(attempt) == ATTEMPT_KEYS for attempt in attempts))
         self.assertTrue(all(set(attempt["context"]) == CONTEXT_KEYS for attempt in attempts))
+        self.assertEqual(
+            [
+                (seed, day_index, slot_index)
+                for seed in range(10)
+                for day_index in range(30)
+                for slot_index in range(5)
+            ],
+            [
+                (attempt["seed"], attempt["day_index"], attempt["slot_index"])
+                for attempt in attempts
+            ],
+        )
         contexts = [attempt["context"] for attempt in attempts]
         timestamps = [datetime.fromisoformat(attempt["attempted_at"]) for attempt in attempts]
         self.assertEqual(
@@ -434,18 +466,54 @@ class SimulationIntegrationTests(unittest.TestCase):
         )
         self.assertFalse(validation.errors)
 
-        tampered = deepcopy(payload)
+        tampered = deepcopy(self.replay_report.to_validation_payload())
         first_selected = next(
             attempt for attempt in tampered["attempts"] if attempt["selected_id"] is not None
         )
         first_selected["selected_id"] = "not-a-real-enabled-id"
         rejected = validate_corpus(
-            self.corpus,
+            self.replay_corpus,
             self.config,
             {"exceptions": []},
             simulation_result=tampered,
         )
         self.assertIn("simulation_unknown_line", {issue.code for issue in rejected.errors})
+
+    def test_task_four_replay_rejects_same_scene_surface_substitution(self) -> None:
+        enabled_by_scene: dict[str, list[str]] = {}
+        rows_by_id = {row.id: row for row in self.replay_corpus}
+        for row in self.replay_corpus:
+            if row.enabled:
+                enabled_by_scene.setdefault(row.semantic_group, []).append(row.id)
+
+        tampered = deepcopy(self.replay_report.to_validation_payload())
+        for attempt in tampered["attempts"]:
+            selected_id = attempt["selected_id"]
+            if selected_id is None:
+                continue
+            selected = rows_by_id[selected_id]
+            siblings = [
+                row_id
+                for row_id in enabled_by_scene[selected.semantic_group]
+                if row_id != selected_id
+            ]
+            if siblings:
+                attempt["selected_id"] = siblings[0]
+                break
+        else:  # pragma: no cover - the replay fixture guarantees surface variants.
+            self.fail("simulation did not select a scene with a sibling surface")
+
+        rejected = validate_corpus(
+            self.replay_corpus,
+            self.config,
+            {"exceptions": []},
+            simulation_result=tampered,
+        )
+
+        self.assertIn(
+            "simulation_replay_mismatch",
+            {issue.code for issue in rejected.errors},
+        )
 
 
 class SimulationUnitTests(unittest.TestCase):
@@ -453,15 +521,20 @@ class SimulationUnitTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.corpus = load_v2(CORPUS_PATH)
         cls.config = load_json_object(CONFIG_PATH)
+        fast_by_scene: dict[str, object] = {}
+        for row in cls.corpus:
+            if row.enabled and len(fast_by_scene) < 32:
+                fast_by_scene.setdefault(row.semantic_group, row)
+        cls.fast_corpus = tuple(fast_by_scene.values())
 
     def test_small_fixed_seed_run_is_reproducible(self) -> None:
-        first = simulate(self.corpus, self.config, days=2, seeds=(7,))
-        second = simulate(self.corpus, self.config, days=2, seeds=(7,))
+        first = simulate(self.fast_corpus, self.config, days=2, seeds=(7,))
+        second = simulate(self.fast_corpus, self.config, days=2, seeds=(7,))
         self.assertEqual(first.to_validation_json(), second.to_validation_json())
         self.assertEqual(render_simulation_report(first), render_simulation_report(second))
 
-    def test_validator_facing_simulation_schema_is_v2(self) -> None:
-        self.assertEqual(2, SIMULATION_SCHEMA_VERSION)
+    def test_validator_facing_simulation_schema_is_v3(self) -> None:
+        self.assertEqual(3, SIMULATION_SCHEMA_VERSION)
 
     def test_simulation_builds_one_prepared_corpus_for_every_natural_slot(self) -> None:
         selected_inputs: list[object] = []
@@ -480,7 +553,7 @@ class SimulationUnitTests(unittest.TestCase):
                 side_effect=observed_select,
             ),
         ):
-            report = simulate(self.corpus, self.config, days=2, seeds=(7,))
+            report = simulate(self.fast_corpus, self.config, days=2, seeds=(7,))
 
         self.assertEqual(1, prepare_mock.call_count)
         self.assertEqual(report.total_attempts, len(selected_inputs))
@@ -1190,9 +1263,14 @@ class SimulationUnitTests(unittest.TestCase):
         )
 
     def test_seed_order_is_canonical_but_corpus_order_changes_replay_anchor(self) -> None:
-        forward = simulate(self.corpus, self.config, days=1, seeds=(9, 3))
-        reverse = simulate(self.corpus, self.config, days=1, seeds=(3, 9))
-        reordered = simulate(tuple(reversed(self.corpus)), self.config, days=1, seeds=(3, 9))
+        forward = simulate(self.fast_corpus, self.config, days=1, seeds=(9, 3))
+        reverse = simulate(self.fast_corpus, self.config, days=1, seeds=(3, 9))
+        reordered = simulate(
+            tuple(reversed(self.fast_corpus)),
+            self.config,
+            days=1,
+            seeds=(3, 9),
+        )
         self.assertEqual((3, 9), forward.seeds)
         self.assertEqual((3, 9), reverse.seeds)
         forward_payload = forward.to_validation_payload()
@@ -1201,8 +1279,8 @@ class SimulationUnitTests(unittest.TestCase):
         self.assertNotEqual(forward.corpus_sha256, reordered.corpus_sha256)
 
     def test_seed_scenario_is_independent_of_other_requested_seeds(self) -> None:
-        alone = simulate(self.corpus, self.config, days=2, seeds=(7,))
-        combined = simulate(self.corpus, self.config, days=2, seeds=(3, 7))
+        alone = simulate(self.fast_corpus, self.config, days=2, seeds=(7,))
+        combined = simulate(self.fast_corpus, self.config, days=2, seeds=(3, 7))
 
         alone_seed = [
             attempt.validation_payload()
@@ -1219,7 +1297,7 @@ class SimulationUnitTests(unittest.TestCase):
     def test_simulation_does_not_mutate_global_random_state(self) -> None:
         random.seed(20260723)
         before = random.getstate()
-        simulate(self.corpus, self.config, days=1, seeds=(0,))
+        simulate(self.fast_corpus, self.config, days=1, seeds=(0,))
         self.assertEqual(before, random.getstate())
 
     def test_zero_output_report_has_zero_filled_groups_and_no_division_error(self) -> None:

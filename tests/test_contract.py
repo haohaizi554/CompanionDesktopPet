@@ -6,7 +6,9 @@ import subprocess
 import sys
 import unittest
 import xml.etree.ElementTree as ET
+from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,6 +33,106 @@ class ReleaseTestProjectContractTests(unittest.TestCase):
             "The test project must declare IsTestProject=true so a clean checkout cannot "
             "silently report zero tests when restore artifacts are absent.",
         )
+
+
+class CSharpContractGeneratorTests(unittest.TestCase):
+    def test_render_preserves_round_trip_double_literals_across_contract_fields(self) -> None:
+        from tools import generate_persona_contract_cs as generator
+
+        contract = generator.PERSONA_CONTRACT
+        scheduler = dict(contract.scheduler)
+        weights = dict(scheduler["category_group_weights"])
+        weights["technical"] = 0.123456789
+        scheduler["category_group_weights"] = weights
+        mode_targets = dict(scheduler["output_mode_targets"])
+        mode_targets["self_talk"] = 0.234567891
+        scheduler["output_mode_targets"] = mode_targets
+        acceptance = dict(scheduler["acceptance"])
+        acceptance["easter_egg_playback_ratio"] = (0.612345678, 0.712345678)
+        scheduler["acceptance"] = acceptance
+
+        dry_sharp = dict(contract.dry_sharp)
+        dry_sharp["scene_hash_threshold"] = 0.345678912
+        dry_sharp["scene_inventory_acceptance"] = (0.456789123, 0.567891234)
+        dry_sharp["playback_target"] = 0.678912345
+        dry_sharp["playback_acceptance"] = (0.789123456, 0.891234567)
+
+        lexical_exposure = dict(contract.lexical_exposure)
+        seasoning = dict(lexical_exposure["seasoning"])
+        inventory_profiles = dict(seasoning["inventory_profiles"])
+        curated_core = dict(inventory_profiles["curated_core"])
+        curated_core["maximum"] = 0.312345678
+        inventory_profiles["curated_core"] = curated_core
+        seasoning["inventory_profiles"] = inventory_profiles
+        seasoning["playback_acceptance"] = (0.412345678, 0.512345678)
+        lexical_exposure["seasoning"] = seasoning
+
+        manifest = generator.EDITORIAL_MANIFEST
+        identities = dict(manifest.identity_easter_eggs)
+        line_id, identity = next(iter(identities.items()))
+        identities[line_id] = replace(
+            identity,
+            cooldown_hours=720.123456789,
+            weight=0.812345678,
+        )
+
+        modified_contract = replace(
+            contract,
+            scheduler=scheduler,
+            dry_sharp=dry_sharp,
+            lexical_exposure=lexical_exposure,
+        )
+        modified_manifest = replace(manifest, identity_easter_eggs=identities)
+        with (
+            patch.object(generator, "PERSONA_CONTRACT", modified_contract),
+            patch.object(generator, "EDITORIAL_MANIFEST", modified_manifest),
+        ):
+            rendered = generator.render_contract()
+
+        expected_literals = (
+            "[DialogueCategoryGroup.Technical] = 0.123456789",
+            "[DialogueOutputMode.SelfTalk] = 0.234567891",
+            "DrySharpSceneHashThreshold = 0.345678912;",
+            "DrySharpSceneInventoryMinimum = 0.456789123;",
+            "DrySharpSceneInventoryMaximum = 0.567891234;",
+            "DrySharpPlaybackTarget = 0.678912345;",
+            "DrySharpPlaybackMinimum = 0.789123456;",
+            "DrySharpPlaybackMaximum = 0.891234567;",
+            "SeasoningCuratedCoreInventoryMaximum = 0.312345678;",
+            "SeasoningPlaybackMinimum = 0.412345678;",
+            "SeasoningPlaybackMaximum = 0.512345678;",
+            "EasterEggPlaybackMinimum = 0.612345678;",
+            "EasterEggPlaybackMaximum = 0.712345678;",
+            f", 720.123456789, {identity.max_per_day}, 0.812345678)",
+        )
+        for literal in expected_literals:
+            with self.subTest(literal=literal):
+                self.assertIn(literal, rendered)
+
+    def test_render_rejects_non_numeric_and_non_finite_double_values(self) -> None:
+        from tools import generate_persona_contract_cs as generator
+
+        for invalid in (
+            True,
+            "0.123",
+            float("nan"),
+            float("inf"),
+            float("-inf"),
+            10**400,
+        ):
+            with self.subTest(invalid=invalid):
+                scheduler = dict(generator.PERSONA_CONTRACT.scheduler)
+                weights = dict(scheduler["category_group_weights"])
+                weights["technical"] = invalid
+                scheduler["category_group_weights"] = weights
+                modified_contract = replace(generator.PERSONA_CONTRACT, scheduler=scheduler)
+
+                with patch.object(generator, "PERSONA_CONTRACT", modified_contract):
+                    with self.assertRaisesRegex(
+                        ValueError,
+                        r"scheduler\.category_group_weights\.technical must be a finite number",
+                    ):
+                        generator.render_contract()
 
 
 class PersonaContractFileTests(unittest.TestCase):

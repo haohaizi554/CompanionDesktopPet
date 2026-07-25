@@ -10,12 +10,16 @@ import tempfile
 import unittest
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from pathlib import Path
+from unittest.mock import patch
 
 from src.persona_corpus.builder import serialize_v2
 from src.persona_corpus.loader import load_v2
 from src.persona_corpus.models import CorpusLine
 from src.persona_corpus.schema import V2_HEADER
+from src.persona_corpus.selector import select_line
+from src.persona_corpus.simulation import simulate
 from src.persona_corpus.simulation_core.scenarios import (
     SUBSEED_DERIVATION_SHA256,
     SUBSEED_DERIVATION_VERSION,
@@ -234,6 +238,37 @@ def simulation_rows() -> list[CorpusLine]:
                 text=text,
             )
         )
+    egg = next(row for row in rows if row.id == "sim_egg")
+    for index, text in enumerate(
+        (
+            "\u7a97\u8fb9\u5076\u7136\u63a0\u8fc7\u4e00\u5c0f\u6bb5\u5149\uff0c\u5b89\u9759\u5f97\u6ca1\u6709\u60ca\u52a8\u8c01\u3002",
+            "\u96e8\u58f0\u5076\u7136\u843d\u8fdb\u4e00\u5c0f\u6bb5\u68a6\uff0c\u8f7b\u5f97\u50cf\u6ca1\u6765\u8fc7\u3002",
+            "\u4e91\u5f71\u5076\u7136\u7ed5\u8fc7\u4e00\u9875\u4e66\uff0c\u6162\u6162\u7559\u4e0b\u4e00\u70b9\u767d\u3002",
+        ),
+        start=2,
+    ):
+        rows.append(
+            replace(
+                egg,
+                id=f"sim_egg_{index}",
+                topic_id=f"simulation.egg_{index}",
+                semantic_group=f"simulation.egg_{index}",
+                source_reference=(
+                    f"legacy:{index};topic:simulation.egg_{index};"
+                    f"variant:simulation.egg_{index}.01"
+                ),
+                text=text,
+            )
+        )
+    life = next(row for row in rows if row.id == "sim_life_a")
+    rows.append(
+        replace(
+            life,
+            id="sim_life_a_surface_2",
+            source_reference="catalog:simulation-life_a;variant:simulation.life_a.02",
+            text="\u7a97\u8fb9\u7684\u5149\u53c8\u6162\u6162\u79fb\u4e86\u4e00\u5c0f\u6bb5\u3002",
+        )
+    )
     return rows
 
 
@@ -273,54 +308,19 @@ def rebind_simulation(
     simulation["scheduler_config_sha256"] = scheduler_config_sha256(config)
 
 
-def clean_simulation() -> tuple[list[CorpusLine], dict[str, object], dict[str, object]]:
-    rows = simulation_rows()
+@lru_cache(maxsize=1)
+def _clean_simulation_template() -> tuple[
+    tuple[CorpusLine, ...], dict[str, object], dict[str, object]
+]:
+    rows = tuple(simulation_rows())
     config = valid_config()
-    base_ids = (
-        "sim_life_a",
-        "sim_growth",
-        "sim_life_b",
-        "sim_career",
-        "sim_care",
-        "sim_life_c",
-        "sim_emotion",
-        "sim_life_b",
-        "sim_system",
-    )
-    attempts: list[dict[str, object]] = []
-    start = datetime(2026, 1, 1, 12, 0, tzinfo=timezone(timedelta(hours=8)))
-    for seed in range(10):
-        technical_days = {0, 6, 12, 18, 24} if seed < 5 else {0, 7, 14, 21}
-        technical_index = 0
-        for day in range(30):
-            played_at = start + timedelta(days=day)
-            if day in technical_days:
-                selected_id = "sim_tech_a" if technical_index % 2 == 0 else "sim_tech_b"
-                technical_index += 1
-            elif day in {3, 13, 23}:
-                selected_id = "sim_egg"
-            else:
-                selected_id = base_ids[day % len(base_ids)]
-            attempts.append(
-                {
-                    "seed": seed,
-                    "attempted_at": played_at.isoformat(),
-                    "context": simulation_context(played_at),
-                    "selected_id": selected_id,
-                }
-            )
-    simulation: dict[str, object] = {
-        "schema_version": 2,
-        "corpus_sha256": "",
-        "scheduler_config_sha256": "",
-        "subseed_derivation_version": SUBSEED_DERIVATION_VERSION,
-        "subseed_derivation_sha256": SUBSEED_DERIVATION_SHA256,
-        "days": 30,
-        "seeds": list(range(10)),
-        "attempts": attempts,
-    }
-    rebind_simulation(simulation, rows, config)
+    simulation = simulate(rows, config, days=30, seeds=range(10)).to_validation_payload()
     return rows, config, simulation
+
+
+def clean_simulation() -> tuple[list[CorpusLine], dict[str, object], dict[str, object]]:
+    rows, config, simulation = _clean_simulation_template()
+    return list(rows), copy.deepcopy(config), copy.deepcopy(simulation)
 
 
 class ValidationContractTests(unittest.TestCase):
@@ -1315,6 +1315,129 @@ class SimulationGateTests(unittest.TestCase):
         self.assertFalse(report.errors)
         self.assertNotIn("simulation_missing", {issue.code for issue in report.warnings})
 
+    def test_replay_reuses_one_canonical_decision_stream_for_identical_inputs(self) -> None:
+        rows, config, simulation = clean_simulation()
+        rows[0] = replace(rows[0], rewrite_reason="performance-cache-fixture")
+        rebind_simulation(simulation, rows, config)
+
+        with patch(
+            "src.persona_corpus.validation_rules.simulation_rules.select_line",
+            wraps=select_line,
+        ) as observed_select:
+            validate_corpus(
+                rows,
+                config,
+                {"exceptions": []},
+                simulation_result=simulation,
+            )
+            validate_corpus(
+                rows,
+                config,
+                {"exceptions": []},
+                simulation_result=copy.deepcopy(simulation),
+            )
+
+        self.assertEqual(1500, observed_select.call_count)
+
+    def test_replay_rejects_unbounded_canonical_work_before_selecting(self) -> None:
+        rows, config, simulation = clean_simulation()
+        simulation["days"] = 1_000_000
+
+        with patch(
+            "src.persona_corpus.validation_rules.simulation_rules.select_line",
+            side_effect=AssertionError("unbounded replay reached the selector"),
+        ) as forbidden_select:
+            report = validate_corpus(
+                rows,
+                config,
+                {"exceptions": []},
+                simulation_result=simulation,
+            )
+
+        self.assertFalse(forbidden_select.called)
+        self.assertIn("simulation_replay_limit", issue_codes(report))
+
+    def test_exact_replay_rejects_same_scene_surface_substitution(self) -> None:
+        rows, config, simulation = clean_simulation()
+        rows_by_id = {row.id: row for row in rows}
+        ids_by_scene: dict[str, list[str]] = {}
+        for row in rows:
+            if row.enabled:
+                ids_by_scene.setdefault(row.semantic_group, []).append(row.id)
+
+        attempts = simulation["attempts"]
+        assert isinstance(attempts, list)
+        for attempt in attempts:
+            selected_id = attempt["selected_id"]
+            if selected_id is None:
+                continue
+            siblings = [
+                row_id
+                for row_id in ids_by_scene[rows_by_id[selected_id].semantic_group]
+                if row_id != selected_id
+            ]
+            if siblings:
+                attempt["selected_id"] = siblings[0]
+                break
+        else:
+            self.fail("fixture did not select a scene with two surfaces")
+
+        report = validate_corpus(
+            rows,
+            config,
+            {"exceptions": []},
+            simulation_result=simulation,
+        )
+
+        self.assertIn("simulation_replay_mismatch", issue_codes(report))
+
+    def test_exact_replay_rejects_missing_extra_reordered_context_and_time_events(self) -> None:
+        rows, config, baseline = clean_simulation()
+
+        def remove_event(payload: dict[str, object]) -> None:
+            attempts = payload["attempts"]
+            assert isinstance(attempts, list)
+            attempts.pop()
+
+        def add_event(payload: dict[str, object]) -> None:
+            attempts = payload["attempts"]
+            assert isinstance(attempts, list)
+            attempts.append(copy.deepcopy(attempts[-1]))
+
+        def reorder_events(payload: dict[str, object]) -> None:
+            attempts = payload["attempts"]
+            assert isinstance(attempts, list)
+            attempts[0], attempts[1] = attempts[1], attempts[0]
+
+        def alter_context(payload: dict[str, object]) -> None:
+            attempts = payload["attempts"]
+            assert isinstance(attempts, list)
+            attempts[0]["context"]["fullscreen"] = True
+
+        def alter_timestamp(payload: dict[str, object]) -> None:
+            attempts = payload["attempts"]
+            assert isinstance(attempts, list)
+            original = datetime.fromisoformat(str(attempts[0]["attempted_at"]))
+            attempts[0]["attempted_at"] = (original + timedelta(minutes=1)).isoformat()
+
+        for name, mutate in (
+            ("missing", remove_event),
+            ("extra", add_event),
+            ("reordered", reorder_events),
+            ("context", alter_context),
+            ("timestamp", alter_timestamp),
+        ):
+            tampered = copy.deepcopy(baseline)
+            mutate(tampered)
+            with self.subTest(case=name):
+                report = validate_corpus(
+                    rows,
+                    config,
+                    {"exceptions": []},
+                    simulation_result=tampered,
+                )
+                self.assertIn("simulation_replay_mismatch", issue_codes(report))
+
     def test_schema_hashes_and_exact_keys_are_verified_not_trusted(self) -> None:
         rows, config, simulation = clean_simulation()
         simulation["corpus_sha256"] = "0" * 64
@@ -1343,9 +1466,9 @@ class SimulationGateTests(unittest.TestCase):
                 )
                 self.assertIn("simulation_replay_binding_mismatch", issue_codes(report))
 
-    def test_simulation_schema_version_rejects_float_two(self) -> None:
+    def test_simulation_schema_version_rejects_float_three(self) -> None:
         rows, config, simulation = clean_simulation()
-        simulation["schema_version"] = 2.0
+        simulation["schema_version"] = 3.0
 
         report = validate_corpus(
             rows,
@@ -1430,7 +1553,9 @@ class SimulationGateTests(unittest.TestCase):
         assert isinstance(attempts, list)
         first = attempts[0]
         duplicate = copy.deepcopy(first)
-        duplicate["attempted_at"] = "2026-01-01T12:04:00+08:00"
+        duplicate["attempted_at"] = (
+            datetime.fromisoformat(str(first["attempted_at"])) + timedelta(minutes=4)
+        ).isoformat()
         duplicate["context"]["minutes_since_last_output"] = 4
         attempts.append(duplicate)
         codes = issue_codes(
@@ -1453,14 +1578,23 @@ class SimulationGateTests(unittest.TestCase):
         attempts = simulation["attempts"]
         assert isinstance(attempts, list)
         first_seed = [attempt for attempt in attempts if attempt["seed"] == 0]
-        for index in range(20):
+        for index in range(len(first_seed)):
             first_seed[index]["selected_id"] = "sim_tech_a" if index % 2 == 0 else "sim_tech_b"
         base = datetime.fromisoformat(str(first_seed[10]["attempted_at"]))
-        for minute, selected_id in ((20, "sim_growth"), (40, "sim_career")):
+        for attempt in first_seed:
+            if datetime.fromisoformat(str(attempt["attempted_at"])).date() == base.date():
+                attempt["selected_id"] = None
+        for minute, selected_id in (
+            (0, "sim_life_a"),
+            (20, "sim_growth"),
+            (40, "sim_career"),
+        ):
             played_at = base.replace(hour=12, minute=minute)
             attempts.append(
                 {
                     "seed": 0,
+                    "day_index": first_seed[10]["day_index"],
+                    "slot_index": first_seed[10]["slot_index"],
                     "attempted_at": played_at.isoformat(),
                     "context": simulation_context(played_at, minutes_since_last_output=20),
                     "selected_id": selected_id,
@@ -1472,6 +1606,8 @@ class SimulationGateTests(unittest.TestCase):
             attempts.append(
                 {
                     "seed": 0,
+                    "day_index": first_seed[10]["day_index"],
+                    "slot_index": first_seed[10]["slot_index"],
                     "attempted_at": played_at.isoformat(),
                     "context": simulation_context(played_at, minutes_since_last_output=20),
                     "selected_id": selected_id,
@@ -1498,6 +1634,9 @@ class SimulationGateTests(unittest.TestCase):
         first_seed = [attempt for attempt in attempts if attempt["seed"] == 0]
         first_seed[10]["selected_id"] = None
         base = datetime.fromisoformat(str(first_seed[10]["attempted_at"]))
+        for attempt in first_seed:
+            if datetime.fromisoformat(str(attempt["attempted_at"])).date() == base.date():
+                attempt["selected_id"] = None
         for hour, minute, selected_id, elapsed in (
             (12, 30, "sim_life_a", 1470),
             (12, 50, "sim_growth", 20),
@@ -1507,6 +1646,8 @@ class SimulationGateTests(unittest.TestCase):
             attempts.append(
                 {
                     "seed": 0,
+                    "day_index": first_seed[10]["day_index"],
+                    "slot_index": first_seed[10]["slot_index"],
                     "attempted_at": played_at.isoformat(),
                     "context": simulation_context(
                         played_at, minutes_since_last_output=elapsed
@@ -1523,6 +1664,8 @@ class SimulationGateTests(unittest.TestCase):
             attempts.append(
                 {
                     "seed": 0,
+                    "day_index": first_seed[10]["day_index"],
+                    "slot_index": first_seed[10]["slot_index"],
                     "attempted_at": played_at.isoformat(),
                     "context": simulation_context(
                         played_at, minutes_since_last_output=elapsed
@@ -1547,6 +1690,9 @@ class SimulationGateTests(unittest.TestCase):
         first_seed = [attempt for attempt in attempts if attempt["seed"] == 0]
         first_seed[10]["selected_id"] = None
         base = datetime.fromisoformat(str(first_seed[10]["attempted_at"]))
+        for attempt in first_seed:
+            if datetime.fromisoformat(str(attempt["attempted_at"])).date() == base.date():
+                attempt["selected_id"] = None
         for hour, minute, selected_id, elapsed in (
             (12, 10, "sim_life_a", 1450),
             (12, 30, "sim_growth", 20),
@@ -1556,6 +1702,8 @@ class SimulationGateTests(unittest.TestCase):
             attempts.append(
                 {
                     "seed": 0,
+                    "day_index": first_seed[10]["day_index"],
+                    "slot_index": first_seed[10]["slot_index"],
                     "attempted_at": played_at.isoformat(),
                     "context": simulation_context(
                         played_at, minutes_since_last_output=elapsed

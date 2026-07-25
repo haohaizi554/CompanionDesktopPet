@@ -791,13 +791,14 @@ public sealed class SceneScheduler
         var drySharpObserved = total == 0 ? 0 : recent.DrySharpCount / (double)total;
         var drySharpDeficit = PersonaContractGenerated.DrySharpPlaybackTarget - drySharpObserved;
         var drySharpBonus = scene.Tone == "dry_sharp" ? drySharpDeficit * 200 : 0;
+        var weightBonus = scene.Weight * 0.5;
         var score = (DialogueForest.CategoryGroupWeights[scene.CategoryGroup] - groupObserved) * 100
                     + (DialogueForest.OutputModeTargets[scene.OutputMode] - modeObserved) * 35
-                    + scene.Weight * 0.5
+                    + weightBonus
                     - scene.InterruptionCost * 0.75
                     - categoryObserved * 5
                     + drySharpBonus;
-        return new ScoredScene(scene, score, (int)Math.Floor(score));
+        return new ScoredScene(scene, score, (int)Math.Floor(score - weightBonus));
     }
 
     private sealed record RecentHistoryProfile(

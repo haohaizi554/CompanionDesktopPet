@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 from pathlib import Path
 from typing import Iterable, Mapping
@@ -23,6 +24,18 @@ def _quoted(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+def _cs_double(value: object, name: str) -> str:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} must be a finite number")
+    try:
+        number = float(value)
+    except (OverflowError, ValueError) as error:
+        raise ValueError(f"{name} must be a finite number") from error
+    if not math.isfinite(number):
+        raise ValueError(f"{name} must be a finite number")
+    return repr(number)
+
+
 def _set_lines(values: Iterable[str], indent: str = "        ") -> str:
     return ",\n".join(f"{indent}{_quoted(value)}" for value in values)
 
@@ -40,9 +53,10 @@ def render_contract() -> str:
     group_modes = scheduler["category_group_output_modes"]
     mode_targets = scheduler["output_mode_targets"]
     limits = scheduler["runtime_limits"]
+    acceptance = scheduler["acceptance"]
     if not all(
         isinstance(value, Mapping)
-        for value in (weights, group_modes, mode_targets, limits)
+        for value in (weights, group_modes, mode_targets, limits, acceptance)
     ):
         raise ValueError("shared scheduler contract is malformed")
     controlled = PERSONA_CONTRACT.raw["controlled_values"]
@@ -56,12 +70,14 @@ def render_contract() -> str:
     )
     group_weights = ",\n".join(
         "            "
-        f"[DialogueCategoryGroup.{_pascal(group)}] = {float(weight):.2f}"
+        f"[DialogueCategoryGroup.{_pascal(group)}] = "
+        f"{_cs_double(weight, f'scheduler.category_group_weights.{group}')}"
         for group, weight in weights.items()
     )
     output_targets = ",\n".join(
         "            "
-        f"[DialogueOutputMode.{_pascal(mode)}] = {float(target):.2f}"
+        f"[DialogueOutputMode.{_pascal(mode)}] = "
+        f"{_cs_double(target, f'scheduler.output_mode_targets.{mode}')}"
         for mode, target in mode_targets.items()
     )
     group_output_modes = ",\n".join(
@@ -93,7 +109,9 @@ def render_contract() -> str:
         "new HashSet<string>(StringComparer.Ordinal) { "
         + ", ".join(_quoted(marker) for marker in item.allowed_markers)
         + " }, "
-        f"{item.cooldown_hours:.1f}, {item.max_per_day}, {item.weight:.2f})"
+        f"{_cs_double(item.cooldown_hours, f'identity_easter_eggs.{item.line_id}.cooldown_hours')}, "
+        f"{item.max_per_day}, "
+        f"{_cs_double(item.weight, f'identity_easter_eggs.{item.line_id}.weight')})"
         for item in EDITORIAL_MANIFEST.identity_easter_eggs.values()
     )
 
@@ -121,20 +139,22 @@ internal static class PersonaContractGenerated
     public const int LegacySurfaceRows = {int(release_inventory['legacy_surface_rows'])};
     public const string DrySharpSceneHashNamespace = {_quoted(str(dry_sharp['scene_hash_namespace']))};
     public const string DrySharpSceneAssignmentField = {_quoted(str(dry_sharp['scene_assignment_field']))};
-    public const double DrySharpSceneHashThreshold = {float(dry_sharp['scene_hash_threshold']):.2f};
-    public const double DrySharpSceneInventoryMinimum = {float(dry_sharp['scene_inventory_acceptance'][0]):.2f};
-    public const double DrySharpSceneInventoryMaximum = {float(dry_sharp['scene_inventory_acceptance'][1]):.2f};
+    public const double DrySharpSceneHashThreshold = {_cs_double(dry_sharp['scene_hash_threshold'], 'dry_sharp.scene_hash_threshold')};
+    public const double DrySharpSceneInventoryMinimum = {_cs_double(dry_sharp['scene_inventory_acceptance'][0], 'dry_sharp.scene_inventory_acceptance[0]')};
+    public const double DrySharpSceneInventoryMaximum = {_cs_double(dry_sharp['scene_inventory_acceptance'][1], 'dry_sharp.scene_inventory_acceptance[1]')};
     public const string DrySharpSceneInventoryEnforcementProfile = {_quoted(str(dry_sharp['scene_inventory_enforcement_profile']))};
     public const string DrySharpRowInventoryPolicy = {_quoted(str(dry_sharp['row_inventory_policy']))};
-    public const double DrySharpPlaybackTarget = {float(dry_sharp['playback_target']):.2f};
-    public const double DrySharpPlaybackMinimum = {float(dry_sharp['playback_acceptance'][0]):.2f};
-    public const double DrySharpPlaybackMaximum = {float(dry_sharp['playback_acceptance'][1]):.2f};
-    public const double SeasoningCuratedCoreInventoryMaximum = {float(seasoning['inventory_profiles']['curated_core']['maximum']):.2f};
+    public const double DrySharpPlaybackTarget = {_cs_double(dry_sharp['playback_target'], 'dry_sharp.playback_target')};
+    public const double DrySharpPlaybackMinimum = {_cs_double(dry_sharp['playback_acceptance'][0], 'dry_sharp.playback_acceptance[0]')};
+    public const double DrySharpPlaybackMaximum = {_cs_double(dry_sharp['playback_acceptance'][1], 'dry_sharp.playback_acceptance[1]')};
+    public const double SeasoningCuratedCoreInventoryMaximum = {_cs_double(seasoning['inventory_profiles']['curated_core']['maximum'], 'lexical_exposure.seasoning.inventory_profiles.curated_core.maximum')};
     public const string SeasoningExpandedRuntimeInventoryPolicy = {_quoted(str(seasoning['inventory_profiles']['expanded_runtime']['policy']))};
-    public const double SeasoningPlaybackMinimum = {float(seasoning['playback_acceptance'][0]):.2f};
-    public const double SeasoningPlaybackMaximum = {float(seasoning['playback_acceptance'][1]):.2f};
+    public const double SeasoningPlaybackMinimum = {_cs_double(seasoning['playback_acceptance'][0], 'lexical_exposure.seasoning.playback_acceptance[0]')};
+    public const double SeasoningPlaybackMaximum = {_cs_double(seasoning['playback_acceptance'][1], 'lexical_exposure.seasoning.playback_acceptance[1]')};
     public const int SeasoningRecentWindow = {int(seasoning['recent_window'])};
     public const int SeasoningRecentMaximum = {int(seasoning['recent_max'])};
+    public const double EasterEggPlaybackMinimum = {_cs_double(acceptance['easter_egg_playback_ratio'][0], 'scheduler.acceptance.easter_egg_playback_ratio[0]')};
+    public const double EasterEggPlaybackMaximum = {_cs_double(acceptance['easter_egg_playback_ratio'][1], 'scheduler.acceptance.easter_egg_playback_ratio[1]')};
     public const int EasterEggRecentWindow = {int(limits['easter_egg_recent_window'])};
     public const int EasterEggRecentMaximum = {int(limits['easter_egg_recent_max'])};
     public const int DrySharpRecentWindow = {int(dry_sharp['recent_window'])};

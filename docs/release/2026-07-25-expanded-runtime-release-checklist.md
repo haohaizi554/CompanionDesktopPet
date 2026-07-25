@@ -149,7 +149,7 @@ if (($isTestProject | Out-String).Trim() -ne 'true') {
 dotnet test CompanionDesktopPet.sln -c Release --no-restore
 ```
 
-`simulation-events.json` 必须使用 schema v2，并同时绑定 corpus SHA-256、scheduler config SHA-256、subseed derivation version 与 derivation SHA-256；任一字段漂移都必须产生 `simulation_replay_binding_mismatch` 硬错误。校验器必须为 `0 hard errors`，并且 warning 只能精确等于一条 `surface_inventory_observation`，其他 warning 一律阻断发布。
+`simulation-events.json` 必须使用 schema v3，并为每次尝试记录精确的 `seed/day_index/slot_index`，同时绑定 corpus SHA-256、scheduler config SHA-256、subseed derivation version 与 derivation SHA-256。校验器必须按规范时间、上下文、subseed 和逐 seed 历史重新执行选择器并比对精确 `selected_id`；任一绑定字段、坐标、上下文、顺序或选择结果漂移都必须产生硬错误。校验器必须为 `0 hard errors`，并且 warning 只能精确等于一条 `surface_inventory_observation`，其他 warning 一律阻断发布。
 
 ### 6.1 Phase 4A 新鲜验证记录
 
@@ -159,6 +159,14 @@ dotnet test CompanionDesktopPet.sln -c Release --no-restore
 - Validator：`0 hard errors / 1 warning`，唯一 warning 为 `surface_inventory_observation`。
 - Python：实际执行并通过 300/300；.NET Release：测试项目门禁为 `IsTestProject=true`，实际执行并通过 389/389。
 - Release 回归还顺带发现并消除了节日候选断言对 52,132 行重复全表扫描的二次复杂度；修复后完整 Release 套件在 33 秒内完成。
+
+### 6.2 Phase 5 精确回放与运行时比例门禁
+
+- validator-facing events 已升级为 schema v3；1,500 条事件按 `seed/day_index/slot_index` 完整排序，校验器会重新构造规范时间、上下文、subseed、逐 seed 历史与精确 `selected_id`。缺失、额外、乱序、上下文/时间篡改和同场景 surface 偷换均为硬错误。
+- 四季、04:00–05:59 dawn、`ide_foreground/idle_return/fullscreen` 的 `null/false/true`，以及 `active_minutes` 的 `null/89/90/91` 均有硬覆盖门禁。
+- canonical replay 上限为 3,000 次；声明规模或原始事件数超限、raw/parsed 数量不完整时均在 selector 前拒绝。相同完整输入只复用容量为 2 的规范答案流缓存，每次事件仍逐条重新比对。
+- C# 运行时通过真实 `OfflineCompanionAgent → SceneScheduler → PersonaCorpus` 路径验证：10 seeds × 30 days × 4 slots = 1,200 outputs，Easter egg 为 120/1,200（10.00%），每 seed 均为 10.00%。接受区间由共享 contract 生成，不在测试中另行硬编码。
+- 主代理最终复验：Python `311/311`（140.4 秒）；.NET Release `392/392`、0 跳过；validator 为 `0 hard errors / 1 warning`，唯一 warning 为 `surface_inventory_observation`。
 
 测试全绿后，只删除已验证位于仓库内的 scratch/publish 目录，并只覆盖明确的交付 EXE：
 
@@ -207,8 +215,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
 | scheduler semantic binding | `4eaa40cd28d58aaa9dcecaaded539f25ceb39b35a4fc1cd9012d422cd414b462` |
 | editorial manifest | `ce03fcbe4bb4de0f61ab81e29075ed80eb30bfe921bb1499e5514a1a3c5ad7b5` |
 | subseed derivation v2 | `e5f6d36ffb5d4936bccca24cb9c7177a63e02d937118342916bd5eea0a83640d` |
-| simulation report | `ccd6d67521c210a30e122806e2d5f695f5d3f9f6613d402034be57dce3f9099e` |
-| validator-facing simulation events | `163956d6ab7137973489d7bf9f1dfbf33a921166290309c81542931a2a8c325c` |
+| simulation report | `09d67f3b69fb97f871337fc6e2a6b5a4a4c9897c680af3551796091764e090e2` |
+| validator-facing simulation events | `5fddf3a0c05705da9ff97f7a1b339b664ee8dbcf1e81318e09267e815bc1d9da` |
 | final `佳怡桌宠.exe` | `cc69d4b555ac438641f805cbe3d51cf8b7d04627d1eda0837dbd089a3bdc6d4e` |
 
 ### 7.1 Phase 4B 发布实证

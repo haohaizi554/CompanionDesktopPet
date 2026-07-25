@@ -4,12 +4,11 @@ import hashlib
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
 from .builder import serialize_v2
-from .context import PersonaContext
 from .history import SelectionHistory
 from .lexical import contains_seasoning_marker
 from .loader import CorpusFormatError, load_legacy
@@ -38,12 +37,14 @@ from .simulation_core.report import (
     render_simulation_report,
 )
 from .simulation_core.scenarios import (
-    NULLABLE_SIGNAL_COMBINATIONS,
+    ATTEMPT_SLOTS,
+    SIMULATION_SCHEMA_VERSION,
     SUBSEED_DERIVATION_SHA256,
     SUBSEED_DERIVATION_SPEC,
     SUBSEED_DERIVATION_VERSION,
     CandidateIndex,
     build_scenario_coverage,
+    build_natural_attempt,
     derive_subseed,
     probe_inventory_coverage,
     summarize_scenario_coverage,
@@ -69,23 +70,6 @@ OUTPUT_MODES = ("self_talk", "ambient", "user_direct", "system_observe")
 LENGTH_BUCKETS = ("<8", "8-16", "17-24", "25-36", ">36")
 PREFIX_WIDTHS = (2, 3, 4, 5, 6)
 SUFFIX_WIDTHS = (4, 6, 8, 10)
-SIMULATION_SCHEMA_VERSION = 2
-SIMULATION_STARTS = (
-    datetime(2026, 1, 1, tzinfo=timezone(timedelta(hours=8))),
-    datetime(2026, 3, 1, tzinfo=timezone(timedelta(hours=8))),
-    datetime(2026, 6, 1, tzinfo=timezone(timedelta(hours=8))),
-    datetime(2026, 9, 1, tzinfo=timezone(timedelta(hours=8))),
-)
-ATTEMPT_SLOTS = (
-    (5, 0, "day_changed"),
-    (7, 20, "app_start"),
-    (11, 40, "tick"),
-    (15, 15, "tick"),
-    (19, 30, "tick"),
-)
-SIMULATED_HOLIDAYS = {(1, 1): "元旦"}
-ANNIVERSARY_DAY_INDEX = 14
-ANNIVERSARY_DAYS = 365
 _EPSILON = 1e-9
 
 _TONE_MARKERS = (
@@ -221,63 +205,42 @@ def simulate(
 
     attempts: list[SimulationAttempt] = []
     for seed in canonical_seeds:
-        simulation_start = SIMULATION_STARTS[seed % len(SIMULATION_STARTS)]
         history = SelectionHistory()
         last_output_at: datetime | None = None
         for day_index in range(days):
-            for slot_index, (hour, minute, event) in enumerate(ATTEMPT_SLOTS):
-                now = simulation_start + timedelta(
-                    days=day_index, hours=hour, minutes=minute
-                )
-                elapsed = (
-                    max(1440.0, float(scheduler.long_silence_minutes))
-                    if last_output_at is None
-                    else (now - last_output_at).total_seconds() / 60
-                )
-                holiday = SIMULATED_HOLIDAYS.get((now.month, now.day))
-                anniversary_days = (
-                    ANNIVERSARY_DAYS if day_index == ANNIVERSARY_DAY_INDEX else 0
-                )
-                signal_index = (
-                    day_index * len(ATTEMPT_SLOTS) + slot_index
-                ) % len(NULLABLE_SIGNAL_COMBINATIONS)
-                ide_foreground, active_minutes, idle_return, fullscreen = (
-                    NULLABLE_SIGNAL_COMBINATIONS[signal_index]
-                )
-                context = PersonaContext.from_datetime(
-                    now,
-                    event=event,
-                    holiday=holiday,
-                    anniversary_days=anniversary_days,
-                    minutes_since_last_output=elapsed,
-                    ide_foreground=ide_foreground,
-                    active_minutes=active_minutes,
-                    idle_return=idle_return,
-                    fullscreen=fullscreen,
+            for slot_index in range(len(ATTEMPT_SLOTS)):
+                natural_attempt = build_natural_attempt(
+                    seed=seed,
+                    day_index=day_index,
+                    slot_index=slot_index,
+                    scheduler_config=scheduler,
+                    last_output_at=last_output_at,
                 )
                 selected = select_line(
                     prepared_corpus,
-                    context,
+                    natural_attempt.context,
                     history,
-                    now,
+                    natural_attempt.attempted_at,
                     seed=derive_subseed(
                         seed=seed,
                         day_index=day_index,
                         slot_index=slot_index,
                         corpus_sha256=corpus_digest,
                         scheduler_config_sha256=config_digest,
-                        scenario=f"natural:{event}:{hour:02d}:{minute:02d}",
+                        scenario=natural_attempt.scenario,
                     ),
                     scheduler_config=scheduler,
                 )
                 row = selected.row if selected is not None else None
                 if row is not None:
-                    last_output_at = now
+                    last_output_at = natural_attempt.attempted_at
                 attempts.append(
                     SimulationAttempt(
                         seed=seed,
-                        attempted_at=now,
-                        context=context,
+                        day_index=day_index,
+                        slot_index=slot_index,
+                        attempted_at=natural_attempt.attempted_at,
+                        context=natural_attempt.context,
                         row=row,
                     )
                 )
