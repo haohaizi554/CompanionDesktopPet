@@ -4,7 +4,7 @@ Copyright © 2026 the applicable rights holder(s). **All rights reserved.**
 
 This notice covers the repository's **Character Assets** and **Persona Materials**, including the character image and icon; names and nicknames; identity, personality, voice, tone, mannerisms, catchphrases, backstory, relationship framing, and other character-defining expression; dialogue corpora; semantic groups; story and decision trees; behavioral forests; annotations; editorial selections; and expressive compilations.
 
-These materials are not licensed under the PolyForm Noncommercial License in `LICENSE`. Except for the limited permission below or rights that applicable law grants regardless of this notice, no permission is granted to copy, redistribute, sublicense, publish, adapt, extract, separate, create derivative characters or corpora, train or fine-tune a model, build a dataset, benchmark a model, impersonate the character, market the character, or reuse any of these materials in another product or project.
+These materials are not licensed under the PolyForm Noncommercial License in `LICENSE.md`. Except for the limited permission below or rights that applicable law grants regardless of this notice, no permission is granted to copy, redistribute, sublicense, publish, adapt, extract, separate, create derivative characters or corpora, train or fine-tune a model, build a dataset, benchmark a model, impersonate the character, market the character, or reuse any of these materials in another product or project.
 
 ## Limited permission for technical evaluation
 

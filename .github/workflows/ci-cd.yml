@@ -126,7 +126,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $evidenceFile = Join-Path $env:GITHUB_WORKSPACE 'ci-evidence/license-contract.txt'
           $requiredFiles = @(
-            'LICENSE'
+            'LICENSE.md'
             'LICENSE-SCOPE.md'
             'ASSET_AND_PERSONA_RIGHTS.md'
             'NOTICE'
@@ -140,11 +140,14 @@ jobs:
               Set-Content -LiteralPath $evidenceFile -Encoding utf8
             throw "Missing or empty legal files: $($missing -join ', ')"
           }
+          if (Test-Path -LiteralPath 'LICENSE') {
+            throw 'The repository license source must be LICENSE.md so GitHub renders it; release packaging supplies the conventional LICENSE asset name.'
+          }
 
           # Official tagged source:
           # https://github.com/polyformproject/polyform-licenses/blob/1.0.0/PolyForm-Noncommercial-1.0.0.md
           $expectedLicenseSha256 = 'c0ea4a896d2c8c394b29f9427589996db826cd501c512279ff0ed3ef48fabbe5'
-          $actualLicenseSha256 = (Get-FileHash -LiteralPath 'LICENSE' -Algorithm SHA256).Hash.ToLowerInvariant()
+          $actualLicenseSha256 = (Get-FileHash -LiteralPath 'LICENSE.md' -Algorithm SHA256).Hash.ToLowerInvariant()
           $requiredNoticeLines = @(
             Get-Content -LiteralPath 'NOTICE' -Encoding utf8 |
               Where-Object { $_ -match '^Required Notice:\s+\S' }
@@ -160,7 +163,7 @@ jobs:
           ) | Set-Content -LiteralPath $evidenceFile -Encoding utf8
 
           if ($actualLicenseSha256 -ne $expectedLicenseSha256) {
-            throw 'LICENSE is not the byte-exact official PolyForm Noncommercial 1.0.0 text.'
+            throw 'LICENSE.md is not the byte-exact official PolyForm Noncommercial 1.0.0 text.'
           }
           if ($requiredNoticeLines.Count -eq 0) {
             throw 'NOTICE must contain a non-empty plain-text line beginning with Required Notice:.'
@@ -352,6 +355,7 @@ jobs:
       contents: read
     outputs:
       release_artifact_name: ${{ steps.release_artifact.outputs.name }}
+      package_version: ${{ steps.package_version.outputs.value }}
 
     steps:
       - name: Check out repository
@@ -425,6 +429,7 @@ jobs:
           Write-Output "Verified committed .NET SDK $actualSdk for this job."
 
       - name: Resolve package version from ref
+        id: package_version
         run: |
           $ErrorActionPreference = 'Stop'
           if ($env:GITHUB_REF -like 'refs/tags/*') {
@@ -440,6 +445,8 @@ jobs:
           }
           "PACKAGE_VERSION=$packageVersion" |
             Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
+          "value=$packageVersion" |
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
           Write-Output "Package version: $packageVersion"
 
       - name: Initialize clean release directories
@@ -603,13 +610,19 @@ jobs:
           New-Item -ItemType Directory -Path $distribution -Force | Out-Null
 
           $deliveryNames = @('佳怡桌宠.exe', '使用说明.txt')
-          $legalNames = @('LICENSE', 'NOTICE', 'LICENSE-SCOPE.md', 'ASSET_AND_PERSONA_RIGHTS.md')
+          $legalSources = [ordered]@{
+            'LICENSE' = 'LICENSE.md'
+            'NOTICE' = 'NOTICE'
+            'LICENSE-SCOPE.md' = 'LICENSE-SCOPE.md'
+            'ASSET_AND_PERSONA_RIGHTS.md' = 'ASSET_AND_PERSONA_RIGHTS.md'
+          }
+          $legalNames = @($legalSources.Keys)
           $bundleNames = @($deliveryNames + $legalNames)
           foreach ($name in $deliveryNames) {
             Copy-Item -LiteralPath (Join-Path 'release-work/delivery' $name) -Destination (Join-Path $bundle $name)
           }
           foreach ($name in $legalNames) {
-            Copy-Item -LiteralPath $name -Destination (Join-Path $bundle $name)
+            Copy-Item -LiteralPath $legalSources[$name] -Destination (Join-Path $bundle $name)
           }
 
           # GitHub normalizes non-ASCII release-asset names. Keep the friendly
@@ -787,10 +800,29 @@ jobs:
       - name: Create immutable tag release
         env:
           GH_TOKEN: ${{ github.token }}
+          PACKAGE_VERSION: ${{ needs.package.outputs.package_version }}
         run: |
           $ErrorActionPreference = 'Stop'
           $tag = $env:GITHUB_REF_NAME
           $repository = $env:GITHUB_REPOSITORY
+          if ([string]::IsNullOrWhiteSpace($env:PACKAGE_VERSION)) {
+            throw 'Package job did not provide the validated release version.'
+          }
+          if ($env:GITHUB_SHA -notmatch '^[a-fA-F0-9]{40}$') {
+            throw "GITHUB_SHA is not a full Git commit SHA: $env:GITHUB_SHA"
+          }
+
+          $releaseTitle = "佳怡桌宠 $tag（Windows x64）"
+          $descriptionMarker = '<!-- companion-release-description:zh-CN:v1 -->'
+          $requiredChineseHeadings = @(
+            '## 发布亮点'
+            '## 下载与运行'
+            '## 完整性验证'
+            '## 离线、单 EXE 与签名说明'
+            '## 构建来源'
+            '## 许可范围与权利声明'
+          )
+          $expectedProductVersion = "$env:PACKAGE_VERSION+$env:GITHUB_SHA"
           $assetNames = @(
             'ASSET_AND_PERSONA_RIGHTS.md'
             'LICENSE'
@@ -813,19 +845,58 @@ jobs:
 
           $encodedTag = [Uri]::EscapeDataString($tag)
           $licenseUrl = 'https://polyformproject.org/licenses/noncommercial/1.0.0'
+          $licenseSourceUrl = "https://github.com/$repository/blob/$encodedTag/LICENSE.md"
           $scopeUrl = "https://github.com/$repository/blob/$encodedTag/LICENSE-SCOPE.md"
           $rightsUrl = "https://github.com/$repository/blob/$encodedTag/ASSET_AND_PERSONA_RIGHTS.md"
-          $legalPreamble = @"
+          $releaseBody = @"
           <!-- release-legal-notice:start -->
-          ## License and rights
+          $descriptionMarker
+          # 佳怡桌宠 $tag（Windows x64）
 
-          PolyForm Noncommercial License 1.0.0: $licenseUrl
+          ## 发布亮点
+
+          - 这是从已验证的 main 提交构建的正式 Windows x64 版本。
+          - 发布前已完成质量门禁、单文件边界检查、真实 WPF 隔离烟测与 SHA-256 校验。
+          - 桌宠、中文角色语料与本地状态均保持离线运行，不依赖网络、数据库或在线模型。
+
+          ## 下载与运行
+
+          - 推荐下载 Jiayi-Desktop-Pet-win-x64.zip；ZIP 内保留 佳怡桌宠.exe、使用说明.txt 与四份法律文件。
+          - 也可以直接下载 Jiayi-Desktop-Pet.exe，并同时阅读 Jiayi-Desktop-Pet-README-zh-CN.txt。
+          - 解压或下载后直接运行 EXE；运行最终程序不需要安装 Python 或 .NET SDK。
+
+          ## 完整性验证
+
+          - 下载 SHA256SUMS.txt，并使用 Get-FileHash -Algorithm SHA256 计算所下载文件的哈希。
+          - 计算结果必须与 SHA256SUMS.txt 中相同文件名对应的 64 位 SHA-256 完全一致。
+          - 主 ZIP、直接下载 EXE、说明文件和法律文件均包含在该校验清单中。
+
+          ## 离线、单 EXE 与签名说明
+
+          - 应用完全离线运行，不读取输入内容、剪贴板或窗口标题，也不枚举用户目录。
+          - Jiayi-Desktop-Pet.exe 是 self-contained 的 Windows x64 单 EXE，旁边不需要应用 DLL、JSON 或 PDB。
+          - 当前 EXE 未做 Authenticode 代码签名；从网络下载时，Windows SmartScreen 或安全软件可能显示信誉提示。
+
+          ## 构建来源
+
+          - 标签：$tag
+          - 提交 SHA：$env:GITHUB_SHA
+          - 包版本：$env:PACKAGE_VERSION
+          - EXE ProductVersion：$expectedProductVersion
+
+          ## 许可范围与权利声明
+
+          Technical Code 按 PolyForm Noncommercial License 1.0.0 提供：$licenseUrl
+
+          仓库内可渲染的许可正文：$licenseSourceUrl
 
           $requiredNotice
 
-          Technical code license scope: $scopeUrl
+          技术代码许可范围：$scopeUrl
 
-          Asset and persona rights: $rightsUrl
+          形象与人格权利边界：$rightsUrl
+
+          桌宠形象、姓名、人格、口吻与语料不随技术代码许可一并授权；请在下载、运行或再分发前阅读上述完整范围。
           <!-- release-legal-notice:end -->
           "@.Trim()
           $bodyPath = Join-Path $env:RUNNER_TEMP 'companion-release-body.md'
@@ -881,12 +952,11 @@ jobs:
             Write-Output "Existing GitHub Release $tag already has the exact immutable assets, including SHA256SUMS.txt; no mutation performed."
           }
           else {
-            [IO.File]::WriteAllText($bodyPath, $legalPreamble + "`n", [Text.UTF8Encoding]::new($false))
+            [IO.File]::WriteAllText($bodyPath, $releaseBody + "`n", [Text.UTF8Encoding]::new($false))
             & gh release create $tag @assets `
               --verify-tag `
-              --generate-notes `
               --notes-file $bodyPath `
-              --title $tag `
+              --title $releaseTitle `
               --repo $repository
             if ($LASTEXITCODE -ne 0) {
               throw "GitHub Release publication failed with exit code $LASTEXITCODE."
@@ -905,6 +975,15 @@ jobs:
             throw "Published GitHub Release assets were renamed or are incomplete: $($publishedAssetNames -join ', ')"
           }
 
+          $publishedTitleOutput = @(& gh release view $tag --repo $repository --json name --jq '.name' 2>&1)
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not verify published GitHub Release title for $tag."
+          }
+          $publishedTitle = $publishedTitleOutput -join "`n"
+          if ($publishedTitle -cne $releaseTitle) {
+            throw "Published GitHub Release title is not the required zh-CN title: $publishedTitle"
+          }
+
           $publishedBodyOutput = @(& gh release view $tag --repo $repository --json body --jq '.body' 2>&1)
           if ($LASTEXITCODE -ne 0) {
             throw "Could not verify published GitHub Release body for $tag."
@@ -912,8 +991,21 @@ jobs:
           $publishedBody = $publishedBodyOutput -join "`n"
           if (-not $publishedBody.TrimStart().StartsWith('<!-- release-legal-notice:start -->') -or
               -not $publishedBody.Contains($licenseUrl) -or
+              -not $publishedBody.Contains($licenseSourceUrl) -or
               -not $publishedBody.Contains($requiredNotice) -or
               -not $publishedBody.Contains($scopeUrl) -or
               -not $publishedBody.Contains($rightsUrl)) {
             throw 'Published GitHub Release body is missing the required visible legal preamble.'
+          }
+
+          $missingChineseHeadings = @($requiredChineseHeadings | Where-Object {
+            -not $publishedBody.Contains($_)
+          })
+          if (-not $publishedBody.Contains($descriptionMarker) -or
+              $missingChineseHeadings.Count -ne 0 -or
+              -not $publishedBody.Contains("标签：$tag") -or
+              -not $publishedBody.Contains("提交 SHA：$env:GITHUB_SHA") -or
+              -not $publishedBody.Contains("包版本：$env:PACKAGE_VERSION") -or
+              -not $publishedBody.Contains("EXE ProductVersion：$expectedProductVersion")) {
+            throw "Published GitHub Release body is missing the required zh-CN description contract: $($missingChineseHeadings -join ', ')"
           }

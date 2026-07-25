@@ -15,7 +15,7 @@
 
 # Keep the byte-exact standard license and companion rights notices stable on
 # Windows runners so the CI license hash cannot drift through CRLF checkout.
-/LICENSE text eol=lf
+/LICENSE.md text eol=lf
 /NOTICE text eol=lf
 /LICENSE-SCOPE.md text eol=lf
 /ASSET_AND_PERSONA_RIGHTS.md text eol=lf

@@ -72,6 +72,8 @@
 | 只重跑 Release job 时找不到上一轮 package artifact | **已修复（本轮）** | package job 把实际 artifact 名称作为 job output；下游 release job 消费该输出，不再用自己重跑后变化的 `run_attempt` 重算名称。 |
 | 已发布 tag 可被移动并用 `--clobber` 覆盖资产 | **已修复（本轮）** | 流水线要求 tag push 在本次事件中新建且非强推；已有 Release 必须具有精确八项资产，且每项下载后 SHA-256 与候选逐字节相同才允许原运行失败后的无操作式重跑。任何差异都会失败，不再删除、覆盖或编辑已有资产。被删除 tag 的历史复用仍应由 GitHub tag ruleset 阻止，不能从单次 push payload 反推全部历史。 |
 | smoke 默认超时测试允许 30–120 秒漂移 | **已修复（本轮）** | 可调用策略与行为合同都要求默认值精确等于 30 秒；显式值仍受 1–120 秒参数范围约束。 |
+| 根目录 `LICENSE` 中的 Markdown 被 GitHub 当纯文本展示 | **已修复（本轮）** | 仓库源文件改为 GitHub 可渲染的 `LICENSE.md`，官方原文 SHA-256 保持不变；CI 明确拒绝重新出现无扩展名源文件，并在 ZIP/Release 外层映射回惯用资产名 `LICENSE`。 |
+| GitHub Release 自动说明可能混入英文 | **已修复（本轮）** | 流水线移除 `--generate-notes`，使用带稳定 `zh-CN` 标记的中文标题和六段中文发布说明，并在发布后回读标题、段落、tag、SHA、版本与 ProductVersion；仅法律要求的 `Required Notice` 保留英文原文。 |
 
 ## 许可边界
 

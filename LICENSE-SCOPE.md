@@ -1,10 +1,10 @@
 # License scope
 
-This repository uses a split license. The word **software** in `LICENSE` means only the **Technical Code** described below. Making source files visible does not grant rights beyond the licenses and limited permissions stated here.
+This repository uses a split license. The word **software** in `LICENSE.md` means only the **Technical Code** described below. Making source files visible does not grant rights beyond the licenses and limited permissions stated here.
 
 ## Technical Code
 
-Subject to the exclusions below, original program logic, build scripts, tests, validation tooling, and CI/CD workflow definitions are available under the [PolyForm Noncommercial License 1.0.0](LICENSE). That license permits noncommercial use, study, research, experimentation, modification, and distribution under its terms.
+Subject to the exclusions below, original program logic, build scripts, tests, validation tooling, and CI/CD workflow definitions are available under the [PolyForm Noncommercial License 1.0.0](LICENSE.md). That license permits noncommercial use, study, research, experimentation, modification, and distribution under its terms.
 
 This is a **source-available, noncommercial** license. It is not an OSI-approved open-source license and does not permit commercial use.
 
@@ -28,4 +28,4 @@ Third-party components remain subject to their own license terms. No right is gr
 
 ## Required notice
 
-Redistributions of licensed Technical Code must preserve `LICENSE`, this scope document, `NOTICE`, and every line beginning with `Required Notice:` as required by the PolyForm license.
+Source redistributions of licensed Technical Code must preserve `LICENSE.md`, this scope document, `NOTICE`, and every line beginning with `Required Notice:` as required by the PolyForm license. Official release bundles carry the same byte-exact license text under the conventional asset name `LICENSE`.

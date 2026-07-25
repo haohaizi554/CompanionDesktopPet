@@ -121,7 +121,7 @@ dotnet test CompanionDesktopPet.sln -c Release --no-restore
 
 `.github/workflows/ci-cd.yml` 会在每个 PR 和推送到 `main` 时执行完整 Python、语料契约、模拟证据和 .NET Release 门禁。手动运行 `workflow_dispatch` 会在门禁通过后生成可下载的 Windows 发布 artifact，但不会创建公开 Release。
 
-正式发布只接受位于 `origin/main` 上、形如 `v1.1.0` 或 `v1.1.0-rc.1` 的全新 annotated tag。流水线从 tag 派生程序集版本，例如 `v1.1.0` 必须生成 `ProductVersion=1.1.0+<40 位提交 SHA>`；随后验证单 EXE、隔离 WPF smoke、法律文件和 SHA-256，再由 GitHub-hosted runner 使用仓库内置 `GITHUB_TOKEN` 创建新的 GitHub Release。这样无需把本机失效的 `gh` keyring 登录用于大文件上传。
+正式发布只接受位于 `origin/main` 上、形如 `v1.1.0` 或 `v1.1.0-rc.1` 的全新 annotated tag。流水线从 tag 派生程序集版本，例如 `v1.1.0` 必须生成 `ProductVersion=1.1.0+<40 位提交 SHA>`；随后验证单 EXE、隔离 WPF smoke、法律文件和 SHA-256，再由 GitHub-hosted runner 使用仓库内置 `GITHUB_TOKEN` 创建新的 GitHub Release。Release 标题、发布亮点、下载说明、完整性验证和构建来源均使用中文；只有许可证要求逐字保留的 `Required Notice` 继续使用官方英文原文。这样无需把本机失效的 `gh` keyring 登录用于大文件上传。
 
 在干净且已推送的 `main` 上可用下面的入口发布。若本机访问 GitHub 需要代理，只让这一次 tag push 经过代理；真正的 EXE/ZIP 上传由云端流水线完成：
 
@@ -172,6 +172,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
 
 ## 许可
 
-本仓库采用分层许可：可分离的技术代码按 [PolyForm Noncommercial License 1.0.0](LICENSE) 提供，可用于非商业学习、研究、实验、修改与按条款分发。由于该许可限制商业用途，本项目属于 **source-available（源码可见）**，不是 OSI 定义的开源软件。
+本仓库采用分层许可：可分离的技术代码按 [PolyForm Noncommercial License 1.0.0](LICENSE.md) 提供，可用于非商业学习、研究、实验、修改与按条款分发。由于该许可限制商业用途，本项目属于 **source-available（源码可见）**，不是 OSI 定义的开源软件。仓库使用 `LICENSE.md` 让 GitHub 正常渲染许可正文；Release 包中仍以标准文件名 `LICENSE` 携带同一份逐字节一致的原文。
 
 桌宠形象、图标、姓名与昵称、人格、口吻、背景、关系设定、全部语料、语义分组、剧情/决策树、行为森林和编辑性编排均不随技术代码授权，原则上保留全部权利。官方 Release 仅额外允许非商业的私下运行，不授权抽取、复用、转载、改编、训练/微调模型、制作数据集或衍生角色。完整边界见 [LICENSE-SCOPE.md](LICENSE-SCOPE.md)、[ASSET_AND_PERSONA_RIGHTS.md](ASSET_AND_PERSONA_RIGHTS.md) 与 [NOTICE](NOTICE)。
