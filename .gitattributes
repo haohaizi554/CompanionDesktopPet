@@ -12,3 +12,10 @@
 # Provenance hashes bind these JSON files byte-for-byte across platforms.
 /config/*.json text eol=lf
 /config/schemas/*.json text eol=lf
+
+# Keep the byte-exact standard license and companion rights notices stable on
+# Windows runners so the CI license hash cannot drift through CRLF checkout.
+/LICENSE text eol=lf
+/NOTICE text eol=lf
+/LICENSE-SCOPE.md text eol=lf
+/ASSET_AND_PERSONA_RIGHTS.md text eol=lf

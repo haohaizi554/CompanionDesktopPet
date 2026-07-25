@@ -1,0 +1,722 @@
+name: CI and Release
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"
+  PYTHONUTF8: "1"
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  quality-gates:
+    name: Quality gates
+    runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+          architecture: x64
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Record toolchain and committed evidence
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $evidence = Join-Path $env:GITHUB_WORKSPACE 'ci-evidence'
+          New-Item -ItemType Directory -Path $evidence -Force | Out-Null
+
+          $trackedSimulation = 'reports/simulation-events.json'
+          & git ls-files --error-unmatch -- $trackedSimulation | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "$trackedSimulation must be committed."
+          }
+
+          @(
+            "Event=$env:GITHUB_EVENT_NAME"
+            "Ref=$env:GITHUB_REF"
+            "Commit=$env:GITHUB_SHA"
+            "Python=$(& python --version 2>&1)"
+            "DotNetSdk=$(& dotnet --version 2>&1)"
+            "SimulationEventsSHA256=$((Get-FileHash -LiteralPath $trackedSimulation -Algorithm SHA256).Hash.ToLowerInvariant())"
+          ) | Set-Content -LiteralPath (Join-Path $evidence 'environment.txt') -Encoding utf8
+          & dotnet --info 2>&1 | Set-Content -LiteralPath (Join-Path $evidence 'dotnet-info.txt') -Encoding utf8
+
+      - name: Verify licensing contract
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $evidenceFile = Join-Path $env:GITHUB_WORKSPACE 'ci-evidence/license-contract.txt'
+          $requiredFiles = @(
+            'LICENSE'
+            'LICENSE-SCOPE.md'
+            'ASSET_AND_PERSONA_RIGHTS.md'
+            'NOTICE'
+          )
+          $missing = @($requiredFiles | Where-Object {
+            -not (Test-Path -LiteralPath $_ -PathType Leaf) -or
+            (Get-Item -LiteralPath $_ -ErrorAction SilentlyContinue).Length -le 0
+          })
+          if ($missing.Count -ne 0) {
+            "Missing or empty legal files: $($missing -join ', ')" |
+              Set-Content -LiteralPath $evidenceFile -Encoding utf8
+            throw "Missing or empty legal files: $($missing -join ', ')"
+          }
+
+          # Official tagged source:
+          # https://github.com/polyformproject/polyform-licenses/blob/1.0.0/PolyForm-Noncommercial-1.0.0.md
+          $expectedLicenseSha256 = 'c0ea4a896d2c8c394b29f9427589996db826cd501c512279ff0ed3ef48fabbe5'
+          $actualLicenseSha256 = (Get-FileHash -LiteralPath 'LICENSE' -Algorithm SHA256).Hash.ToLowerInvariant()
+          $requiredNoticeLines = @(
+            Get-Content -LiteralPath 'NOTICE' -Encoding utf8 |
+              Where-Object { $_ -match '^Required Notice:\s+\S' }
+          )
+
+          @(
+            "ExpectedLicenseSHA256=$expectedLicenseSha256"
+            "ActualLicenseSHA256=$actualLicenseSha256"
+            "RequiredNoticeCount=$($requiredNoticeLines.Count)"
+            $requiredFiles | ForEach-Object {
+              "FileSHA256=$((Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant())  $_"
+            }
+          ) | Set-Content -LiteralPath $evidenceFile -Encoding utf8
+
+          if ($actualLicenseSha256 -ne $expectedLicenseSha256) {
+            throw 'LICENSE is not the byte-exact official PolyForm Noncommercial 1.0.0 text.'
+          }
+          if ($requiredNoticeLines.Count -eq 0) {
+            throw 'NOTICE must contain a non-empty plain-text line beginning with Required Notice:.'
+          }
+
+      - name: Check generated C# persona contract
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $log = Join-Path $env:GITHUB_WORKSPACE 'ci-evidence/generator-check.txt'
+          $output = @(& python tools/generate_persona_contract_cs.py --check 2>&1)
+          $exitCode = $LASTEXITCODE
+          if ($output.Count -eq 0) {
+            $output = @('PASS: generated C# persona contract is current.')
+          }
+          $output | Tee-Object -FilePath $log
+          if ($exitCode -ne 0) {
+            throw "Persona contract generator check failed with exit code $exitCode."
+          }
+
+      - name: Validate corpus against committed simulation events
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $log = Join-Path $env:GITHUB_WORKSPACE 'ci-evidence/corpus-validation.txt'
+          $output = @(& python tools/validate_corpus_v2.py `
+            --corpus data/optimized/persona-corpus-v2.tsv `
+            --config config/persona-scheduler.json `
+            --allowlist config/persona-review-allowlist.json `
+            --simulation reports/simulation-events.json 2>&1)
+          $exitCode = $LASTEXITCODE
+          $output | Tee-Object -FilePath $log
+          if ($exitCode -ne 0) {
+            throw "Corpus validation failed with exit code $exitCode."
+          }
+
+          $summary = @($output | Where-Object { $_ -match '^Validation:' }) | Select-Object -First 1
+          if ($null -eq $summary -or $summary -notmatch '^Validation: 0 hard errors, (?<Count>[0-9]+) warnings$') {
+            throw "Validator did not report the required zero-hard-error summary: $summary"
+          }
+          $warningCount = [int]$Matches['Count']
+          $warningLines = @($output | Where-Object { $_ -match '^WARNING ' })
+          if ($warningCount -ne $warningLines.Count) {
+            throw 'Validator warning summary does not match its warning details.'
+          }
+          $unexpectedWarnings = @($warningLines | Where-Object {
+            $_ -notmatch '^WARNING surface_inventory_observation:'
+          })
+          if ($unexpectedWarnings.Count -ne 0 -or $warningLines.Count -gt 1) {
+            throw "Validator emitted unexpected warnings: $($warningLines -join ' | ')"
+          }
+
+      - name: Run full Python test suite
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $log = Join-Path $env:GITHUB_WORKSPACE 'ci-evidence/python-tests.txt'
+          $output = @(& python -m unittest discover -s tests -v 2>&1)
+          $exitCode = $LASTEXITCODE
+          $output | Tee-Object -FilePath $log
+          if ($exitCode -ne 0) {
+            throw "Python tests failed with exit code $exitCode."
+          }
+
+      - name: Restore .NET solution
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $log = Join-Path $env:GITHUB_WORKSPACE 'ci-evidence/dotnet-restore.txt'
+          $output = @(& dotnet restore CompanionDesktopPet.sln -r win-x64 --nologo 2>&1)
+          $exitCode = $LASTEXITCODE
+          $output | Tee-Object -FilePath $log
+          if ($exitCode -ne 0) {
+            throw ".NET restore failed with exit code $exitCode."
+          }
+
+      - name: Require nonzero .NET test discovery
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $testProject = 'tests/CompanionDesktopPet.Tests/CompanionDesktopPet.Tests.csproj'
+          $propertyLog = Join-Path $env:GITHUB_WORKSPACE 'ci-evidence/dotnet-test-project.txt'
+          $propertyOutput = @(& dotnet msbuild $testProject -nologo -getProperty:IsTestProject 2>&1)
+          $propertyExitCode = $LASTEXITCODE
+          $propertyOutput | Tee-Object -FilePath $propertyLog
+          if ($propertyExitCode -ne 0) {
+            throw "Unable to inspect IsTestProject; exit code $propertyExitCode."
+          }
+          if (-not ($propertyOutput | Where-Object { $_.ToString().Trim() -eq 'true' })) {
+            throw 'The .NET test project must set IsTestProject=true.'
+          }
+
+          $discoveryLog = Join-Path $env:GITHUB_WORKSPACE 'ci-evidence/dotnet-test-discovery.txt'
+          $discovery = @(& dotnet test $testProject `
+            -c Release `
+            --no-restore `
+            --list-tests `
+            --nologo `
+            --verbosity quiet 2>&1)
+          $discoveryExitCode = $LASTEXITCODE
+          $discovery | Tee-Object -FilePath $discoveryLog
+          if ($discoveryExitCode -ne 0) {
+            throw ".NET test discovery failed with exit code $discoveryExitCode."
+          }
+
+          $discoveredTests = @($discovery | Where-Object {
+            $_.ToString() -match '^\s+CompanionDesktopPet\.Tests\.'
+          })
+          "DiscoveredTests=$($discoveredTests.Count)" |
+            Add-Content -LiteralPath $discoveryLog -Encoding utf8
+          if ($discoveredTests.Count -le 0) {
+            throw '.NET test discovery returned zero CompanionDesktopPet tests.'
+          }
+          "### .NET discovery: $($discoveredTests.Count) tests" |
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8
+
+      - name: Run full .NET Release test suite
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $results = Join-Path $env:GITHUB_WORKSPACE 'ci-evidence/dotnet-results'
+          New-Item -ItemType Directory -Path $results -Force | Out-Null
+          $log = Join-Path $env:GITHUB_WORKSPACE 'ci-evidence/dotnet-tests.txt'
+          $output = @(& dotnet test CompanionDesktopPet.sln `
+            -c Release `
+            --no-restore `
+            --nologo `
+            --verbosity normal `
+            --logger 'trx;LogFileName=release-tests.trx' `
+            --results-directory $results 2>&1)
+          $exitCode = $LASTEXITCODE
+          $output | Tee-Object -FilePath $log
+          if ($exitCode -ne 0) {
+            throw ".NET Release tests failed with exit code $exitCode."
+          }
+
+          $trxFiles = @(Get-ChildItem -LiteralPath $results -Filter '*.trx' -File -Recurse)
+          if ($trxFiles.Count -eq 0) {
+            throw '.NET test run produced no TRX evidence.'
+          }
+          $total = 0
+          $failed = 0
+          foreach ($trxFile in $trxFiles) {
+            [xml]$trx = Get-Content -LiteralPath $trxFile.FullName -Raw
+            $counters = $trx.SelectSingleNode("//*[local-name()='Counters']")
+            if ($null -eq $counters) {
+              throw "TRX file has no test counters: $($trxFile.FullName)"
+            }
+            $total += [int]$counters.GetAttribute('total')
+            $failed += [int]$counters.GetAttribute('failed')
+          }
+          if ($total -le 0) {
+            throw '.NET Release test evidence reports zero executed tests.'
+          }
+          if ($failed -ne 0) {
+            throw ".NET Release test evidence reports $failed failed tests."
+          }
+          "ExecutedTests=$total`nFailedTests=$failed" |
+            Add-Content -LiteralPath $log -Encoding utf8
+          "### .NET Release: $total tests, $failed failed" |
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8
+
+      - name: Confirm committed contracts stayed unchanged
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $log = Join-Path $env:GITHUB_WORKSPACE 'ci-evidence/contract-diff.txt'
+          $output = @(& git diff --exit-code -- `
+            src/CompanionDesktopPet/Services/PersonaContract.g.cs `
+            reports/simulation-events.json 2>&1)
+          $exitCode = $LASTEXITCODE
+          if ($output.Count -eq 0) {
+            $output = @('PASS: generator and validation gates did not rewrite committed contracts.')
+          }
+          $output | Tee-Object -FilePath $log
+          if ($exitCode -ne 0) {
+            throw 'Quality gates modified a committed contract or simulation evidence file.'
+          }
+
+      - name: Upload quality-gate evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: quality-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-evidence
+          if-no-files-found: warn
+          retention-days: 30
+
+  package:
+    name: Package verified Windows release
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    needs: quality-gates
+    runs-on: windows-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Initialize clean release directories
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $repoRoot = [IO.Path]::GetFullPath($env:GITHUB_WORKSPACE)
+          $rootPrefix = $repoRoot.TrimEnd('\') + '\'
+          $releaseRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot 'release-work'))
+          $verifyRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot 'outputs/verify'))
+          foreach ($path in @($releaseRoot, $verifyRoot)) {
+            if (-not $path.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+              throw "Cleanup target escaped repository root: $path"
+            }
+            Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
+          }
+          New-Item -ItemType Directory -Path (Join-Path $releaseRoot 'publish') -Force | Out-Null
+          New-Item -ItemType Directory -Path (Join-Path $releaseRoot 'delivery') -Force | Out-Null
+          New-Item -ItemType Directory -Path (Join-Path $releaseRoot 'evidence') -Force | Out-Null
+
+      - name: Restore release project
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $log = Join-Path $env:GITHUB_WORKSPACE 'release-work/evidence/dotnet-restore.txt'
+          $output = @(& dotnet restore `
+            src/CompanionDesktopPet/CompanionDesktopPet.csproj `
+            -r win-x64 `
+            --nologo 2>&1)
+          $exitCode = $LASTEXITCODE
+          $output | Tee-Object -FilePath $log
+          if ($exitCode -ne 0) {
+            throw "Release restore failed with exit code $exitCode."
+          }
+
+      - name: Publish clean self-contained single-file app
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $publishDir = Join-Path $env:GITHUB_WORKSPACE 'release-work/publish'
+          $log = Join-Path $env:GITHUB_WORKSPACE 'release-work/evidence/dotnet-publish.txt'
+          $output = @(& dotnet publish `
+            src/CompanionDesktopPet/CompanionDesktopPet.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            --no-restore `
+            --nologo `
+            -p:PublishSingleFile=true `
+            -p:PublishTrimmed=false `
+            -p:DebugType=None `
+            -p:DebugSymbols=false `
+            -p:ContinuousIntegrationBuild=true `
+            -p:SourceRevisionId=$env:GITHUB_SHA `
+            -o $publishDir 2>&1)
+          $exitCode = $LASTEXITCODE
+          $output | Tee-Object -FilePath $log
+          if ($exitCode -ne 0) {
+            throw "Release publish failed with exit code $exitCode."
+          }
+
+      - name: Stage delivery names and current usage evidence
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $publishExe = Join-Path $env:GITHUB_WORKSPACE 'release-work/publish/CompanionDesktopPet.exe'
+          $deliveryDir = Join-Path $env:GITHUB_WORKSPACE 'release-work/delivery'
+          $deliveryExe = Join-Path $deliveryDir '佳怡桌宠.exe'
+          $deliveryReadme = Join-Path $deliveryDir '使用说明.txt'
+          Copy-Item -LiteralPath $publishExe -Destination $deliveryExe
+
+          $sourceReadme = Join-Path $env:GITHUB_WORKSPACE 'outputs/CompanionDesktopPet/使用说明.txt'
+          $readmeText = Get-Content -LiteralPath $sourceReadme -Raw -Encoding utf8
+          $exe = Get-Item -LiteralPath $deliveryExe
+          $exeSha256 = (Get-FileHash -LiteralPath $deliveryExe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $gitSha = $env:GITHUB_SHA
+          if ($gitSha -notmatch '^[a-fA-F0-9]{40}$') {
+            throw "GITHUB_SHA is not a full Git commit SHA: $gitSha"
+          }
+          $productVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($deliveryExe).ProductVersion
+          if ([string]::IsNullOrWhiteSpace($productVersion) -or
+              $productVersion.IndexOf($gitSha, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+            throw "Published EXE ProductVersion does not contain GITHUB_SHA. ProductVersion=$productVersion; GITHUB_SHA=$gitSha"
+          }
+
+          $metadata = @(
+            @{ Pattern = '(?m)^大小：.*$'; Value = "大小：$($exe.Length.ToString('N0', [Globalization.CultureInfo]::InvariantCulture)) 字节" }
+            @{ Pattern = '(?m)^SHA-256：.*$'; Value = "SHA-256：$exeSha256" }
+            @{ Pattern = '(?m)^built-from：.*$'; Value = "built-from：$gitSha" }
+          )
+          foreach ($entry in $metadata) {
+            if ($readmeText -notmatch $entry.Pattern) {
+              throw "Usage guide is missing release metadata matching $($entry.Pattern)."
+            }
+            $readmeText = [Regex]::Replace($readmeText, $entry.Pattern, $entry.Value)
+          }
+
+          $requiredNotice = @(
+            Get-Content -LiteralPath 'NOTICE' -Encoding utf8 |
+              Where-Object { $_ -match '^Required Notice:\s+\S' }
+          ) -join "`n"
+          if ([string]::IsNullOrWhiteSpace($requiredNotice)) {
+            throw 'NOTICE has no Required Notice line to carry into the delivery guide.'
+          }
+          $licenseUrl = 'https://polyformproject.org/licenses/noncommercial/1.0.0'
+          if (-not $readmeText.Contains($requiredNotice)) {
+            $readmeText = $readmeText.TrimEnd() + @"
+
+
+          许可与权利：
+          Technical Code 按 PolyForm Noncommercial License 1.0.0 提供：
+          $licenseUrl
+          $requiredNotice
+          "@
+          }
+          elseif (-not $readmeText.Contains($licenseUrl)) {
+            throw 'Usage guide contains Required Notice but omits the PolyForm license URL.'
+          }
+          [IO.File]::WriteAllText($deliveryReadme, $readmeText, [Text.UTF8Encoding]::new($false))
+
+          @(
+            "DeliveryExe=$deliveryExe"
+            "DeliveryExeBytes=$($exe.Length)"
+            "DeliveryExeSHA256=$exeSha256"
+            "ProductVersion=$productVersion"
+            "BuiltFrom=$gitSha"
+          ) | Set-Content -LiteralPath 'release-work/evidence/staging.txt' -Encoding utf8
+
+      - name: Verify publish boundary and real WPF smoke test
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $log = Join-Path $env:GITHUB_WORKSPACE 'release-work/evidence/verify-publish.txt'
+          $output = @(& powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
+            -ExePath 'release-work/delivery/佳怡桌宠.exe' `
+            -PublishExePath 'release-work/publish/CompanionDesktopPet.exe' 2>&1)
+          $exitCode = $LASTEXITCODE
+          $output | Tee-Object -FilePath $log
+          if ($exitCode -ne 0) {
+            throw "Publish verification failed with exit code $exitCode."
+          }
+
+      - name: Run strengthened publish-verifier contract
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $log = Join-Path $env:GITHUB_WORKSPACE 'release-work/evidence/verify-publish-contract.txt'
+          $output = @(& powershell -NoProfile -ExecutionPolicy Bypass -File tests/Verify-Publish.Contract.ps1 `
+            -ExePath 'release-work/delivery/佳怡桌宠.exe' `
+            -PublishExePath 'release-work/publish/CompanionDesktopPet.exe' 2>&1)
+          $exitCode = $LASTEXITCODE
+          $output | Tee-Object -FilePath $log
+          if ($exitCode -ne 0) {
+            throw "Publish-verifier contract failed with exit code $exitCode."
+          }
+
+      - name: Assemble checksummed release assets
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bundle = Join-Path $env:GITHUB_WORKSPACE 'release-work/bundle'
+          $distribution = Join-Path $env:GITHUB_WORKSPACE 'release-work/distribution'
+          $zipVerification = Join-Path $env:GITHUB_WORKSPACE 'release-work/zip-verification'
+          New-Item -ItemType Directory -Path $bundle -Force | Out-Null
+          New-Item -ItemType Directory -Path $distribution -Force | Out-Null
+
+          $deliveryNames = @('佳怡桌宠.exe', '使用说明.txt')
+          $legalNames = @('LICENSE', 'NOTICE', 'LICENSE-SCOPE.md', 'ASSET_AND_PERSONA_RIGHTS.md')
+          $bundleNames = @($deliveryNames + $legalNames)
+          foreach ($name in $deliveryNames) {
+            Copy-Item -LiteralPath (Join-Path 'release-work/delivery' $name) -Destination (Join-Path $bundle $name)
+          }
+          foreach ($name in $legalNames) {
+            Copy-Item -LiteralPath $name -Destination (Join-Path $bundle $name)
+          }
+
+          $zipName = '佳怡桌宠-win-x64.zip'
+          $zipPath = Join-Path $distribution $zipName
+          $bundlePaths = @($bundleNames | ForEach-Object { Join-Path $bundle $_ })
+          Compress-Archive -LiteralPath $bundlePaths -DestinationPath $zipPath -CompressionLevel Optimal -Force
+
+          New-Item -ItemType Directory -Path $zipVerification -Force | Out-Null
+          Expand-Archive -LiteralPath $zipPath -DestinationPath $zipVerification -Force
+          $unexpectedZipDirectories = @(Get-ChildItem -LiteralPath $zipVerification -Directory -Force -Recurse)
+          $actualZipNames = @(
+            Get-ChildItem -LiteralPath $zipVerification -File -Force |
+              Select-Object -ExpandProperty Name |
+              Sort-Object
+          )
+          $expectedZipNames = @($bundleNames | Sort-Object)
+          if ($unexpectedZipDirectories.Count -ne 0 -or
+              ($actualZipNames -join "`n") -cne ($expectedZipNames -join "`n")) {
+            throw "Primary ZIP content is not the exact flat bundle: $($actualZipNames -join ', ')"
+          }
+          foreach ($name in $bundleNames) {
+            $bundleHash = (Get-FileHash -LiteralPath (Join-Path $bundle $name) -Algorithm SHA256).Hash
+            $zipHash = (Get-FileHash -LiteralPath (Join-Path $zipVerification $name) -Algorithm SHA256).Hash
+            if ($zipHash -cne $bundleHash) {
+              throw "Primary ZIP content differs from staged file: $name"
+            }
+            Copy-Item -LiteralPath (Join-Path $bundle $name) -Destination (Join-Path $distribution $name)
+          }
+
+          $checksumTargets = @($bundleNames + $zipName | Sort-Object)
+          $actualPreChecksumNames = @(
+            Get-ChildItem -LiteralPath $distribution -File -Force |
+              Select-Object -ExpandProperty Name |
+              Sort-Object
+          )
+          if (($actualPreChecksumNames -join "`n") -cne ($checksumTargets -join "`n")) {
+            throw "Release assets before checksumming are unexpected: $($actualPreChecksumNames -join ', ')"
+          }
+          $checksumLines = @($checksumTargets | ForEach-Object {
+            $hash = (Get-FileHash -LiteralPath (Join-Path $distribution $_) -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $_"
+          })
+          [IO.File]::WriteAllLines(
+            (Join-Path $distribution 'SHA256SUMS.txt'),
+            $checksumLines,
+            [Text.UTF8Encoding]::new($false)
+          )
+
+          $expectedNames = @($checksumTargets + 'SHA256SUMS.txt' | Sort-Object)
+          $actualNames = @(Get-ChildItem -LiteralPath $distribution -File -Force | Select-Object -ExpandProperty Name | Sort-Object)
+          if (($actualNames -join "`n") -cne ($expectedNames -join "`n")) {
+            throw "Release distribution has unexpected files: $($actualNames -join ', ')"
+          }
+
+          @(
+            "Ref=$env:GITHUB_REF"
+            "Commit=$env:GITHUB_SHA"
+            "Run=$env:GITHUB_RUN_ID/$env:GITHUB_RUN_ATTEMPT"
+            "DotNetSdk=$(& dotnet --version 2>&1)"
+            $actualNames | ForEach-Object {
+              $item = Get-Item -LiteralPath (Join-Path $distribution $_)
+              $hash = (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+              "AssetSHA256=$hash  Bytes=$($item.Length)  Name=$($_)"
+            }
+          ) | Set-Content -LiteralPath 'release-work/evidence/release-manifest.txt' -Encoding utf8
+          $checksumLines | ForEach-Object { '- `' + $_ + '`' } |
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8
+
+      - name: Upload release assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: companion-desktop-pet-${{ github.run_id }}-${{ github.run_attempt }}
+          path: release-work/distribution
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+      - name: Upload packaging evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: release-work/evidence
+          if-no-files-found: warn
+          retention-days: 30
+
+  github-release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package
+    runs-on: windows-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download verified release assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: companion-desktop-pet-${{ github.run_id }}-${{ github.run_attempt }}
+          path: release-assets
+
+      - name: Verify downloaded checksums
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $assetDirectory = Join-Path $env:GITHUB_WORKSPACE 'release-assets'
+          $checksumTargets = @(
+            'ASSET_AND_PERSONA_RIGHTS.md'
+            'LICENSE'
+            'LICENSE-SCOPE.md'
+            'NOTICE'
+            '佳怡桌宠-win-x64.zip'
+            '佳怡桌宠.exe'
+            '使用说明.txt'
+          ) | Sort-Object
+          $expectedNames = @($checksumTargets + 'SHA256SUMS.txt' | Sort-Object)
+          $actualNames = @(Get-ChildItem -LiteralPath $assetDirectory -File -Force | Select-Object -ExpandProperty Name | Sort-Object)
+          if (($actualNames -join "`n") -cne ($expectedNames -join "`n")) {
+            throw "Downloaded release artifact has unexpected files: $($actualNames -join ', ')"
+          }
+
+          $checksumLines = @(Get-Content -LiteralPath (Join-Path $assetDirectory 'SHA256SUMS.txt') -Encoding utf8)
+          if ($checksumLines.Count -ne $checksumTargets.Count) {
+            throw 'SHA256SUMS.txt must hash every uploaded asset except itself exactly once.'
+          }
+          $checksumNames = @()
+          foreach ($line in $checksumLines) {
+            if ($line -notmatch '^(?<Hash>[a-f0-9]{64})  (?<Name>.+)$') {
+              throw "Malformed checksum line: $line"
+            }
+            $expectedHash = $Matches['Hash']
+            $assetName = $Matches['Name']
+            if ([IO.Path]::GetFileName($assetName) -cne $assetName -or $checksumNames -ccontains $assetName) {
+              throw "Checksum target name is unsafe or duplicated: $assetName"
+            }
+            $checksumNames += $assetName
+            $path = Join-Path $assetDirectory $assetName
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "Checksum target is missing: $assetName"
+            }
+            $actualHash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actualHash -ne $expectedHash) {
+              throw "Checksum mismatch for $assetName."
+            }
+          }
+          $actualChecksumNames = @($checksumNames | Sort-Object)
+          if (($actualChecksumNames -join "`n") -cne ($checksumTargets -join "`n")) {
+            throw "Checksum coverage does not exactly match uploaded assets: $($actualChecksumNames -join ', ')"
+          }
+
+      - name: Create or refresh tag release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = $env:GITHUB_REF_NAME
+          $repository = $env:GITHUB_REPOSITORY
+          $assetNames = @(
+            'ASSET_AND_PERSONA_RIGHTS.md'
+            'LICENSE'
+            'LICENSE-SCOPE.md'
+            'NOTICE'
+            'SHA256SUMS.txt'
+            '佳怡桌宠-win-x64.zip'
+            '佳怡桌宠.exe'
+            '使用说明.txt'
+          )
+          $assets = @($assetNames | ForEach-Object { Join-Path 'release-assets' $_ })
+
+          $requiredNotice = @(
+            Get-Content -LiteralPath (Join-Path 'release-assets' 'NOTICE') -Encoding utf8 |
+              Where-Object { $_ -match '^Required Notice:\s+\S' }
+          ) -join "`n"
+          if ([string]::IsNullOrWhiteSpace($requiredNotice)) {
+            throw 'Downloaded NOTICE has no exact Required Notice line for the GitHub Release body.'
+          }
+
+          $encodedTag = [Uri]::EscapeDataString($tag)
+          $licenseUrl = 'https://polyformproject.org/licenses/noncommercial/1.0.0'
+          $scopeUrl = "https://github.com/$repository/blob/$encodedTag/LICENSE-SCOPE.md"
+          $rightsUrl = "https://github.com/$repository/blob/$encodedTag/ASSET_AND_PERSONA_RIGHTS.md"
+          $legalPreamble = @"
+          <!-- release-legal-notice:start -->
+          ## License and rights
+
+          PolyForm Noncommercial License 1.0.0: $licenseUrl
+
+          $requiredNotice
+
+          Technical code license scope: $scopeUrl
+
+          Asset and persona rights: $rightsUrl
+          <!-- release-legal-notice:end -->
+          "@.Trim()
+          $bodyPath = Join-Path $env:RUNNER_TEMP 'companion-release-body.md'
+
+          & gh release view $tag --repo $repository *> $null
+          $releaseExists = $LASTEXITCODE -eq 0
+          if ($releaseExists) {
+            $existingBodyOutput = @(& gh release view $tag --repo $repository --json body --jq '.body' 2>&1)
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not read existing GitHub Release body for $tag."
+            }
+            $existingBody = $existingBodyOutput -join "`n"
+            $managedPattern = '(?s)\A\s*<!-- release-legal-notice:start -->.*?<!-- release-legal-notice:end -->\s*'
+            $preservedBody = [Regex]::Replace($existingBody, $managedPattern, '').TrimStart()
+            $completeBody = $legalPreamble
+            if (-not [string]::IsNullOrWhiteSpace($preservedBody)) {
+              $completeBody += "`n`n$preservedBody"
+            }
+            [IO.File]::WriteAllText($bodyPath, $completeBody + "`n", [Text.UTF8Encoding]::new($false))
+
+            & gh release upload $tag @assets --clobber --repo $repository
+            if ($LASTEXITCODE -eq 0) {
+              & gh release edit $tag --notes-file $bodyPath --repo $repository
+            }
+          }
+          else {
+            [IO.File]::WriteAllText($bodyPath, $legalPreamble + "`n", [Text.UTF8Encoding]::new($false))
+            & gh release create $tag @assets `
+              --verify-tag `
+              --generate-notes `
+              --notes-file $bodyPath `
+              --title $tag `
+              --repo $repository
+          }
+          if ($LASTEXITCODE -ne 0) {
+            throw "GitHub Release publication failed with exit code $LASTEXITCODE."
+          }
+
+          $publishedBodyOutput = @(& gh release view $tag --repo $repository --json body --jq '.body' 2>&1)
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not verify published GitHub Release body for $tag."
+          }
+          $publishedBody = $publishedBodyOutput -join "`n"
+          if (-not $publishedBody.TrimStart().StartsWith('<!-- release-legal-notice:start -->') -or
+              -not $publishedBody.Contains($licenseUrl) -or
+              -not $publishedBody.Contains($requiredNotice) -or
+              -not $publishedBody.Contains($scopeUrl) -or
+              -not $publishedBody.Contains($rightsUrl)) {
+            throw 'Published GitHub Release body is missing the required visible legal preamble.'
+          }
