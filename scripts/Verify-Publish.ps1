@@ -94,6 +94,7 @@ try {
         -FilePath $isolatedExe `
         -ArgumentList '--smoke-test' `
         -WorkingDirectory $verifyDirectory `
+        -WindowStyle Hidden `
         -PassThru
     $processId = $process.Id
 
@@ -128,4 +129,4 @@ if ($null -ne $smokeFailure) {
     throw $smokeFailure
 }
 
-Write-Output "PASS: one delivered EXE, no runtime sidecars, matching publish SHA-256, isolated --smoke-test exited 0: $resolved"
+Write-Output "PASS: one delivered EXE, no runtime sidecars; SmokePID=$processId; ExitCode=0; SHA-256: publish=$publishHash delivery=$deliveredHash isolated=$isolatedHash; EXE=$resolved"

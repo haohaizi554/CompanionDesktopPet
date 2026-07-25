@@ -19,6 +19,15 @@ if ($verifierText -notmatch "--smoke-test") {
 if ($verifierText -match 'WaitForInputIdle|CloseMainWindow') {
     throw 'Verify-Publish.ps1 must not treat input-idle or manual window closing as smoke-test success.'
 }
+if ($verifierText -notmatch '(?m)^\s*-WindowStyle\s+Hidden\s*`?\s*$') {
+    throw 'Verify-Publish.ps1 must launch the smoke process with -WindowStyle Hidden.'
+}
+if ($verifierText -notmatch 'Stop-Process\s+-Id\s+\$processId') {
+    throw 'Verify-Publish.ps1 must clean up only the PID returned by Start-Process.'
+}
+if ($verifierText -match '(?i)(?:Get|Stop)-Process[^\r\n]*\s-Name(?:\s|$)') {
+    throw 'Verify-Publish.ps1 must never inspect or clean up smoke processes by process name.'
+}
 if ([string]::IsNullOrWhiteSpace($PublishExePath)) {
     $PublishExePath = Join-Path $repoRoot 'publish\CompanionDesktopPet.exe'
 }
@@ -97,20 +106,43 @@ function Assert-Accepted {
         [string]$Case,
 
         [Parameter(Mandatory = $true)]
-        [scriptblock]$Arrange
+        [scriptblock]$Arrange,
+
+        [switch]$AssertSuccessEvidence
     )
 
     $paths = Reset-Scratch
     & $Arrange $paths
 
     try {
-        & $verifier `
+        $verifierOutput = @(& $verifier `
             -ExePath (Join-Path $paths.Delivery 'candidate.exe') `
             -PublishExePath $paths.PublishExe `
-            -SmokeTimeoutSeconds 20 | Out-Null
+            -SmokeTimeoutSeconds 20)
     }
     catch {
         throw "Expected Verify-Publish.ps1 to accept case '$Case': $($_.Exception.Message)"
+    }
+
+    if ($AssertSuccessEvidence) {
+        $successText = $verifierOutput -join [Environment]::NewLine
+        $candidatePath = Join-Path $paths.Delivery 'candidate.exe'
+        $expectedHash = (Get-FileHash -LiteralPath $candidatePath -Algorithm SHA256).Hash
+        $escapedHash = [Regex]::Escape($expectedHash)
+
+        if ($successText -notmatch 'SmokePID=(?<SmokePid>[1-9][0-9]*)') {
+            throw "Verify-Publish.ps1 success output must identify the current smoke PID: $successText"
+        }
+        $smokePid = [int]$Matches['SmokePid']
+        if ($successText -notmatch 'ExitCode=0') {
+            throw "Verify-Publish.ps1 success output must include ExitCode=0: $successText"
+        }
+        if ($successText -notmatch "SHA-256: publish=$escapedHash delivery=$escapedHash isolated=$escapedHash") {
+            throw "Verify-Publish.ps1 success output must include identical publish, delivery, and isolated SHA-256 values: $successText"
+        }
+        if ($null -ne (Get-Process -Id $smokePid -ErrorAction SilentlyContinue)) {
+            throw "Verify-Publish.ps1 reported smoke PID $smokePid, but that process is still running."
+        }
     }
 }
 
@@ -119,7 +151,7 @@ try {
         param($paths)
         $readmeName = (-join ([char[]](0x4F7F, 0x7528, 0x8BF4, 0x660E))) + '.txt'
         Set-Content -LiteralPath (Join-Path $paths.Delivery $readmeName) -Value 'contract test'
-    }
+    } -AssertSuccessEvidence
 
     Assert-Rejected -Case 'publish DLL sidecar' -Arrange {
         param($paths)
