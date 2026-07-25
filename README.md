@@ -2,7 +2,7 @@
 
 一个完全离线的 Windows x64 WPF 桌宠，以及配套的可审计中文角色语料系统。她不读取输入内容、剪贴板、文件名或窗口标题，也不依赖网络、数据库或在线模型。
 
-> 当前审计基线已包含 806 条 curated core、WPF 离线运行时、异步语料预热、本地 fallback、自包含单文件发布与隔离烟测。最终扩展版的发布验收常量是 52,132 条运行时文案（806 core + 51,326 条已批准安全 legacy surfaces）和 533 个语义场景。扩展产物尚未进入本基线，因此这些数字在最终集成提交上完成计数、可复现重建和 SHA-256 复核前，均是“待校验发布常量”，不是对当前文件的完成声明。
+> 当前集成基线包含 52,132 条运行时文案：806 条 curated core 加 51,326 条由 manifest 精确批准的安全 legacy surfaces；按唯一 `semantic_group` 聚合后为 533 个语义场景。WPF 离线运行时、异步语料预热、本地 fallback、自包含单文件发布与隔离烟测也已接入。75,375 条无表头源物理数据行仍作为不可变审计证据，不会整体进入运行时。
 
 左键点击会显示爱心、左右交替轻轻倾斜，并给出一句回复。点击回复有长期运行兜底：即使冷却历史逐渐累积，或从旧版容易陷入静默的本地记忆恢复，后续点击也不会永久失声。桌宠保留自然单次/偶发双次眨眼，启动后会显示一次本地“嗨♡”，也可从右键面板选择 `打个招呼♡`；这些都是纯本地 UI 动作，不由语料驱动。
 
@@ -15,7 +15,7 @@ outputs/CompanionDesktopPet/佳怡桌宠.exe
 outputs/CompanionDesktopPet/使用说明.txt
 ```
 
-`佳怡桌宠.exe` 是 `win-x64` 自包含单文件应用，运行时不需要安装 .NET，也不依赖外部 DLL、JSON、PDB 或其他运行时 sidecar。
+`佳怡桌宠.exe` 是 `win-x64` 自包含单文件应用，运行时不需要另行安装 .NET，也不依赖旁置或外部应用 DLL、JSON、PDB 等运行时 sidecar。“自包含单 EXE”不表示进程绝不加载 DLL；作为 Windows 桌面应用，它仍会正常使用操作系统提供的系统 DLL 与系统组件。
 
 ## 体验与操作
 
@@ -46,15 +46,15 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run
 
 ## 已验证能力
 
-- 冻结并校验 75,375 个不可变 archive/source 证据位置及字节副本；它们只用于审计、复核和来源映射。
+- 冻结并校验 75,375 条无表头不可变源物理数据行及其字节副本；它们只用于审计、复核和来源映射。
 - 当前 curated core 精确为 806 条完整、可独立播放的启用语料。
-- 最终扩展版必须精确为 52,132 条启用语料：806 条 curated core 加 51,326 条通过安全筛选并由 manifest 精确绑定的 legacy surfaces；按 `semantic_group` 聚合后必须精确为 533 个场景。该扩展产物在本审计基线中仍待集成验证。
+- 当前运行时精确集成 52,132 条启用语料：806 条 curated core 加 51,326 条通过安全筛选并由 manifest 精确绑定的 legacy surfaces；按唯一 `semantic_group` 聚合后精确为 533 个场景。
 - 20 列 v2 元数据、严格校验器、确定性离线选择器与 30 天 × 10 seeds 模拟已经接入。
 - 运行时按场景优先：先执行触发器/上下文、语义冷却、每日上限、最小间隔、滚动小时预算、夜间预算与组配额并选择 `semantic_group` 场景，再在场景内选择合格变体；变体多的场景不会因此获得更大权重。
 - 发布模拟的播放比例硬门禁是 Easter egg 8%–12%、seasoning 3%–6%、dry-sharp 2%–4%；这些是播放暴露率，不是 TSV 行数占比。
 - 点击专用恢复路径通过 8 小时连续会话、900 次连续点击和旧版静默记忆恢复测试；主动播报仍遵守原有静默预算。
 - 启动不在 UI 线程同步构建大型目录；预热期间使用固定本地 fallback，且真实 WPF 烟测只接受完整语料产生的启动回复。
-- WPF 只嵌入最终 v2 运行时资源；75,375 个旧 archive/source 证据不会整体进入运行时。
+- WPF 只嵌入已集成的 v2 运行时资源；75,375 条源物理数据行及其 archive 证据不会整体进入运行时。
 - Release 测试、干净 self-contained single-file publish、源/副本 SHA-256、固定种子重建和隔离单 EXE 烟测作为最终门禁。
 
 完整语料维护契约、20 字段说明和精确命令见 [README-persona-corpus.md](README-persona-corpus.md)。
@@ -144,7 +144,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
 ## 数据、隐私与限制
 
 - `src/CompanionDesktopPet/Assets/persona-corpus.tsv` 与 `data/source/persona-corpus.original.tsv` 是不可变审计证据，不原地覆盖。
-- 禁用内容进入 archive；不确定内容与 PII 进入 review；只有通过安全规则并由 surface manifest 精确绑定原始行、topic、原文与摘要的 legacy surface 才能进入扩展运行时。
+- 禁用内容进入 archive；不确定内容与 PII 进入 review；只有通过安全规则并由 surface manifest 精确绑定原始行、topic、原文与摘要的 legacy surface 才能进入运行时。
 - 身份彩蛋只有精确列入 editorial manifest、且 ID、来源、允许的身份 marker、文本 SHA-256、分类、冷却和每日上限全部匹配时才可进入 `PersonaCorpus`；宽泛 marker 命中或 EXE 字节扫描不是批准。应用启动自校验该 exact manifest，Python validator 和程序集测试共同阻止未审批身份或隐私内容进入运行时。
 - IDE 前台、连续活跃、空闲返回和全屏等未来信号默认未知，不猜测用户状态。
 - 自动检查不能替代人物授权、虚构身份、关系边界和再分发权利的人工审批。

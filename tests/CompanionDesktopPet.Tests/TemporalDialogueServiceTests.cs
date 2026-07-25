@@ -113,10 +113,12 @@ public sealed class TemporalDialogueServiceTests
             .Count;
         var festivalLines = TemporalDialogueService
             .GetContextualLines(new DateTime(2026, 10, 24, 20, 0, 0));
+        var enabledText = PersonaCorpus.All
+            .Select(item => item.Text)
+            .ToHashSet(StringComparer.Ordinal);
 
         Assert.True(festivalLines.Count > regularEveningCount);
-        Assert.All(festivalLines, line =>
-            Assert.Contains(line, PersonaCorpus.All.Select(item => item.Text)));
+        Assert.All(festivalLines, line => Assert.Contains(line, enabledText));
     }
 
     [Fact]

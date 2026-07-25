@@ -2,13 +2,13 @@
 
 本文说明佳怡桌宠离线角色语料的来源、20 列契约、确定性流水线、运行时选择规则与发布边界。所有命令均从仓库根目录运行；流水线只使用 Python 标准库，不调用网络、模型 API 或数据库。
 
-> 版本口径：2026-07-22 文档中的“约 800 条”和 Easter egg `<=2%` 是历史初版目标，已被 2026-07-24 persona contract 与 expanded-runtime 方案取代。当前审计基线可验证 curated core 为 806 条；最终发布常量为 52,132 条运行时文案、51,326 条安全 legacy surfaces 与 533 个语义场景。扩展文件和最终哈希在本基线尚未集成，下文将其明确标作待校验，不能据此宣称现有文件已经达标。
+> 版本口径：2026-07-22 文档中的“约 800 条”和 Easter egg `<=2%` 是历史初版目标，已被 2026-07-24 persona contract 与 expanded-runtime 方案取代。当前已集成 52,132 条运行时文案，其中包含 806 条 curated core 与 51,326 条安全 legacy surfaces；按唯一 `semantic_group` 聚合后为 533 个语义场景。这些是当前文件统计，也是发布必须保持的精确常量。
 
-## 1. 为什么 75,375 行不是 75,375 条独立内容
+## 1. 为什么 75,375 条源数据行不是 75,375 条独立内容
 
-不可变源证据位于 `src/CompanionDesktopPet/Assets/persona-corpus.tsv`，共 75,375 个物理行（含表头）。基线审计发现大量共享开头、主题句和结尾：例如多个技术分类各有 3,900 行，相同长结尾各重复 3,600 次，且有 455,894 对有界近重复候选。这些行主要是前缀 × 主题 × 后缀的笛卡尔组合，不等于 75,375 个独立写作意图。
+不可变源证据位于 `src/CompanionDesktopPet/Assets/persona-corpus.tsv`，共 75,375 条无表头物理数据行。基线审计发现大量共享开头、主题句和结尾：例如多个技术分类各有 3,900 行，相同长结尾各重复 3,600 次，且有 455,894 对有界近重复候选。这些行主要是前缀 × 主题 × 后缀的笛卡尔组合，不等于 75,375 个独立写作意图。
 
-curated core 不在构建时或运行时重新拼接片段，而是提供 806 条能独立播放的完整句子。expanded runtime 在 core 之外只加入 51,326 条通过安全筛选、保持原文并有精确 lineage/manifest 的 legacy surfaces，因此最终启用总数必须是 `806 + 51,326 = 52,132`；原始 75,375 个证据位置仍逐一保存在 archive、review 和来源映射中，不因进入运行时而被改写或删除。
+curated core 不在构建时或运行时重新拼接片段，而是提供 806 条能独立播放的完整句子。当前 expanded runtime 在 core 之外集成 51,326 条通过安全筛选、保持原文并有精确 lineage/manifest 的 legacy surfaces，因此启用总数是 `806 + 51,326 = 52,132`；原始 75,375 条数据行仍逐一保存在 archive、review 和来源映射中，不因进入运行时而被改写或删除。
 
 ## 2. 不可变源与 SHA-256 门禁
 
@@ -26,18 +26,24 @@ $copy = Get-FileHash data/source/persona-corpus.original.tsv -Algorithm SHA256
 if ($source.Hash -ne $copy.Hash) { throw 'Immutable source hash mismatch.' }
 ```
 
-### 2.1 发布拓扑与当前校验状态
+### 2.1 `source_line` 与 lineage epoch
+
+`source_line` 是冻结 source SHA 下从 1 开始计数的物理数据行号；源文件没有表头，因此 `source_line=1` 就是第 1 条源数据。行号只有与对应的冻结 source SHA（即 lineage epoch）一起才构成完整身份，不能脱离该 SHA 单独解释。
+
+源文件发生任何字节变化——包括内容修改、插入、删除、重排、编码或换行变化——都必须开启新的 lineage epoch，并重新生成全部派生产物、重新复核、重新审批。只要冻结 source SHA 不变，就不得重编号当前 51,326 个已批准 surface ID，也不得改写它们的 `source_line` 绑定；输出文件排序变化不构成重编号理由。
+
+### 2.2 发布拓扑与当前集成状态
 
 | 层 | 最终发布常量 | 本审计基线状态 |
 | --- | ---: | --- |
-| immutable source | 75,375 个物理行（含表头） | 已验证，双副本 SHA-256 相同 |
-| archive | 75,375 条 disposition 记录 | expanded build 集成后重算 |
+| immutable source | 75,375 条无表头物理数据行 | 已验证，双副本 SHA-256 相同 |
+| archive | 75,375 条 disposition 记录 | 已集成，当前计数精确匹配 |
 | curated core | 806 条 | 已验证 |
-| safe legacy surfaces | 51,326 条 | 待集成 `persona-surface-manifest.tsv` 后验证 |
-| expanded runtime | 52,132 条 | 待集成并验证，必须等于 core + surfaces |
-| semantic scenes | 533 个 | 待集成并按唯一 `semantic_group` 重算 |
+| safe legacy surfaces | 51,326 条 | 已由 `persona-surface-manifest.tsv` 精确绑定并集成 |
+| expanded runtime | 52,132 条 | 已集成，精确等于 core + surfaces |
+| semantic scenes | 533 个 | 已按唯一 `semantic_group` 聚合 |
 
-这里的 52,132、51,326 和 533 是最终发布的精确验收值，不是范围；任一计数不符都阻止发布。它们也不是本审计基线当前 `persona-corpus-v2.tsv` 的文件统计。最终哈希必须在集成提交上通过可复现重建得到，见本文末尾和 [发布与清理清单](docs/release/2026-07-25-expanded-runtime-release-checklist.md)。
+这里的 52,132、51,326 和 533 既是当前集成文件的精确统计，也是发布验收值，不是范围；任一计数不符都阻止发布。发布哈希仍必须从目标提交上的隔离可复现重建与模拟重放取得，见本文末尾和 [发布与清理清单](docs/release/2026-07-25-expanded-runtime-release-checklist.md)。
 
 ## 3. v2 的 20 个字段
 
@@ -162,7 +168,7 @@ python -m unittest tests.test_selector -v
 
 ## 16. WPF 集成
 
-`CompanionDesktopPet.csproj` 只把最终 `data/optimized/persona-corpus-v2.tsv` 以逻辑名 `CompanionDesktopPet.Assets.persona-corpus-v2.tsv` 嵌入应用。旧的 `src/CompanionDesktopPet/Assets/persona-corpus.tsv` 仅是不可变源证据，不重新嵌入运行时。WPF 按字段名解析精确表头，只加载 806 core 与 manifest 批准的安全 surfaces，并把场景/变体选择、语义冷却、每日上限、组配额、seasoning/dry 暴露和打扰成本交给离线运行时选择器。
+`CompanionDesktopPet.csproj` 只把当前 `data/optimized/persona-corpus-v2.tsv` 以逻辑名 `CompanionDesktopPet.Assets.persona-corpus-v2.tsv` 嵌入应用。旧的 `src/CompanionDesktopPet/Assets/persona-corpus.tsv` 仅是不可变源证据，不重新嵌入运行时。WPF 按字段名解析精确表头，加载已集成的 806 core 与 51,326 条 manifest 批准安全 surfaces，并把场景/变体选择、语义冷却、每日上限、组配额、seasoning/dry 暴露和打扰成本交给离线运行时选择器。
 
 ## 17. 完整测试门禁
 
@@ -221,7 +227,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
   -PublishExePath (Join-Path $publishDir 'CompanionDesktopPet.exe')
 ```
 
-验证器要求交付目录只有一个 EXE（可另有 `.txt` 说明），拒绝 DLL/PDB/JSON 等 sidecar，并核对交付 EXE 与 publish EXE 的 SHA-256。身份彩蛋只有在精确列入 editorial manifest 后才可进入运行时语料；安全边界由应用启动时对 `PersonaCorpus` exact editorial manifest 的自校验、Python validator 和程序集测试共同承担，不再使用无法区分已批准内容与泄露的 EXE 原始字节 marker 扫描。验证器把 EXE 单独复制到 `outputs/verify/` 后以 `--smoke-test` 启动；应用必须在时限内完成真实 WPF 资源与启动气泡初始化、正常关闭并自行以退出码 0 结束。超时、需要强杀或非零退出均失败，强杀只用于清理残留 PID。
+验证器要求交付目录只有一个自包含 EXE（可另有 `.txt` 说明），拒绝旁置或外部应用 DLL、PDB、JSON 等 sidecar，并核对交付 EXE 与 publish EXE 的 SHA-256。这里的“单 EXE”是交付边界，不表示 Windows 进程绝不加载 DLL；应用仍会使用操作系统提供的系统 DLL 与系统组件。身份彩蛋只有在精确列入 editorial manifest 后才可进入运行时语料；安全边界由应用启动时对 `PersonaCorpus` exact editorial manifest 的自校验、Python validator 和程序集测试共同承担，不再使用无法区分已批准内容与泄露的 EXE 原始字节 marker 扫描。验证器把 EXE 单独复制到 `outputs/verify/` 后以 `--smoke-test` 启动；应用必须在时限内完成真实 WPF 资源与启动气泡初始化、正常关闭并自行以退出码 0 结束。超时、需要强杀或非零退出均失败，强杀只用于清理残留 PID。
 
 ## 19. 桌宠交互与隐私
 
@@ -244,8 +250,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
 | `data/optimized/persona-corpus-review.tsv` | `a251b1e01003a078d7912f71099e57c5c6830a75195558ea61428105990b866a` |
 | `reports/pii-review.tsv` | `702037759f730759be83fb1c643a8f61382fa1c3f8f2a25e2c0351a177eec6e7` |
 | `data/optimized/persona-surface-manifest.tsv` | `bcf9c97be0e4b1d7b7db11fcb46f44de17ef0ade6cb2e79d69f8af69bdbc637d` |
-| `reports/simulation-report.md` | `6404c028966e6081ea5181781eb502a3076227dc55ca70b3f2d0a56292880d20` |
-| `reports/simulation-events.json` | `dcabfc9f73cc7e4c73b8ce60ce8a5b49eb2439e60892f1e372c2b428b9042df6` |
-| `outputs/CompanionDesktopPet/佳怡桌宠.exe` | `afec231497158a1ccb71b97b057972d15d3f4ce80e9fa8317f632311a4932e60` |
+| `reports/simulation-report.md` | `ccd6d67521c210a30e122806e2d5f695f5d3f9f6613d402034be57dce3f9099e` |
+| `reports/simulation-events.json` | `163956d6ab7137973489d7bf9f1dfbf33a921166290309c81542931a2a8c325c` |
+| `outputs/CompanionDesktopPet/佳怡桌宠.exe` | Phase 4B 重新发布后填写 |
 
 任何未填写的哈希占位仍存在时都不得发布。
