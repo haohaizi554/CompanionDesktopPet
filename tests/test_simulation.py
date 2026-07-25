@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import hashlib
 import json
 import random
@@ -1342,6 +1343,12 @@ class SimulationUnitTests(unittest.TestCase):
             seed_sequence_from_count(True)
 
     def test_editorial_reports_use_real_traceable_evidence_and_meet_minimums(self) -> None:
+        def tsv_data_rows(path: Path) -> int:
+            with path.open("r", encoding="utf-8", newline="") as stream:
+                reader = csv.reader(stream, delimiter="\t", strict=True)
+                next(reader)
+                return sum(1 for _ in reader)
+
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
             summary = write_editorial_reports(
@@ -1358,7 +1365,9 @@ class SimulationUnitTests(unittest.TestCase):
             self.assertGreaterEqual(summary.disabled_examples, 20)
             self.assertGreaterEqual(summary.tone_fix_examples, 20)
             self.assertGreaterEqual(summary.fake_context_examples, 20)
-            self.assertEqual(3265 + 1248, summary.manual_review_items)
+            expected_manual_review_items = tsv_data_rows(REVIEW_PATH) + tsv_data_rows(PII_PATH)
+            self.assertGreater(expected_manual_review_items, 0)
+            self.assertEqual(expected_manual_review_items, summary.manual_review_items)
             for path in (
                 output / "corpus-audit-after.md",
                 output / "corpus-rewrite-summary.md",

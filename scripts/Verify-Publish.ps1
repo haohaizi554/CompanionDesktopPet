@@ -5,12 +5,19 @@ param(
     [string]$PublishExePath = '',
 
     [ValidateRange(1, 120)]
-    [int]$SmokeTimeoutSeconds = 30
+    [int]$SmokeTimeoutSeconds
 )
 
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+Import-Module -Name (Join-Path $PSScriptRoot 'Verify-Publish.Core.psm1') -Force
+$effectiveSmokeTimeoutSeconds = if ($PSBoundParameters.ContainsKey('SmokeTimeoutSeconds')) {
+    $SmokeTimeoutSeconds
+}
+else {
+    Get-PublishSmokeDefaultTimeoutSeconds
+}
 $resolved = (Resolve-Path -LiteralPath $ExePath).Path
 $directory = Split-Path -Parent $resolved
 
@@ -85,48 +92,10 @@ if ($isolatedHash -ne $deliveredHash) {
     throw 'Isolated EXE hash differs from delivered EXE.'
 }
 
-$process = $null
-$processId = $null
-$cleanupFailure = $null
-$smokeFailure = $null
-try {
-    $process = Start-Process `
-        -FilePath $isolatedExe `
-        -ArgumentList '--smoke-test' `
-        -WorkingDirectory $verifyDirectory `
-        -WindowStyle Hidden `
-        -PassThru
-    $processId = $process.Id
+$smokeResult = Invoke-PublishSmokeTest `
+    -ExePath $isolatedExe `
+    -WorkingDirectory $verifyDirectory `
+    -TimeoutSeconds $effectiveSmokeTimeoutSeconds
+$processId = $smokeResult.ProcessId
 
-    if (-not $process.WaitForExit($SmokeTimeoutSeconds * 1000)) {
-        $smokeFailure = "Smoke-test timed out after $SmokeTimeoutSeconds seconds; forced termination is cleanup only."
-    }
-    elseif ($process.ExitCode -ne 0) {
-        $smokeFailure = "Smoke-test PID $processId exited with non-zero code $($process.ExitCode)."
-    }
-}
-finally {
-    if ($null -ne $process) {
-        $process.Refresh()
-        if (-not $process.HasExited) {
-            Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
-            if (-not $process.WaitForExit(10000)) {
-                $cleanupFailure = "Desktop pet PID $processId remained alive after forced termination."
-            }
-        }
-    }
-}
-
-if ($null -ne $cleanupFailure) {
-    throw $cleanupFailure
-}
-
-if ($null -ne (Get-Process -Id $processId -ErrorAction SilentlyContinue)) {
-    throw "Desktop pet PID $processId is still running after smoke test cleanup."
-}
-
-if ($null -ne $smokeFailure) {
-    throw $smokeFailure
-}
-
-Write-Output "PASS: one delivered EXE, no runtime sidecars; SmokePID=$processId; ExitCode=0; SHA-256: publish=$publishHash delivery=$deliveredHash isolated=$isolatedHash; EXE=$resolved"
+Write-Output "PASS: one delivered EXE, no runtime sidecars; SmokePID=$processId; ExitCode=$($smokeResult.ExitCode); SHA-256: publish=$publishHash delivery=$deliveredHash isolated=$isolatedHash; EXE=$resolved"

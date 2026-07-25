@@ -12,30 +12,22 @@ $scratch = Join-Path $repoRoot 'outputs\verify-contract-test'
 $helperDirectory = Join-Path $repoRoot 'outputs\verify-contract-helpers'
 $source = (Resolve-Path -LiteralPath $ExePath).Path
 $verifier = Join-Path $repoRoot 'scripts\Verify-Publish.ps1'
-$verifierText = Get-Content -LiteralPath $verifier -Raw
-$defaultTimeoutMatch = [Regex]::Match(
-    $verifierText,
-    '\[int\]\$SmokeTimeoutSeconds\s*=\s*(?<Seconds>[0-9]+)'
-)
-if (-not $defaultTimeoutMatch.Success -or
-    [int]$defaultTimeoutMatch.Groups['Seconds'].Value -lt 30) {
-    throw 'Verify-Publish.ps1 default smoke timeout must be at least 30 seconds.'
+$verifierCore = Join-Path $repoRoot 'scripts\Verify-Publish.Core.psm1'
+$repoPidRecord = Join-Path $repoRoot 'smoke-process.pid'
+$verifyPidRecord = Join-Path $repoRoot 'outputs\verify\smoke-process.pid'
+$siblingPidRecord = Join-Path $helperDirectory 'sibling\smoke-process.pid'
+
+$coreModule = Import-Module -Name $verifierCore -Force -PassThru
+try {
+    $defaultSmokeTimeoutSeconds = Get-PublishSmokeDefaultTimeoutSeconds
 }
-if ($verifierText -notmatch "--smoke-test") {
-    throw 'Verify-Publish.ps1 must launch the isolated executable with --smoke-test.'
+finally {
+    Remove-Module -Name $coreModule.Name -Force
 }
-if ($verifierText -match 'WaitForInputIdle|CloseMainWindow') {
-    throw 'Verify-Publish.ps1 must not treat input-idle or manual window closing as smoke-test success.'
+if ($defaultSmokeTimeoutSeconds -ne 30) {
+    throw "Core smoke timeout policy must be exactly 30 seconds; actual=$defaultSmokeTimeoutSeconds."
 }
-if ($verifierText -notmatch '(?m)^\s*-WindowStyle\s+Hidden\s*`?\s*$') {
-    throw 'Verify-Publish.ps1 must launch the smoke process with -WindowStyle Hidden.'
-}
-if ($verifierText -notmatch 'Stop-Process\s+-Id\s+\$processId') {
-    throw 'Verify-Publish.ps1 must clean up only the PID returned by Start-Process.'
-}
-if ($verifierText -match '(?i)(?:Get|Stop)-Process[^\r\n]*\s-Name(?:\s|$)') {
-    throw 'Verify-Publish.ps1 must never inspect or clean up smoke processes by process name.'
-}
+
 if ([string]::IsNullOrWhiteSpace($PublishExePath)) {
     $PublishExePath = Join-Path $repoRoot 'publish\CompanionDesktopPet.exe'
 }
@@ -72,6 +64,19 @@ function Set-HiddenItem {
 
     $item = Get-Item -LiteralPath $LiteralPath -Force
     $item.Attributes = $item.Attributes -bor [IO.FileAttributes]::Hidden
+}
+
+function Assert-RecordedSmokeProcessStopped {
+    if (-not (Test-Path -LiteralPath $verifyPidRecord)) {
+        throw 'Smoke helper did not record the PID started by Verify-Publish.ps1.'
+    }
+
+    $recordedProcessId = [int](Get-Content -LiteralPath $verifyPidRecord -Raw)
+    $remainingProcess = Get-Process -Id $recordedProcessId -ErrorAction SilentlyContinue
+    if ($null -ne $remainingProcess) {
+        Stop-Process -Id $recordedProcessId -Force -ErrorAction SilentlyContinue
+        throw "Verify-Publish.ps1 left timed-out smoke PID $recordedProcessId running."
+    }
 }
 
 function Assert-Rejected {
@@ -126,17 +131,31 @@ function Assert-Accepted {
         [Parameter(Mandatory = $true)]
         [scriptblock]$Arrange,
 
+        [string]$CandidateSource = '',
+
+        [int]$SmokeTimeoutSeconds = 30,
+
+        [switch]$UseDefaultSmokeTimeout,
+
         [switch]$AssertSuccessEvidence
     )
 
     $paths = Reset-Scratch
+    if (-not [string]::IsNullOrWhiteSpace($CandidateSource)) {
+        Copy-Item -LiteralPath $CandidateSource -Destination (Join-Path $paths.Delivery 'candidate.exe') -Force
+        Copy-Item -LiteralPath $CandidateSource -Destination $paths.PublishExe -Force
+    }
     & $Arrange $paths
 
     try {
-        $verifierOutput = @(& $verifier `
-            -ExePath (Join-Path $paths.Delivery 'candidate.exe') `
-            -PublishExePath $paths.PublishExe `
-            -SmokeTimeoutSeconds 30)
+        $verifierArguments = @{
+            ExePath = Join-Path $paths.Delivery 'candidate.exe'
+            PublishExePath = $paths.PublishExe
+        }
+        if (-not $UseDefaultSmokeTimeout) {
+            $verifierArguments['SmokeTimeoutSeconds'] = $SmokeTimeoutSeconds
+        }
+        $verifierOutput = @(& $verifier @verifierArguments)
     }
     catch {
         throw "Expected Verify-Publish.ps1 to accept case '$Case': $($_.Exception.Message)"
@@ -165,11 +184,19 @@ function Assert-Accepted {
 }
 
 try {
+    Assert-Rejected -Case 'explicit smoke timeout below the supported range' -Arrange {
+        param($paths)
+    } -SmokeTimeoutSeconds 0
+
+    Assert-Rejected -Case 'explicit smoke timeout above the supported range' -Arrange {
+        param($paths)
+    } -SmokeTimeoutSeconds 121
+
     Assert-Accepted -Case 'the documented delivery readme' -Arrange {
         param($paths)
         $readmeName = (-join ([char[]](0x4F7F, 0x7528, 0x8BF4, 0x660E))) + '.txt'
         Set-Content -LiteralPath (Join-Path $paths.Delivery $readmeName) -Value 'contract test'
-    } -AssertSuccessEvidence
+    } -UseDefaultSmokeTimeout -AssertSuccessEvidence
 
     Assert-Rejected -Case 'publish DLL sidecar' -Arrange {
         param($paths)
@@ -258,7 +285,7 @@ try {
             $stream = [IO.File]::Open($path, [IO.FileMode]::Append, [IO.FileAccess]::Write)
             try { $stream.Write($bytes, 0, $bytes.Length) } finally { $stream.Dispose() }
         }
-    }
+    } -SmokeTimeoutSeconds 120
 
     Assert-Accepted -Case 'UTF-16 exact-manifest-approved identity bytes' -Arrange {
         param($paths)
@@ -278,14 +305,56 @@ try {
         Remove-Item -LiteralPath $helperDirectory -Recurse -Force
     }
     New-Item -ItemType Directory -Path $helperDirectory | Out-Null
+
+    $launchContractExe = Join-Path $helperDirectory 'launch-contract.exe'
+    Add-Type -Language CSharp -OutputType ConsoleApplication -OutputAssembly $launchContractExe -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+public static class LaunchContractProgram
+{
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetConsoleWindow();
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindowVisible(IntPtr handle);
+
+    public static int Main(string[] args)
+    {
+        if (args.Length != 1 || args[0] != "--smoke-test")
+        {
+            return 21;
+        }
+
+        IntPtr console = GetConsoleWindow();
+        if (console != IntPtr.Zero && IsWindowVisible(console))
+        {
+            return 22;
+        }
+
+        return 0;
+    }
+}
+'@
+    Assert-Accepted -Case 'isolated launch receives the smoke argument and has no visible console' -Arrange {
+        param($paths)
+    } -CandidateSource $launchContractExe -SmokeTimeoutSeconds 5 -AssertSuccessEvidence
+
     $hangingExe = Join-Path $helperDirectory 'hanging-smoke.exe'
     Add-Type -Language CSharp -OutputType ConsoleApplication -OutputAssembly $hangingExe -TypeDefinition @'
+using System;
+using System.Diagnostics;
+using System.IO;
 using System.Threading;
 
 public static class HangingSmokeProgram
 {
     public static int Main(string[] args)
     {
+        File.WriteAllText(
+            Path.Combine(Environment.CurrentDirectory, "smoke-process.pid"),
+            Process.GetCurrentProcess().Id.ToString());
         Thread.Sleep(30000);
         return 0;
     }
@@ -294,6 +363,78 @@ public static class HangingSmokeProgram
     Assert-Rejected -Case 'smoke timeout requiring forced termination' -Arrange {
         param($paths)
     } -CandidateSource $hangingExe -ExpectedMessage 'timed out'
+    Assert-RecordedSmokeProcessStopped
+
+    $siblingDirectory = Join-Path $helperDirectory 'sibling'
+    New-Item -ItemType Directory -Path $siblingDirectory | Out-Null
+    $siblingExe = Join-Path $siblingDirectory 'candidate.exe'
+    Copy-Item -LiteralPath $hangingExe -Destination $siblingExe
+    $siblingProcess = Start-Process `
+        -FilePath $siblingExe `
+        -ArgumentList '--smoke-test' `
+        -WorkingDirectory $siblingDirectory `
+        -WindowStyle Hidden `
+        -PassThru
+    try {
+        Assert-Rejected -Case 'timeout cleanup leaves an unrelated same-name process alive' -Arrange {
+            param($paths)
+        } -CandidateSource $hangingExe -ExpectedMessage 'timed out'
+        Assert-RecordedSmokeProcessStopped
+
+        if (Test-Path -LiteralPath $repoPidRecord) {
+            throw "Sibling smoke helper leaked its PID record into the repository root: $repoPidRecord"
+        }
+        if (-not (Test-Path -LiteralPath $siblingPidRecord)) {
+            throw "Sibling smoke helper did not use its isolated working directory: $siblingDirectory"
+        }
+
+        $siblingProcess.Refresh()
+        if ($siblingProcess.HasExited) {
+            throw 'Verify-Publish.ps1 cleanup terminated an unrelated process with the same executable name.'
+        }
+    }
+    finally {
+        $siblingProcess.Refresh()
+        if (-not $siblingProcess.HasExited) {
+            Stop-Process -Id $siblingProcess.Id -Force -ErrorAction SilentlyContinue
+            $null = $siblingProcess.WaitForExit(10000)
+        }
+        $siblingProcess.Dispose()
+    }
+
+    $inputIdleExe = Join-Path $helperDirectory 'input-idle-smoke.exe'
+    Add-Type `
+        -Language CSharp `
+        -OutputType WindowsApplication `
+        -OutputAssembly $inputIdleExe `
+        -ReferencedAssemblies 'System.Windows.Forms.dll', 'System.Drawing.dll' `
+        -TypeDefinition @'
+using System;
+using System.Windows.Forms;
+
+public static class InputIdleSmokeProgram
+{
+    [STAThread]
+    public static int Main(string[] args)
+    {
+        if (args.Length != 1 || args[0] != "--smoke-test")
+        {
+            return 31;
+        }
+
+        Application.EnableVisualStyles();
+        using (Form form = new Form())
+        {
+            form.Text = "publish-contract-input-idle";
+            Application.Run(form);
+        }
+        return 0;
+    }
+}
+'@
+    Assert-Rejected -Case 'GUI input-idle is not mistaken for a completed smoke test' -Arrange {
+        param($paths)
+    } -CandidateSource $inputIdleExe -ExpectedMessage 'timed out'
 
     $failingExe = Join-Path $helperDirectory 'failing-smoke.exe'
     Add-Type -Language CSharp -OutputType ConsoleApplication -OutputAssembly $failingExe -TypeDefinition @'
@@ -310,6 +451,11 @@ public static class FailingSmokeProgram
     } -CandidateSource $failingExe -SmokeTimeoutSeconds 5 -ExpectedMessage 'non-zero code 7'
 }
 finally {
+    foreach ($pidRecord in @($repoPidRecord, $verifyPidRecord, $siblingPidRecord)) {
+        if (Test-Path -LiteralPath $pidRecord -PathType Leaf) {
+            Remove-Item -LiteralPath $pidRecord -Force
+        }
+    }
     if (Test-Path -LiteralPath $scratch) {
         Remove-Item -LiteralPath $scratch -Recurse -Force
     }
@@ -318,18 +464,4 @@ finally {
     }
 }
 
-foreach ($enumerationVariable in @(
-    'deliveryFiles',
-    'deliveryDirectories',
-    'publishFiles',
-    'publishDirectories',
-    'isolatedFiles'
-)) {
-    $pattern = '(?m)^\s*\$' + [Regex]::Escape($enumerationVariable) +
-        '\s*=\s*@\(Get-ChildItem(?![^\r\n]*-Force)'
-    if ($verifierText -match $pattern) {
-        throw "Verify-Publish.ps1 must enumerate $enumerationVariable with -Force."
-    }
-}
-
-Write-Output 'PASS: publish verifier accepts exact-manifest-approved identity bytes after a real smoke test, and rejects publish sidecars, delivery sidecars, extra EXEs, nested dependencies, forced smoke termination, and non-zero smoke exit.'
+Write-Output 'PASS: publish verifier behavior accepts approved payloads and rejects sidecars, nested dependencies, visible/wrong-mode launches, GUI input-idle, timeouts, and non-zero exits without terminating unrelated same-name processes.'
