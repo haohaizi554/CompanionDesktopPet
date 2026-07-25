@@ -75,6 +75,52 @@ public sealed class PetActionCoordinatorTests
     }
 
     [Fact]
+    public void DragRestartedDuringLanding_PreservesThePausedLandingDestination()
+    {
+        var coordinator = new PetActionCoordinator();
+
+        coordinator.Pause();
+        coordinator.BeginDrag();
+        coordinator.BeginLanding();
+        coordinator.BeginDrag();
+        coordinator.BeginLanding();
+        coordinator.Complete(PetActionState.Landing);
+
+        Assert.Equal(PetActionState.Paused, coordinator.State);
+    }
+
+    [Theory]
+    [InlineData(PetActionState.Idle)]
+    [InlineData(PetActionState.Dragging)]
+    [InlineData(PetActionState.Paused)]
+    public void Complete_RejectsStatesThatAreNotCompletableActions(PetActionState state)
+    {
+        var coordinator = new PetActionCoordinator();
+        if (state == PetActionState.Dragging)
+        {
+            coordinator.BeginDrag();
+        }
+        else if (state == PetActionState.Paused)
+        {
+            coordinator.Pause();
+        }
+
+        coordinator.Complete(state);
+
+        Assert.Equal(state, coordinator.State);
+    }
+
+    [Fact]
+    public void TryBeginAmbient_RejectsUnknownActionValues()
+    {
+        var coordinator = new PetActionCoordinator();
+
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            coordinator.TryBeginAmbient((PetAmbientAction)int.MaxValue));
+        Assert.Equal(PetActionState.Idle, coordinator.State);
+    }
+
+    [Fact]
     public void PauseDuringDrag_PreservesDragAndReturnsToPausedAfterLanding()
     {
         var coordinator = new PetActionCoordinator();

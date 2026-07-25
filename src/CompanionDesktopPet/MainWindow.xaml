@@ -17,8 +17,7 @@
     <Popup x:Name="BubblePopup"
            AllowsTransparency="True"
            Focusable="False"
-           Placement="RelativePoint"
-           PlacementTarget="{Binding ElementName=CharacterStage}"
+           Placement="AbsolutePoint"
            StaysOpen="True">
       <Border x:Name="BubblePopupSurface"
               Padding="10"

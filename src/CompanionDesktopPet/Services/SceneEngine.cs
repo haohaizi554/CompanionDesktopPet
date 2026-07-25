@@ -86,8 +86,11 @@ public sealed class SceneHistory
     private readonly Dictionary<string, SceneHistoryEntry> _lastByLineId = new(StringComparer.Ordinal);
     private readonly Dictionary<(string LineId, DateOnly Date), int> _dailyCounts = [];
     private readonly Dictionary<string, HashSet<string>> _seenLineIdsBySemanticGroup = new(StringComparer.Ordinal);
+    private readonly IReadOnlyList<SceneHistoryEntry> _entriesView;
 
-    public IReadOnlyList<SceneHistoryEntry> Entries => _entries;
+    public SceneHistory() => _entriesView = _entries.AsReadOnly();
+
+    public IReadOnlyList<SceneHistoryEntry> Entries => _entriesView;
 
     public void Record(SceneDefinition scene, DateTime playedAt, DialogueLine line)
     {
@@ -128,8 +131,12 @@ public sealed class SceneHistory
     public void Restore(IEnumerable<SceneHistoryEntry> entries)
     {
         ArgumentNullException.ThrowIfNull(entries);
+        var restored = entries
+            .OrderBy(entry => entry.PlayedAt)
+            .TakeLast(2_000)
+            .ToArray();
         _entries.Clear();
-        _entries.AddRange(entries.OrderBy(entry => entry.PlayedAt).TakeLast(2_000));
+        _entries.AddRange(restored);
         RebuildIndexes();
     }
 

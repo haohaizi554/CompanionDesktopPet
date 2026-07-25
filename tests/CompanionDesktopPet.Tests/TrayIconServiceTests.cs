@@ -170,12 +170,14 @@ public sealed class TrayIconServiceTests
             using var source = LoadTestIcon();
             var shell = new FakeTrayShellIcon { ThrowWhenHidden = true };
             var calls = 0;
+            var cleanupFailures = new List<Exception>();
             var service = CreateService(
                 source,
                 shell,
                 () => new TrayMenuState(true, false, false, true),
                 toggleVisibility: () => calls++,
-                publishIcon: true);
+                publishIcon: true,
+                reportException: cleanupFailures.Add);
 
             service.ShowHideMenuItem.PerformClick();
             service.Dispose();
@@ -187,6 +189,9 @@ public sealed class TrayIconServiceTests
             Assert.Equal(1, shell.DisposeCount);
             Assert.True(shell.ContextMenuWasAliveWhenDisposed);
             Assert.True(shell.IconWasAliveWhenDisposed);
+            var cleanupFailure = Assert.Single(cleanupFailures);
+            Assert.Equal("Tray cleanup failed.", cleanupFailure.Message);
+            Assert.Equal("hide failed", cleanupFailure.InnerException?.Message);
         });
     }
 
@@ -360,7 +365,8 @@ public sealed class TrayIconServiceTests
         FakeTrayShellIcon shell,
         Func<TrayMenuState> getState,
         Action? toggleVisibility = null,
-        bool publishIcon = false) =>
+        bool publishIcon = false,
+        Action<Exception>? reportException = null) =>
         new(
             Dispatcher.CurrentDispatcher,
             source,
@@ -372,7 +378,7 @@ public sealed class TrayIconServiceTests
             () => Task.CompletedTask,
             publishIcon,
             () => shell,
-            _ => { });
+            reportException ?? (_ => { }));
 
     private static Icon LoadTestIcon() => new(TestIconPath());
 

@@ -407,7 +407,7 @@ public sealed class TrayIconService : IDisposable
         _unsubscribeActions.Clear();
     }
 
-    private static void CleanupNativeResources(
+    private void CleanupNativeResources(
         ITrayShellIcon? notifyIcon,
         Forms.ContextMenuStrip? contextMenu,
         Icon? ownedIcon,
@@ -429,16 +429,31 @@ public sealed class TrayIconService : IDisposable
         TryCleanup(() => ownedIcon?.Dispose());
     }
 
-    private static void TryCleanup(Action cleanup)
+    private void TryCleanup(Action cleanup)
     {
         try
         {
             cleanup();
         }
-        catch
+        catch (Exception exception) when (!IsFatalException(exception))
         {
+            try
+            {
+                _reportCommandException(new InvalidOperationException(
+                    "Tray cleanup failed.",
+                    exception));
+            }
+            catch (Exception reportingFailure) when (!IsFatalException(reportingFailure))
+            {
+                // Cleanup remains best-effort even if diagnostics are unavailable.
+            }
         }
     }
+
+    private static bool IsFatalException(Exception exception) =>
+        exception is OutOfMemoryException
+            or StackOverflowException
+            or AccessViolationException;
 
     private static void ReportCommandException(Exception exception) =>
         Trace.TraceError("Tray command failed: {0}", exception);

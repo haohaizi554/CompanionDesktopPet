@@ -2247,15 +2247,46 @@ public sealed class WindowShellTests
             window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
 
             Assert.True(popup.IsOpen);
-            Assert.Same(stage, popup.PlacementTarget);
-            Assert.Equal(PlacementMode.RelativePoint, popup.Placement);
+            Assert.Null(popup.PlacementTarget);
+            Assert.Equal(PlacementMode.AbsolutePoint, popup.Placement);
             Assert.Equal(new Thickness(10), surface.Padding);
             Assert.Equal(Visibility.Visible, arrowUp.Visibility);
             Assert.Equal(Visibility.Collapsed, arrowDown.Visibility);
             Assert.Equal(
                 window.Top + localTop + stage.ActualHeight + 30,
-                window.Top + localTop + popup.VerticalOffset + surface.Padding.Top,
+                popup.VerticalOffset + surface.Padding.Top,
                 3);
+            window.Close();
+        });
+        DeleteSettingsDirectory(settingsDirectory);
+    }
+
+    [Fact]
+    public void MainWindow_OpenBubbleTracksWindowMovementInScreenCoordinates()
+    {
+        var settingsDirectory = CreateSettingsDirectory();
+        RunOnStaThread(() =>
+        {
+            var window = CreateWindow(settingsDirectory);
+            window.Show();
+            window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+            window.Left = SystemParameters.WorkArea.Left + 360;
+            window.Top = SystemParameters.WorkArea.Top + 180;
+            InvokePrivate(window, "ShowBubble", "follow the character");
+            window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+
+            var popupSurface = Assert.IsType<Border>(window.FindName("BubblePopupSurface"));
+            var windowBefore = window.PointToScreen(new Point());
+            var bubbleBefore = popupSurface.PointToScreen(new Point());
+
+            window.Left += 140;
+            window.Top += 70;
+            window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+
+            var windowAfter = window.PointToScreen(new Point());
+            var bubbleAfter = popupSurface.PointToScreen(new Point());
+            Assert.Equal(windowAfter.X - windowBefore.X, bubbleAfter.X - bubbleBefore.X, 1);
+            Assert.Equal(windowAfter.Y - windowBefore.Y, bubbleAfter.Y - bubbleBefore.Y, 1);
             window.Close();
         });
         DeleteSettingsDirectory(settingsDirectory);
@@ -2342,10 +2373,11 @@ public sealed class WindowShellTests
             window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
             window.UpdateLayout();
 
-            var bubbleBottomRelativeToCharacter =
+            var characterTop = window.Top + window.ActualHeight - stage.ActualHeight;
+            var bubbleBottom =
                 popup.VerticalOffset + popupSurface.Padding.Top + bubble.ActualHeight;
 
-            Assert.InRange(-bubbleBottomRelativeToCharacter, 29.5, 30.5);
+            Assert.InRange(characterTop - bubbleBottom, 29.5, 30.5);
             window.Close();
         });
         DeleteSettingsDirectory(settingsDirectory);
@@ -2374,9 +2406,10 @@ public sealed class WindowShellTests
             window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
             window.UpdateLayout();
 
-            var bubbleBottomRelativeToCharacter =
+            var characterTop = window.Top + window.ActualHeight - stage.ActualHeight;
+            var bubbleBottom =
                 popup.VerticalOffset + popupSurface.Padding.Top + bubble.ActualHeight;
-            var gap = -bubbleBottomRelativeToCharacter;
+            var gap = characterTop - bubbleBottom;
 
             Assert.True(
                 popup.IsOpen && bubble.ActualHeight > 0 && bubble.ActualWidth > 0,

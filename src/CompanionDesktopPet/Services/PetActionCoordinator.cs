@@ -10,6 +10,11 @@ public sealed class PetActionCoordinator
 
     public bool TryBeginAmbient(PetAmbientAction action)
     {
+        if (!Enum.IsDefined(action))
+        {
+            throw new ArgumentOutOfRangeException(nameof(action), action, "Unknown ambient action.");
+        }
+
         if (State != PetActionState.Idle)
         {
             return false;
@@ -28,7 +33,12 @@ public sealed class PetActionCoordinator
             return;
         }
 
-        _returnToPaused = State == PetActionState.Paused;
+        _returnToPaused = State switch
+        {
+            PetActionState.Paused => true,
+            PetActionState.Landing => _returnToPaused,
+            _ => false
+        };
         State = PetActionState.Dragging;
     }
 
@@ -66,7 +76,10 @@ public sealed class PetActionCoordinator
 
     public void Complete(PetActionState completed)
     {
-        if (State != completed)
+        if (completed is not (PetActionState.Blinking
+                or PetActionState.Greeting
+                or PetActionState.Landing)
+            || State != completed)
         {
             return;
         }

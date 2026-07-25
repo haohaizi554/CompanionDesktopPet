@@ -1036,8 +1036,11 @@ public partial class MainWindow : Window
             0);
         BubbleArrowUp.Margin = arrowMargin;
         BubbleArrowDown.Margin = arrowMargin;
-        BubblePopup.HorizontalOffset = placement.Origin.X - character.Left - BubbleShadowSafety;
-        BubblePopup.VerticalOffset = placement.Origin.Y - character.Top - BubbleShadowSafety;
+        // Popup does not reliably move its native HWND when a RelativePoint target's
+        // parent window moves and the relative offsets remain unchanged. Absolute
+        // coordinates change with the character and keep the bubble physically anchored.
+        BubblePopup.HorizontalOffset = placement.Origin.X - BubbleShadowSafety;
+        BubblePopup.VerticalOffset = placement.Origin.Y - BubbleShadowSafety;
     }
 
     private void SynchronizeBubbleTimer()

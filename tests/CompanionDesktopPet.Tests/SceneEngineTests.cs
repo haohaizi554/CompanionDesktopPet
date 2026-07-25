@@ -70,6 +70,30 @@ public sealed class SceneEngineTests
     }
 
     [Fact]
+    public void History_RestoreFromItsOwnEntriesPreservesEntriesAndIndexes()
+    {
+        var scene = SceneCatalog.PersonaScenes.First();
+        var line = scene.Lines[0];
+        var playedAt = new DateTime(2026, 7, 25, 15, 0, 0, DateTimeKind.Local);
+        var history = new SceneHistory();
+        history.Record(scene, playedAt, line);
+
+        history.Restore(history.Entries);
+
+        Assert.Equal(line.Id, Assert.Single(history.Entries).DialogueLineId);
+        Assert.True(history.IsLineCoolingDown(line, playedAt.AddSeconds(1)));
+    }
+
+    [Fact]
+    public void History_EntriesExposeAReadOnlyFacade()
+    {
+        var history = new SceneHistory();
+
+        Assert.IsNotType<List<SceneHistoryEntry>>(history.Entries);
+        Assert.False(history.Entries is ICollection<SceneHistoryEntry> { IsReadOnly: false });
+    }
+
+    [Fact]
     public void History_EnforcesIdDailyMaximumUsingThePlaybackLocalDate()
     {
         var scene = SceneCatalog.PersonaScenes.First();

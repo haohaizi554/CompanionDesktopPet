@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text.Json;
 using CompanionDesktopPet.Models;
 using CompanionDesktopPet.Services;
 
@@ -65,6 +66,57 @@ public sealed class SettingsServiceTests : IDisposable
         Assert.Equal(PetSettings.Default, await new SettingsService(_directory).LoadAsync());
     }
 
+    [Fact]
+    public async Task Load_MalformedJson_ReportsTheFallbackReasonOnce()
+    {
+        await WriteSettingsAsync("{broken");
+        var failures = new List<Exception>();
+
+        Assert.Equal(
+            PetSettings.Default,
+            await new SettingsService(_directory, failures.Add).LoadAsync());
+
+        Assert.IsType<JsonException>(Assert.Single(failures));
+    }
+
+    [Fact]
+    public async Task Load_MissingFile_ReturnsDefaultsWithoutReportingFailure()
+    {
+        var failures = new List<Exception>();
+
+        Assert.Equal(
+            PetSettings.Default,
+            await new SettingsService(_directory, failures.Add).LoadAsync());
+
+        Assert.Empty(failures);
+    }
+
+    [Fact]
+    public async Task Load_ContractInvalidValues_ReportTheFallbackReason()
+    {
+        await WriteSettingsAsync(
+            """{"Left":1000001,"Top":240,"Scale":"Large","AnimationPaused":true,"AlwaysOnTop":false}""");
+        var failures = new List<Exception>();
+
+        Assert.Equal(
+            PetSettings.Default,
+            await new SettingsService(_directory, failures.Add).LoadAsync());
+
+        var failure = Assert.IsType<InvalidDataException>(Assert.Single(failures));
+        Assert.Contains("supported contract", failure.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Load_DiagnosticFailureDoesNotDisableTheDefaultFallback()
+    {
+        await WriteSettingsAsync("{broken");
+        var service = new SettingsService(
+            _directory,
+            _ => throw new InvalidOperationException("diagnostics unavailable"));
+
+        Assert.Equal(PetSettings.Default, await service.LoadAsync());
+    }
+
     [Theory]
     [MemberData(nameof(IncompatibleJson))]
     public async Task Load_IncompleteOrIncompatibleJson_ReturnsDefaults(string json)
@@ -97,4 +149,5 @@ public sealed class SettingsServiceTests : IDisposable
             Directory.Delete(_directory, true);
         }
     }
+
 }
