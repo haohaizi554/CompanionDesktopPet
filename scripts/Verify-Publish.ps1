@@ -19,8 +19,8 @@ if ($item.Extension -ne '.exe' -or $item.Length -le 0) {
     throw 'Delivered artifact is not a non-empty EXE.'
 }
 
-$deliveryFiles = @(Get-ChildItem -LiteralPath $directory -File)
-$deliveryDirectories = @(Get-ChildItem -LiteralPath $directory -Directory)
+$deliveryFiles = @(Get-ChildItem -LiteralPath $directory -File -Force)
+$deliveryDirectories = @(Get-ChildItem -LiteralPath $directory -Directory -Force)
 if ($deliveryDirectories.Count -ne 0) {
     throw "Delivery directory contains forbidden subdirectories: $($deliveryDirectories.Name -join ', ')"
 }
@@ -50,8 +50,8 @@ if ($publishItem.Extension -ne '.exe' -or $publishItem.Length -le 0) {
 }
 
 $publishDirectory = Split-Path -Parent $resolvedPublish
-$publishFiles = @(Get-ChildItem -LiteralPath $publishDirectory -File)
-$publishDirectories = @(Get-ChildItem -LiteralPath $publishDirectory -Directory)
+$publishFiles = @(Get-ChildItem -LiteralPath $publishDirectory -File -Force)
+$publishDirectories = @(Get-ChildItem -LiteralPath $publishDirectory -Directory -Force)
 if ($publishDirectories.Count -ne 0 -or
     $publishFiles.Count -ne 1 -or
     $publishFiles[0].FullName -ne $resolvedPublish -or
@@ -75,7 +75,7 @@ New-Item -ItemType Directory -Path $verifyDirectory | Out-Null
 $isolatedExe = Join-Path $verifyDirectory $item.Name
 Copy-Item -LiteralPath $resolved -Destination $isolatedExe
 
-$isolatedFiles = @(Get-ChildItem -LiteralPath $verifyDirectory -File)
+$isolatedFiles = @(Get-ChildItem -LiteralPath $verifyDirectory -File -Force)
 if ($isolatedFiles.Count -ne 1 -or $isolatedFiles[0].Extension -ne '.exe') {
     throw 'Isolated verification directory must contain exactly one EXE.'
 }

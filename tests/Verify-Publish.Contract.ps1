@@ -64,6 +64,16 @@ function Reset-Scratch {
     }
 }
 
+function Set-HiddenItem {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$LiteralPath
+    )
+
+    $item = Get-Item -LiteralPath $LiteralPath -Force
+    $item.Attributes = $item.Attributes -bor [IO.FileAttributes]::Hidden
+}
+
 function Assert-Rejected {
     param(
         [Parameter(Mandatory = $true)]
@@ -166,6 +176,13 @@ try {
         Set-Content -LiteralPath (Join-Path $paths.Publish 'CompanionDesktopPet.dll') -Value 'contract test'
     } -ExpectedMessage 'Publish directory'
 
+    Assert-Rejected -Case 'hidden publish DLL sidecar' -Arrange {
+        param($paths)
+        $sidecar = Join-Path $paths.Publish 'CompanionDesktopPet.dll'
+        Set-Content -LiteralPath $sidecar -Value 'contract test'
+        Set-HiddenItem -LiteralPath $sidecar
+    } -ExpectedMessage 'Publish directory' -SmokeTimeoutSeconds 30
+
     Assert-Rejected -Case 'publish JSON sidecar' -Arrange {
         param($paths)
         Set-Content -LiteralPath (Join-Path $paths.Publish 'CompanionDesktopPet.runtimeconfig.json') -Value '{}'
@@ -186,10 +203,24 @@ try {
         New-Item -ItemType Directory -Path (Join-Path $paths.Publish 'runtimes') | Out-Null
     } -ExpectedMessage 'Publish directory'
 
+    Assert-Rejected -Case 'hidden publish nested directory' -Arrange {
+        param($paths)
+        $sidecar = Join-Path $paths.Publish 'runtimes'
+        New-Item -ItemType Directory -Path $sidecar | Out-Null
+        Set-HiddenItem -LiteralPath $sidecar
+    } -ExpectedMessage 'Publish directory' -SmokeTimeoutSeconds 30
+
     Assert-Rejected -Case 'adjacent runtime sidecar' -Arrange {
         param($paths)
         Set-Content -LiteralPath (Join-Path $paths.Delivery 'unexpected.pdb') -Value 'contract test'
     } -ExpectedMessage 'forbidden sidecars'
+
+    Assert-Rejected -Case 'hidden adjacent runtime sidecar' -Arrange {
+        param($paths)
+        $sidecar = Join-Path $paths.Delivery 'CompanionDesktopPet.runtimeconfig.json'
+        Set-Content -LiteralPath $sidecar -Value '{}'
+        Set-HiddenItem -LiteralPath $sidecar
+    } -ExpectedMessage 'forbidden sidecars' -SmokeTimeoutSeconds 30
 
     Assert-Rejected -Case 'unapproved delivery text file' -Arrange {
         param($paths)
@@ -207,6 +238,13 @@ try {
         New-Item -ItemType Directory -Path $runtimeDirectory | Out-Null
         Set-Content -LiteralPath (Join-Path $runtimeDirectory 'dependency.dll') -Value 'contract test'
     } -ExpectedMessage 'forbidden subdirectories'
+
+    Assert-Rejected -Case 'hidden nested runtime dependency directory' -Arrange {
+        param($paths)
+        $runtimeDirectory = Join-Path $paths.Delivery 'runtimes'
+        New-Item -ItemType Directory -Path $runtimeDirectory | Out-Null
+        Set-HiddenItem -LiteralPath $runtimeDirectory
+    } -ExpectedMessage 'forbidden subdirectories' -SmokeTimeoutSeconds 30
 
     Assert-Accepted -Case 'UTF-8 exact-manifest-approved identity bytes' -Arrange {
         param($paths)
@@ -277,6 +315,20 @@ finally {
     }
     if (Test-Path -LiteralPath $helperDirectory) {
         Remove-Item -LiteralPath $helperDirectory -Recurse -Force
+    }
+}
+
+foreach ($enumerationVariable in @(
+    'deliveryFiles',
+    'deliveryDirectories',
+    'publishFiles',
+    'publishDirectories',
+    'isolatedFiles'
+)) {
+    $pattern = '(?m)^\s*\$' + [Regex]::Escape($enumerationVariable) +
+        '\s*=\s*@\(Get-ChildItem(?![^\r\n]*-Force)'
+    if ($verifierText -match $pattern) {
+        throw "Verify-Publish.ps1 must enumerate $enumerationVariable with -Force."
     }
 }
 
