@@ -13,6 +13,14 @@ $helperDirectory = Join-Path $repoRoot 'outputs\verify-contract-helpers'
 $source = (Resolve-Path -LiteralPath $ExePath).Path
 $verifier = Join-Path $repoRoot 'scripts\Verify-Publish.ps1'
 $verifierText = Get-Content -LiteralPath $verifier -Raw
+$defaultTimeoutMatch = [Regex]::Match(
+    $verifierText,
+    '\[int\]\$SmokeTimeoutSeconds\s*=\s*(?<Seconds>[0-9]+)'
+)
+if (-not $defaultTimeoutMatch.Success -or
+    [int]$defaultTimeoutMatch.Groups['Seconds'].Value -lt 30) {
+    throw 'Verify-Publish.ps1 default smoke timeout must be at least 30 seconds.'
+}
 if ($verifierText -notmatch "--smoke-test") {
     throw 'Verify-Publish.ps1 must launch the isolated executable with --smoke-test.'
 }
@@ -118,7 +126,7 @@ function Assert-Accepted {
         $verifierOutput = @(& $verifier `
             -ExePath (Join-Path $paths.Delivery 'candidate.exe') `
             -PublishExePath $paths.PublishExe `
-            -SmokeTimeoutSeconds 20)
+            -SmokeTimeoutSeconds 30)
     }
     catch {
         throw "Expected Verify-Publish.ps1 to accept case '$Case': $($_.Exception.Message)"

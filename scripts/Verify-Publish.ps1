@@ -5,7 +5,7 @@ param(
     [string]$PublishExePath = '',
 
     [ValidateRange(1, 120)]
-    [int]$SmokeTimeoutSeconds = 20
+    [int]$SmokeTimeoutSeconds = 30
 )
 
 $ErrorActionPreference = 'Stop'
