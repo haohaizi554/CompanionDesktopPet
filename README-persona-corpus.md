@@ -252,6 +252,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
 | `data/optimized/persona-surface-manifest.tsv` | `bcf9c97be0e4b1d7b7db11fcb46f44de17ef0ade6cb2e79d69f8af69bdbc637d` |
 | `reports/simulation-report.md` | `ccd6d67521c210a30e122806e2d5f695f5d3f9f6613d402034be57dce3f9099e` |
 | `reports/simulation-events.json` | `163956d6ab7137973489d7bf9f1dfbf33a921166290309c81542931a2a8c325c` |
-| `outputs/CompanionDesktopPet/佳怡桌宠.exe` | Phase 4B 重新发布后填写 |
+| `outputs/CompanionDesktopPet/佳怡桌宠.exe` | `cc69d4b555ac438641f805cbe3d51cf8b7d04627d1eda0837dbd089a3bdc6d4e` |
 
-任何未填写的哈希占位仍存在时都不得发布。
+最终 EXE 从提交 `dbc587243f209f785fc57de4da507229a41e0509` 使用 .NET SDK `9.0.301` 构建，`ProductVersion=1.0.0+dbc587243f209f785fc57de4da507229a41e0509`，大小为 `80,429,415` 字节。publish、delivery 与 isolated 副本的 SHA-256 全部等于上表值；最终隔离 smoke PID `18188` 自行以退出码 0 结束，随后 `publish/` 与 `outputs/verify/` 已清理。
+
+发布表中任何哈希占位都必须先清零；当前表无未填写占位。

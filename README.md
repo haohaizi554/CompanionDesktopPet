@@ -17,6 +17,8 @@ outputs/CompanionDesktopPet/使用说明.txt
 
 `佳怡桌宠.exe` 是 `win-x64` 自包含单文件应用，运行时不需要另行安装 .NET，也不依赖旁置或外部应用 DLL、JSON、PDB 等运行时 sidecar。“自包含单 EXE”不表示进程绝不加载 DLL；作为 Windows 桌面应用，它仍会正常使用操作系统提供的系统 DLL 与系统组件。
 
+当前交付 EXE 从提交 `dbc587243f209f785fc57de4da507229a41e0509` 使用 .NET SDK `9.0.301` 构建，大小为 `80,429,415` 字节，SHA-256 为 `cc69d4b555ac438641f805cbe3d51cf8b7d04627d1eda0837dbd089a3bdc6d4e`。publish、交付与隔离烟测副本的哈希一致，真实 WPF smoke 自行以退出码 0 结束；完整证据见[发布与清理清单](docs/release/2026-07-25-expanded-runtime-release-checklist.md)。当前 EXE 未做 Authenticode 代码签名，从网络下载时可能出现 Windows SmartScreen/安全软件信誉提示。
+
 ## 体验与操作
 
 - 左键单击人物：显示爱心、按左右方向交替轻轻倾斜，并按当前场景说一句话。
@@ -55,7 +57,7 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run
 - 点击专用恢复路径通过 8 小时连续会话、900 次连续点击和旧版静默记忆恢复测试；主动播报仍遵守原有静默预算。
 - 启动不在 UI 线程同步构建大型目录；预热期间使用固定本地 fallback，且真实 WPF 烟测只接受完整语料产生的启动回复。
 - WPF 只嵌入已集成的 v2 运行时资源；75,375 条源物理数据行及其 archive 证据不会整体进入运行时。
-- Release 测试、干净 self-contained single-file publish、源/副本 SHA-256、固定种子重建和隔离单 EXE 烟测作为最终门禁。
+- Release 测试、干净 self-contained single-file publish、源/副本 SHA-256、固定种子重建和隔离单 EXE 烟测均已通过最终门禁。
 
 完整语料维护契约、20 字段说明和精确命令见 [README-persona-corpus.md](README-persona-corpus.md)。
 

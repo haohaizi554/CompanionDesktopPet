@@ -1,9 +1,9 @@
 # Expanded Runtime 发布与清理清单
 
 日期：2026-07-25
-状态：Phase 4A 语料、仿真与文档证据已重放；Phase 4B 单 EXE 与最终提交哈希待登记
+状态：Phase 4A 语料/仿真证据与 Phase 4B 单 EXE 发布证据均已完成
 
-本文是已集成 52,132 条 expanded runtime 的发布门禁。它不授权修改不可变 source；当前计数、可复现重建与模拟证据已经重新核对，最终发布仍须完成 Phase 4B 单 EXE 构建、隔离烟测与哈希登记。
+本文是已集成 52,132 条 expanded runtime 的发布门禁。它不授权修改不可变 source；当前计数、可复现重建、模拟与单 EXE 隔离烟测证据均已重新核对。Phase 4B 交付物已从固定且已推送的干净提交构建；artifact commit 与最终 `main` SHA 以远端 Git 结果为准。
 
 ## 1. 精确验收常量
 
@@ -190,7 +190,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
   -PublishExePath (Join-Path $publishDir 'CompanionDesktopPet.exe')
 ```
 
-`Verify-Publish.ps1` 必须确认 publish 目录只有 `CompanionDesktopPet.exe`、交付目录只有一个 EXE 和允许的 `使用说明.txt`、两份 EXE 哈希相同，并在 `outputs/verify/` 隔离启动 `--smoke-test`。这里的单 EXE 指不依赖旁置/外部应用 DLL、JSON 或 PDB；Windows 系统 DLL 与系统组件不在此承诺范围。脚本只跟踪本次 PID；不要使用 `Stop-Process -Name` 清理无关桌宠进程。
+`Verify-Publish.ps1` 必须确认 publish 目录只有 `CompanionDesktopPet.exe`、交付目录只有一个 EXE 和允许的 `使用说明.txt`、两份 EXE 哈希相同，并在 `outputs/verify/` 隔离启动 `--smoke-test`。默认 30 秒总预算覆盖应用内部最多 15 秒语料 warmup 与两次各 2 秒动作探针；成功输出必须登记 `SmokePID`、`ExitCode=0` 及 publish/delivery/isolated 三份哈希。这里的单 EXE 指不依赖旁置/外部应用 DLL、JSON 或 PDB；内嵌原生组件仍可能由 .NET 单文件机制解压到系统临时缓存，Windows 系统 DLL 与系统组件也不在此承诺范围。脚本只跟踪本次 PID；不要使用 `Stop-Process -Name` 清理无关桌宠进程。
 
 ## 7. 发布哈希登记
 
@@ -209,9 +209,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
 | subseed derivation v2 | `e5f6d36ffb5d4936bccca24cb9c7177a63e02d937118342916bd5eea0a83640d` |
 | simulation report | `ccd6d67521c210a30e122806e2d5f695f5d3f9f6613d402034be57dce3f9099e` |
 | validator-facing simulation events | `163956d6ab7137973489d7bf9f1dfbf33a921166290309c81542931a2a8c325c` |
-| final `佳怡桌宠.exe` | Phase 4B 重新发布后填写 |
+| final `佳怡桌宠.exe` | `cc69d4b555ac438641f805cbe3d51cf8b7d04627d1eda0837dbd089a3bdc6d4e` |
 
-填入哈希后重新运行计数、可复现比较、验证器、simulation、.NET 测试与 publish verifier。记录最终 commit、EXE 大小、哈希、测试数、simulation 比例、smoke PID/退出码和 cleanup 状态。
+### 7.1 Phase 4B 发布实证
+
+- built-from source commit：`dbc587243f209f785fc57de4da507229a41e0509`；构建前 tracked worktree 干净且该 SHA 已推送到远端。
+- 工具链：.NET SDK `9.0.301`；EXE `ProductVersion=1.0.0+dbc587243f209f785fc57de4da507229a41e0509`，可从二进制反查 built-from。
+- 最终 EXE：`80,429,415` 字节；publish、delivery、isolated 三份 SHA-256 均为 `cc69d4b555ac438641f805cbe3d51cf8b7d04627d1eda0837dbd089a3bdc6d4e`。
+- publish 清单精确为一个 `CompanionDesktopPet.exe`；delivery 清单精确为 `佳怡桌宠.exe` 与允许的 `使用说明.txt`，无应用 DLL/JSON/PDB 或额外目录。
+- 最终隔离 smoke：`SmokePID=18188`，`ExitCode=0`，进程自行退出且未按进程名清理；完整发布验证器契约测试通过。
+- Phase 4B 提交前全量复核：Python `300/300`、.NET Release `389/389`，均为 0 失败、0 跳过。
+- 证据登记后已清理 `publish/`、`outputs/verify/`、`outputs/verify-contract-test/` 与 `outputs/verify-contract-helpers/`；交付目录保留。
+- Authenticode 状态为 `NotSigned`。这不改变单文件与离线门禁，但 GitHub/网络下载可能触发 SmartScreen 或安全软件信誉提示；未配置代码签名证书前不得宣称“下载后无安全提示”。
+
+版本化文件不能可靠记录“包含自身的最终提交 SHA”，因为写入该 SHA 会再次改变提交。本节只记录实际产生 EXE 的 built-from source commit；Phase 4B artifact commit 与最终 `main` SHA 以 Git 远端结果为准。
 
 ## 8. 发布后清理
 
@@ -229,10 +240,10 @@ git status --short
 
 最终 `git status --short` 只允许预期的源代码、数据、报告、文档和交付 EXE 变化；`bin/`、`obj/`、`publish/`、`outputs/verify/`、`__pycache__/`、临时报告、额外 EXE 或 sidecar 都是清理/审阅信号，不能盲目纳入提交。
 
-## 9. 已关闭审计项与剩余发布项
+## 9. 已关闭审计项与发布结论
 
 - 已关闭：surface manifest 为 51,326 行，expanded v2 为 52,132 行，唯一 `semantic_group` 精确为 533；五份隔离重建产物与 canonical SHA-256 全部一致。
 - 已关闭：simulation 已用当前 scheduler semantic binding 重放，1,500/1,500 attempts 有输出；Easter egg 9.87%、seasoning 4.93%、dry-sharp 4.00%，natural/adversarial/combined hard violations 全为零，dawn 与四季、nullable signals 均覆盖。
 - 已关闭：scene-first fallback、identity exact set、surface/runtime 一一绑定、旧 seasoning/dry 历史迁移均有自动化测试；900-click retained-memory 门槛已收紧为 256 MiB，不通过缩减 runtime 规避。
 - 已关闭：Phase 4A 的 Python 300/300 与 .NET Release 389/389 均为实际非零执行结果，不是仅凭进程退出码推断。
-- 剩余：`outputs/CompanionDesktopPet/佳怡桌宠.exe` 仍是旧发布物。必须从 Phase 4A 干净提交重新 publish，登记 built-from commit、EXE 字节数与 SHA-256，并通过 publish/delivery/isolated 三份哈希一致和隔离 `--smoke-test` 后，才可完成 Phase 4B。
+- 已关闭：`outputs/CompanionDesktopPet/佳怡桌宠.exe` 已从干净且已推送的 `dbc5872` 重建；built-from、SDK、ProductVersion、字节数与 SHA-256 均已登记，publish/delivery/isolated 三份哈希一致，隔离 `--smoke-test` 自行以退出码 0 结束，Phase 4B 完成。
