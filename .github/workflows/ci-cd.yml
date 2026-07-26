@@ -19,6 +19,7 @@ concurrency:
 env:
   DOTNET_CLI_TELEMETRY_OPTOUT: "1"
   DOTNET_NOLOGO: "1"
+  DOTNET_CLI_UI_LANGUAGE: "en"
   PYTHONUTF8: "1"
 
 defaults:
@@ -112,6 +113,14 @@ jobs:
             "SimulationEventsSHA256=$((Get-FileHash -LiteralPath $trackedSimulation -Algorithm SHA256).Hash.ToLowerInvariant())"
           ) | Set-Content -LiteralPath (Join-Path $evidence 'environment.txt') -Encoding utf8
           & dotnet --info 2>&1 | Set-Content -LiteralPath (Join-Path $evidence 'dotnet-info.txt') -Encoding utf8
+
+      - name: Verify CI test evidence parser contract
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $log = Join-Path $env:GITHUB_WORKSPACE 'ci-evidence/ci-test-evidence-contract.txt'
+          $contract = Join-Path $env:GITHUB_WORKSPACE 'tests/Ci-TestEvidence.Contract.ps1'
+          $output = @(& $contract 2>&1)
+          $output | Tee-Object -FilePath $log
 
       - name: Verify release packaging contract
         run: |
@@ -225,6 +234,15 @@ jobs:
             throw "Python tests failed with exit code $exitCode."
           }
 
+          Import-Module -Name (Join-Path $env:GITHUB_WORKSPACE 'scripts/Ci-TestEvidence.Core.psm1') -Force
+          $pythonEvidence = Get-PythonUnittestEvidence -Lines $output
+          $pythonEvidenceLines = @(
+            ConvertTo-CiTestEvidenceLines -Prefix 'Python' -Evidence $pythonEvidence
+          )
+          $pythonEvidenceLines | Add-Content -LiteralPath $log -Encoding utf8
+          "### Python unittest: $($pythonEvidence.TestsRun) tests, 0 skipped, 0 failures, 0 errors" |
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8
+
       - name: Restore .NET solution
         run: |
           $ErrorActionPreference = 'Stop'
@@ -236,7 +254,7 @@ jobs:
             throw ".NET restore failed with exit code $exitCode."
           }
 
-      - name: Require nonzero .NET test discovery
+      - name: Require nonzero .NET full-solution test discovery
         run: |
           $ErrorActionPreference = 'Stop'
           $testProject = 'tests/CompanionDesktopPet.Tests/CompanionDesktopPet.Tests.csproj'
@@ -252,7 +270,7 @@ jobs:
           }
 
           $discoveryLog = Join-Path $env:GITHUB_WORKSPACE 'ci-evidence/dotnet-test-discovery.txt'
-          $discovery = @(& dotnet test $testProject `
+          $discovery = @(& dotnet test CompanionDesktopPet.sln `
             -c Release `
             --no-restore `
             --list-tests `
@@ -264,15 +282,19 @@ jobs:
             throw ".NET test discovery failed with exit code $discoveryExitCode."
           }
 
-          $discoveredTests = @($discovery | Where-Object {
-            $_.ToString() -match '^\s+CompanionDesktopPet\.Tests\.'
-          })
-          "DiscoveredTests=$($discoveredTests.Count)" |
-            Add-Content -LiteralPath $discoveryLog -Encoding utf8
-          if ($discoveredTests.Count -le 0) {
-            throw '.NET test discovery returned zero CompanionDesktopPet tests.'
-          }
-          "### .NET discovery: $($discoveredTests.Count) tests" |
+          Import-Module -Name (Join-Path $env:GITHUB_WORKSPACE 'scripts/Ci-TestEvidence.Core.psm1') -Force
+          $discoveryEvidence = Get-DotNetTestDiscoveryEvidence `
+            -Lines $discovery
+          $discoveryRecord = Join-Path $env:GITHUB_WORKSPACE 'ci-evidence/dotnet-test-discovery-count.txt'
+          Save-CiTestEvidenceInteger `
+            -Path $discoveryRecord `
+            -Name 'DiscoveredTests' `
+            -Value $discoveryEvidence.DiscoveredTests
+          $discoveryEvidenceLines = @(
+            ConvertTo-CiTestEvidenceLines -Prefix 'DotNetDiscovery' -Evidence $discoveryEvidence
+          )
+          $discoveryEvidenceLines | Add-Content -LiteralPath $discoveryLog -Encoding utf8
+          "### .NET discovery: $($discoveryEvidence.DiscoveredTests) tests" |
             Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8
 
       - name: Run full .NET Release test suite
@@ -295,29 +317,19 @@ jobs:
           }
 
           $trxFiles = @(Get-ChildItem -LiteralPath $results -Filter '*.trx' -File -Recurse)
-          if ($trxFiles.Count -eq 0) {
-            throw '.NET test run produced no TRX evidence.'
-          }
-          $total = 0
-          $failed = 0
-          foreach ($trxFile in $trxFiles) {
-            [xml]$trx = Get-Content -LiteralPath $trxFile.FullName -Raw
-            $counters = $trx.SelectSingleNode("//*[local-name()='Counters']")
-            if ($null -eq $counters) {
-              throw "TRX file has no test counters: $($trxFile.FullName)"
-            }
-            $total += [int]$counters.GetAttribute('total')
-            $failed += [int]$counters.GetAttribute('failed')
-          }
-          if ($total -le 0) {
-            throw '.NET Release test evidence reports zero executed tests.'
-          }
-          if ($failed -ne 0) {
-            throw ".NET Release test evidence reports $failed failed tests."
-          }
-          "ExecutedTests=$total`nFailedTests=$failed" |
-            Add-Content -LiteralPath $log -Encoding utf8
-          "### .NET Release: $total tests, $failed failed" |
+          $discoveryRecord = Join-Path $env:GITHUB_WORKSPACE 'ci-evidence/dotnet-test-discovery-count.txt'
+          Import-Module -Name (Join-Path $env:GITHUB_WORKSPACE 'scripts/Ci-TestEvidence.Core.psm1') -Force
+          $expectedDiscoveredTests = Read-CiTestEvidenceInteger `
+            -Path $discoveryRecord `
+            -Name 'DiscoveredTests'
+          $trxEvidence = Get-DotNetTrxEvidence `
+            -TrxPaths @($trxFiles | ForEach-Object { $_.FullName }) `
+            -ExpectedDiscoveredTests $expectedDiscoveredTests
+          $trxEvidenceLines = @(
+            ConvertTo-CiTestEvidenceLines -Prefix 'DotNetTRX' -Evidence $trxEvidence
+          )
+          $trxEvidenceLines | Add-Content -LiteralPath $log -Encoding utf8
+          "### .NET Release: $($trxEvidence.Total) tests, $($trxEvidence.Passed) passed, 0 skipped/not-run/failed/error" |
             Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8
 
       - name: Confirm committed contracts stayed unchanged
