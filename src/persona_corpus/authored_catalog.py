@@ -30,6 +30,24 @@ APPROVED_REVIEW_STATUS = "approved"
 # only source that can authorize an authored relationship profile.
 RELATIONSHIP_PROFILES = PERSONA_CONTRACT.relationship_profiles
 
+# A semantic group is a scheduling identity, not just an editorial label.
+# Rows may share one only when the selector-visible metadata is identical; the
+# text, variant id, topic id, and editorial role may still vary within it.
+_SEMANTIC_GROUP_METADATA_FIELDS = (
+    "category",
+    "category_group",
+    "output_mode",
+    "trigger",
+    "required_context",
+    "tone",
+    "interrupt_cost",
+    "cooldown_hours",
+    "semantic_cooldown_hours",
+    "max_per_day",
+    "weight",
+    "relationship_profile",
+)
+
 _MANIFEST_KEYS = frozenset(
     {
         "format",
@@ -310,6 +328,36 @@ def _candidate_batch_paths(authored_dir: Path) -> tuple[Path, ...]:
     return paths
 
 
+def _semantic_group_metadata(entry: AuthoredEntry) -> tuple[object, ...]:
+    return tuple(getattr(entry, name) for name in _SEMANTIC_GROUP_METADATA_FIELDS)
+
+
+def _validate_semantic_group_metadata(entries: tuple[AuthoredEntry, ...]) -> None:
+    """Reject one semantic scheduling identity with divergent metadata."""
+
+    first_by_group: dict[str, tuple[AuthoredEntry, tuple[object, ...]]] = {}
+    for entry in entries:
+        metadata = _semantic_group_metadata(entry)
+        previous = first_by_group.get(entry.semantic_group)
+        if previous is None:
+            first_by_group[entry.semantic_group] = (entry, metadata)
+            continue
+
+        first_entry, first_metadata = previous
+        if metadata == first_metadata:
+            continue
+        for field_name, first_value, value in zip(
+            _SEMANTIC_GROUP_METADATA_FIELDS, first_metadata, metadata, strict=True
+        ):
+            if first_value != value:
+                raise AuthoredCatalogError(
+                    f"semantic_group {entry.semantic_group!r} has inconsistent "
+                    f"{field_name}: {first_value!r} for {first_entry.variant_id!r} "
+                    f"but {value!r} for {entry.variant_id!r}"
+                )
+        raise AssertionError("semantic group metadata comparison must find a difference")
+
+
 def parse_authored_batches(authored_dir: Path) -> tuple[AuthoredEntry, ...]:
     """Parse all 100 literal source batches, without reading a manifest."""
 
@@ -344,6 +392,7 @@ def parse_authored_batches(authored_dir: Path) -> tuple[AuthoredEntry, ...]:
     variant_ids = [entry.variant_id for entry in sorted_entries]
     if len(variant_ids) != len(set(variant_ids)):
         raise AuthoredCatalogError("authored batches contain duplicate variant_id")
+    _validate_semantic_group_metadata(sorted_entries)
     texts = [entry.text for entry in sorted_entries]
     if len(texts) != len(set(texts)):
         raise AuthoredCatalogError("authored batches contain duplicate text")
