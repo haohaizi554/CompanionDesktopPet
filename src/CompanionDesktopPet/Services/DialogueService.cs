@@ -115,13 +115,20 @@ public sealed class DialogueService
         }
     }
 
-    public AgentReply GetReply(CompanionEvent trigger, DateTime localTime, Random random)
+    public AgentReply GetReply(CompanionEvent trigger, DateTime localTime, Random random) =>
+        GetReply(trigger, localTime, random, default);
+
+    internal AgentReply GetReply(
+        CompanionEvent trigger,
+        DateTime localTime,
+        Random random,
+        FullscreenSnapshot fullscreen)
     {
         ArgumentNullException.ThrowIfNull(random);
         lock (_sync)
         {
             return _agent is { } agent
-                ? agent.Respond(trigger, localTime, random)
+                ? agent.Respond(trigger, localTime, random, fullscreen)
                 : GetFallbackReply(trigger);
         }
     }

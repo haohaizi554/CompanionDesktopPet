@@ -18,7 +18,11 @@ internal interface ICompanionDialogueAgent
 
     AgentMemorySnapshot CreateSnapshot();
 
-    AgentReply Respond(CompanionEvent trigger, DateTime localTime, Random random);
+    AgentReply Respond(
+        CompanionEvent trigger,
+        DateTime localTime,
+        Random random,
+        FullscreenSnapshot fullscreen);
 }
 
 public sealed class OfflineCompanionAgent : ICompanionDialogueAgent
@@ -72,7 +76,28 @@ public sealed class OfflineCompanionAgent : ICompanionDialogueAgent
 
     internal void WarmUp() => _ = SceneCatalog.All.Count;
 
-    public AgentReply Respond(CompanionEvent trigger, DateTime localTime, Random random)
+    public AgentReply Respond(CompanionEvent trigger, DateTime localTime, Random random) =>
+        RespondCore(trigger, localTime, random, default);
+
+    internal AgentReply RespondWithContext(
+        CompanionEvent trigger,
+        DateTime localTime,
+        Random random,
+        FullscreenSnapshot fullscreen) =>
+        RespondCore(trigger, localTime, random, fullscreen);
+
+    AgentReply ICompanionDialogueAgent.Respond(
+        CompanionEvent trigger,
+        DateTime localTime,
+        Random random,
+        FullscreenSnapshot fullscreen) =>
+        RespondCore(trigger, localTime, random, fullscreen);
+
+    private AgentReply RespondCore(
+        CompanionEvent trigger,
+        DateTime localTime,
+        Random random,
+        FullscreenSnapshot fullscreen)
     {
         ArgumentNullException.ThrowIfNull(random);
         _state ??= CharacterState.Create(localTime);
@@ -83,13 +108,15 @@ public sealed class OfflineCompanionAgent : ICompanionDialogueAgent
             trigger,
             localTime,
             _state,
+            IsFullscreen: fullscreen.Observed,
             PreferredTree: preferredTree.Kind,
-            PreviousCategory: _lastCategory);
+            PreviousCategory: _lastCategory,
+            EffectiveFullscreen: fullscreen.EffectiveQuietMode);
         var scene = _scheduler.Select(
             context,
             _history,
             random,
-            bypassInterruptionBudget: trigger == CompanionEvent.Click);
+            bypassInterruptionBudget: DialogueEventPolicy.BypassesInterruptionBudget(trigger));
         DialogueLine? fallbackLine = null;
         if (scene is null && trigger == CompanionEvent.Click)
         {

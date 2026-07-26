@@ -3391,7 +3391,11 @@ public sealed class WindowShellTests
 
         public AgentMemorySnapshot CreateSnapshot() => _snapshot;
 
-        public AgentReply Respond(CompanionEvent trigger, DateTime localTime, Random random)
+        public AgentReply Respond(
+            CompanionEvent trigger,
+            DateTime localTime,
+            Random random,
+            FullscreenSnapshot fullscreen)
         {
             LastRespondedAt = localTime;
             return new AgentReply(

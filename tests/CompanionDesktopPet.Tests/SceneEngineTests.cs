@@ -571,6 +571,80 @@ public sealed class SceneEngineTests
         Assert.Contains("not_fullscreen", ContextTokens(context));
     }
 
+    [Fact]
+    public void EffectiveFullscreen_ActivatesFullscreenBudgetWithoutInventingRawTokens()
+    {
+        var now = new DateTime(2026, 7, 26, 15, 0, 0, DateTimeKind.Local);
+        var recentScene = SceneCatalog.PersonaScenes.First(scene => scene.Lines.Count > 0);
+        var history = new SceneHistory();
+        history.Record(recentScene, now.AddMinutes(-90), recentScene.Lines[0]);
+        var activeContext = new SceneContext(
+            CompanionEvent.Automatic,
+            now,
+            CharacterState.Create(now));
+        var quietContext = activeContext with { EffectiveFullscreen = true };
+
+        Assert.DoesNotContain("not_fullscreen", ContextTokens(quietContext));
+        Assert.NotNull(new SceneScheduler().Select(activeContext, history, new Random(2605)));
+        Assert.Null(new SceneScheduler().Select(quietContext, history, new Random(2605)));
+    }
+
+    [Theory]
+    [InlineData(CompanionEvent.Click)]
+    [InlineData(CompanionEvent.DragReleased)]
+    [InlineData(CompanionEvent.AnimationPaused)]
+    [InlineData(CompanionEvent.AnimationResumed)]
+    [InlineData(CompanionEvent.SizeChanged)]
+    [InlineData(CompanionEvent.PositionRestored)]
+    public void DirectFeedbackEventsBypassInterruptionBudget(CompanionEvent trigger)
+    {
+        var now = new DateTime(2026, 7, 26, 15, 0, 0);
+        var history = CreateRecentBudgetHistory(now);
+        var context = new SceneContext(trigger, now, CharacterState.Create(now));
+
+        var selected = new SceneScheduler().Select(
+            context,
+            history,
+            new Random(2607),
+            DialogueEventPolicy.BypassesInterruptionBudget(trigger));
+
+        Assert.NotNull(selected);
+    }
+
+    [Theory]
+    [InlineData(CompanionEvent.ClockTick)]
+    [InlineData(CompanionEvent.DayChanged)]
+    [InlineData(CompanionEvent.IdleReturned)]
+    [InlineData(CompanionEvent.StoryTimerDue)]
+    public void EventOutputsRemainBudgeted(CompanionEvent trigger)
+    {
+        var now = new DateTime(2026, 7, 26, 15, 0, 0);
+        var history = CreateRecentBudgetHistory(now);
+        var context = new SceneContext(trigger, now, CharacterState.Create(now));
+
+        Assert.Null(new SceneScheduler().Select(context, history, new Random(2608)));
+    }
+
+    [Fact]
+    public void AutomaticBypassesLegacyHourlyLateNightAndFullscreenBudgets()
+    {
+        var now = new DateTime(2026, 7, 26, 23, 30, 0, DateTimeKind.Local);
+        var history = CreateRecentBudgetHistory(now);
+        var context = new SceneContext(
+            CompanionEvent.Automatic,
+            now,
+            CharacterState.Create(now),
+            EffectiveFullscreen: true);
+
+        var selected = new SceneScheduler().Select(
+            context,
+            history,
+            new Random(2609),
+            DialogueEventPolicy.BypassesInterruptionBudget(CompanionEvent.Automatic));
+
+        Assert.NotNull(selected);
+    }
+
     [Theory]
     [InlineData(4)]
     [InlineData(5)]
@@ -660,6 +734,21 @@ public sealed class SceneEngineTests
 
     private static IReadOnlySet<string> ContextTokens(SceneContext context)
         => SceneScheduler.ContextTokens(context);
+
+    private static SceneHistory CreateRecentBudgetHistory(DateTime now)
+    {
+        var history = new SceneHistory();
+        var scenes = SceneCatalog.PersonaScenes
+            .Where(scene => scene.Lines.Count > 0)
+            .Take(InterruptionBudget.MaximumOutputsPerHour)
+            .ToArray();
+        for (var index = 0; index < scenes.Length; index++)
+        {
+            history.Record(scenes[index], now.AddMinutes(-2 - index), scenes[index].Lines[0]);
+        }
+
+        return history;
+    }
 
     private static DialogueTrigger DayPart(DateTime now)
         => InterruptionBudget.DayPart(now);

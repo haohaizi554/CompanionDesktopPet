@@ -44,7 +44,8 @@ public sealed record SceneContext(
     bool? IsFullscreen = null,
     TimeSpan UserIdle = default,
     DialogueTreeKind? PreferredTree = null,
-    DialogueCategory? PreviousCategory = null);
+    DialogueCategory? PreviousCategory = null,
+    bool EffectiveFullscreen = false);
 
 public sealed record SceneHistoryEntry(
     [property: JsonRequired] string SceneId,
@@ -728,7 +729,7 @@ public sealed class SceneScheduler
         && !history.IsSemanticGroupCoolingDown(scene, context.Now)
         && history.MeetsAdjacencyAndRecentQuotas(scene)
         && (bypassInterruptionBudget
-            || InterruptionBudget.CanPlay(scene, context.Now, history, context.IsFullscreen));
+            || InterruptionBudget.CanPlay(scene, context.Now, history, context.EffectiveFullscreen));
 
     private static bool TriggerMatches(SceneDefinition scene, SceneContext context, SceneHistory history)
     {

@@ -280,7 +280,7 @@ public sealed class OfflineCompanionAgentTests
 
     [Fact]
     [Trait("Category", "Performance")]
-    public void Respond_RepeatedClicksDoNotBecomePermanentlySilent()
+    public void Respond_RepeatedClicksRemainResponsiveAndDoNotSuppressAutomatic()
     {
         // Startup owns corpus/catalog materialization; this gate measures the
         // steady interactive path after that one-time prewarm.
@@ -396,8 +396,8 @@ public sealed class OfflineCompanionAgentTests
             CompanionEvent.Automatic,
             start.AddSeconds(900 * 10),
             random);
-        Assert.False(automatic.ShouldDisplayText);
-        Assert.Equal("intentional_silence", automatic.SceneId);
+        Assert.True(automatic.ShouldDisplayText);
+        Assert.NotEqual("intentional_silence", automatic.SceneId);
     }
 
     private static double RecentSurfaceRepeatRatio(

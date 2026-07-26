@@ -281,7 +281,11 @@ public sealed class DialogueWarmupTests
 
         public AgentMemorySnapshot CreateSnapshot() => _snapshot;
 
-        public AgentReply Respond(CompanionEvent trigger, DateTime localTime, Random random) =>
+        public AgentReply Respond(
+            CompanionEvent trigger,
+            DateTime localTime,
+            Random random,
+            FullscreenSnapshot fullscreen) =>
             new(
                 _text,
                 DialogueCategory.CharacterLife,
@@ -307,7 +311,11 @@ public sealed class DialogueWarmupTests
             null,
             []);
 
-        public AgentReply Respond(CompanionEvent trigger, DateTime localTime, Random random)
+        public AgentReply Respond(
+            CompanionEvent trigger,
+            DateTime localTime,
+            Random random,
+            FullscreenSnapshot fullscreen)
         {
             var active = Interlocked.Increment(ref _activeCalls);
             UpdateMaximum(active);
