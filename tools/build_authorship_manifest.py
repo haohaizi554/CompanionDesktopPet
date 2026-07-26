@@ -34,7 +34,7 @@ def main() -> int:
         entries = parse_authored_batches(arguments.authored_dir)
         payload = build_authorship_manifest_payload(entries)
         arguments.output.parent.mkdir(parents=True, exist_ok=True)
-        arguments.output.write_text(canonical_manifest_json(payload), encoding="utf-8")
+        arguments.output.write_bytes(canonical_manifest_json(payload).encode("utf-8"))
     except AuthoredCatalogError as error:
         print(f"authorship manifest build failed: {error}", file=sys.stderr)
         return 1

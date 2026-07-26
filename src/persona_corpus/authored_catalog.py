@@ -485,6 +485,22 @@ def _read_manifest(path: Path) -> dict[str, Any]:
     return raw
 
 
+def _require_manifest_integer(
+    manifest_path: Path,
+    field_name: str,
+    value: object,
+    expected_value: int,
+) -> None:
+    if type(value) is not int:
+        raise AuthoredCatalogError(
+            f"{manifest_path}: {field_name} must be an integer {expected_value}"
+        )
+    if value != expected_value:
+        raise AuthoredCatalogError(
+            f"{manifest_path}: {field_name} must equal {expected_value!r}"
+        )
+
+
 def _validate_manifest(
     manifest_path: Path,
     manifest: Mapping[str, Any],
@@ -499,10 +515,7 @@ def _validate_manifest(
         ("rows_per_batch", ROWS_PER_BATCH),
         ("total_rows", EXPECTED_ENTRY_COUNT),
     ):
-        if manifest[key] != expected_value:
-            raise AuthoredCatalogError(
-                f"{manifest_path}: {key} must equal {expected_value!r}"
-            )
+        _require_manifest_integer(manifest_path, key, manifest[key], expected_value)
 
     batches = manifest["batches"]
     expected_batches = expected["batches"]
@@ -530,10 +543,15 @@ def _validate_manifest(
                 raise AuthoredCatalogError(
                     f"{manifest_path}: batch {batch_id} {field_name} must be a lowercase SHA-256"
                 )
-        if actual_digest["row_count"] != expected_digest["row_count"]:
-            raise AuthoredCatalogError(
-                f"{manifest_path}: batch {batch_id} row_count mismatch"
-            )
+        expected_row_count = expected_digest["row_count"]
+        if type(expected_row_count) is not int:  # Defensive: internal contract.
+            raise AuthoredCatalogError("internal batch row count expectation is malformed")
+        _require_manifest_integer(
+            manifest_path,
+            f"batch {batch_id} row_count",
+            actual_digest["row_count"],
+            expected_row_count,
+        )
         for field_name in ("text_sha256", "metadata_sha256"):
             if actual_digest[field_name] != expected_digest[field_name]:
                 raise AuthoredCatalogError(

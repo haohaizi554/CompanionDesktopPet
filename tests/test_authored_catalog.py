@@ -158,6 +158,52 @@ class AuthoredCatalogTests(unittest.TestCase):
         self.assertEqual(64, len(manifest["root_sha256"]))
         self.assertTrue(all(batch["row_count"] == 300 for batch in manifest["batches"].values()))
 
+    def test_manifest_builder_writes_exact_utf8_lf_bytes(self) -> None:
+        manifest_bytes = self.manifest_path.read_bytes()
+        manifest = json.loads(manifest_bytes.decode("utf-8"))
+        expected_bytes = (
+            json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+        ).encode("utf-8")
+
+        self.assertEqual(expected_bytes, manifest_bytes)
+        self.assertNotIn(b"\r", manifest_bytes)
+
+    def test_load_authored_catalog_rejects_non_integer_manifest_inventory_counts(self) -> None:
+        cases = (
+            ("batch_count", 100, 100.0),
+            ("batch_count", 100, True),
+            ("rows_per_batch", 300, 300.0),
+            ("rows_per_batch", 300, True),
+            ("total_rows", 30_000, 30_000.0),
+            ("total_rows", 30_000, True),
+        )
+        for field_name, expected_value, invalid_value in cases:
+            with self.subTest(field_name=field_name, invalid_value=invalid_value):
+                manifest_payload = json.loads(self.manifest_path.read_text(encoding="utf-8"))
+                manifest_payload[field_name] = invalid_value
+                manifest_path = self.root / f"non-integer-{field_name}-{type(invalid_value).__name__}.json"
+                manifest_path.write_text(json.dumps(manifest_payload), encoding="utf-8")
+
+                with self.assertRaisesRegex(
+                    ValueError,
+                    rf"{field_name} must be an integer {expected_value}",
+                ):
+                    load_authored_catalog(self.authored_dir, manifest_path)
+
+    def test_load_authored_catalog_rejects_non_integer_batch_row_count(self) -> None:
+        for invalid_value in (300.0, True):
+            with self.subTest(invalid_value=invalid_value):
+                manifest_payload = json.loads(self.manifest_path.read_text(encoding="utf-8"))
+                manifest_payload["batches"]["b001"]["row_count"] = invalid_value
+                manifest_path = self.root / f"non-integer-row-count-{type(invalid_value).__name__}.json"
+                manifest_path.write_text(json.dumps(manifest_payload), encoding="utf-8")
+
+                with self.assertRaisesRegex(
+                    ValueError,
+                    r"batch b001 row_count must be an integer 300",
+                ):
+                    load_authored_catalog(self.authored_dir, manifest_path)
+
     def test_ledger_rows_are_one_to_one_and_hash_bound(self) -> None:
         catalog = load_authored_catalog(self.authored_dir, self.manifest_path)
         ledger = list(catalog.ledger_rows())
