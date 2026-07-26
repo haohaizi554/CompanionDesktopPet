@@ -820,6 +820,61 @@ public sealed class WindowShellTests
     }
 
     [Fact]
+    public async Task MainWindow_HiddenWarmupCompletionDoesNotReplayOrRearm()
+    {
+        await RunOnStaThreadAsync(async () =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var time = new ManualTimeProvider();
+            time.SetLocalNow(new DateTime(2026, 7, 26, 10, 0, 0));
+            var detector = new SequenceFullscreenDetector(false, true);
+            using var factory = new ControlledDialogueFactory("hidden warmup reply");
+            var dialogue = DialogueService.CreateDeferred(factory.Create, time);
+            var coordinator = new DialogueWarmupCoordinator(dialogue, time);
+            var window = new MainWindow(new MainWindowDependencies(
+                PetSettings.Default,
+                new SettingsService(settingsDirectory))
+            {
+                SuppressApplicationShutdownOnClose = true,
+                AmbientScheduler = new AmbientActionScheduler(() => 0.5),
+                AutoStartService = DisabledAutoStartService.Instance,
+                DialogueService = dialogue,
+                TimeProvider = time,
+                WarmupCoordinator = coordinator,
+                ForegroundFullscreenDetector = detector,
+                DialogueScheduler = new DialogueScheduler(new EndpointRandom())
+            });
+            try
+            {
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                Assert.True(factory.Entered.Wait(TimeSpan.FromSeconds(2)));
+                var replyBeforeHide = GetLastReply(window);
+                var warmup = coordinator.StartAsync(CancellationToken.None);
+                window.SetTrayAvailability(true);
+                window.HideToTray();
+                Assert.False(window.CaptureAutomaticDialogueRuntime().IsScheduled);
+
+                factory.Release();
+                Assert.Equal(DialogueWarmupOutcome.Ready, await warmup);
+                await window.Dispatcher.InvokeAsync(
+                    () => { },
+                    DispatcherPriority.ApplicationIdle);
+
+                Assert.Equal(1, detector.ObserveCount);
+                Assert.Null(factory.Agent.LastRespondedAt);
+                Assert.Same(replyBeforeHide, GetLastReply(window));
+                Assert.False(window.CaptureAutomaticDialogueRuntime().IsScheduled);
+            }
+            finally
+            {
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
     public void MainWindow_ClickBetweenLoadedAndContentRenderedIsNotOverwrittenByWarmStartup()
     {
         RunOnStaThread(() =>
@@ -2120,6 +2175,49 @@ public sealed class WindowShellTests
     }
 
     [Fact]
+    public void MainWindow_AutomaticTickStopsExistingTimerBeforeFullscreenObservation()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var time = new ManualTimeProvider();
+            time.SetLocalNow(new DateTime(2026, 7, 26, 10, 0, 0));
+            MainWindow? window = null;
+            bool? scheduledDuringTickObservation = null;
+            var detector = new SequenceFullscreenDetector(false, false)
+            {
+                OnObserve = callCount =>
+                {
+                    if (callCount == 2)
+                    {
+                        scheduledDuringTickObservation = window!
+                            .CaptureAutomaticDialogueRuntime()
+                            .IsScheduled;
+                    }
+                }
+            };
+            var agent = new RecordingDialogueAgent();
+            window = CreateWindowWithCadence(settingsDirectory, time, detector, agent);
+            try
+            {
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                Assert.True(window.CaptureAutomaticDialogueRuntime().IsScheduled);
+
+                window.ProcessAutomaticTimerTick();
+
+                Assert.False(scheduledDuringTickObservation);
+                Assert.True(window.CaptureAutomaticDialogueRuntime().IsScheduled);
+            }
+            finally
+            {
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
     public void MainWindow_LateAutomaticTickSilentlyRearms()
     {
         RunOnStaThread(() =>
@@ -2342,6 +2440,8 @@ public sealed class WindowShellTests
             var detector = new SequenceFullscreenDetector(false, true);
             var agent = new RecordingDialogueAgent();
             var window = CreateWindowWithCadence(settingsDirectory, time, detector, agent);
+            var closed = false;
+            window.Closed += (_, _) => closed = true;
             try
             {
                 window.Show();
@@ -2364,7 +2464,7 @@ public sealed class WindowShellTests
             }
             finally
             {
-                if (!GetPrivateField<bool>(window, "_isClosed"))
+                if (!closed)
                 {
                     window.Close();
                 }

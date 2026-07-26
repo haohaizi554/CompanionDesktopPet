@@ -1127,6 +1127,7 @@ public partial class MainWindow : Window
 
     internal void ProcessAutomaticTimerTick()
     {
+        _automaticTimer.Stop();
         if (PresentationSuspended)
         {
             DisarmAutomaticTimer();
@@ -1336,7 +1337,7 @@ public partial class MainWindow : Window
         DialogueWarmupOutcome outcome,
         long generation)
     {
-        if (InteractionFrozen || generation != _dialogueWarmupGeneration)
+        if (PresentationSuspended || generation != _dialogueWarmupGeneration)
         {
             return;
         }
