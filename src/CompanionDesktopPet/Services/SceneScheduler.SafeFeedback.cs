@@ -133,12 +133,12 @@ public sealed partial class SceneScheduler
             .Where(scene => !retainCooldownsAndAdjacency
                             || (!history.IsSemanticGroupCoolingDown(scene, context.Now)
                                 && history.MeetsAdjacencyAndRecentQuotas(scene)))
-            .Where(scene => SafeLines(
+            .Where(scene => HasSafeLine(
                 scene,
                 context.Now,
                 history,
                 previousText,
-                retainCooldownsAndAdjacency).Count > 0)
+                retainCooldownsAndAdjacency))
             .Select(scene => Score(scene, recent))
             .ToList();
 
@@ -179,29 +179,39 @@ public sealed partial class SceneScheduler
                            && (!retainLineCooldown || !history.IsLineCoolingDown(line, now)))
             .ToArray();
 
+    private static bool HasSafeLine(
+        SceneDefinition scene,
+        DateTime now,
+        SceneHistory history,
+        string? previousText,
+        bool retainLineCooldown) =>
+        scene.Lines.Any(line =>
+            IsSafeFeedbackLine(scene, line)
+            && line.Text != previousText
+            && history.IsBelowDailyMaximum(line, now)
+            && (!retainLineCooldown || !history.IsLineCoolingDown(line, now)));
+
     private static DialogueLine ChooseUnusedOrLeastRecent(
         IReadOnlyList<DialogueLine> lines,
         SceneHistory history,
         Random random)
     {
-        var lastPlayedAt = new Dictionary<string, DateTime>(StringComparer.Ordinal);
-        foreach (var entry in history.Entries)
-        {
-            if (!string.IsNullOrEmpty(entry.DialogueLineId))
-            {
-                lastPlayedAt[entry.DialogueLineId] = entry.PlayedAt;
-            }
-        }
-
-        var unused = lines.Where(line => !lastPlayedAt.ContainsKey(line.Id)).ToArray();
+        var unused = lines
+            .Where(line => !history.TryGetLastPlayedAt(line.Id, out _))
+            .ToArray();
         if (unused.Length > 0)
         {
             return WeightedLineChoice(history.PreferSurfaceExposure(unused), random);
         }
 
-        var oldest = lines.Min(line => lastPlayedAt.GetValueOrDefault(line.Id, DateTime.MinValue));
+        var oldest = lines.Min(line =>
+            history.TryGetLastPlayedAt(line.Id, out var playedAt)
+                ? playedAt
+                : DateTime.MinValue);
         var leastRecent = lines
-            .Where(line => lastPlayedAt.GetValueOrDefault(line.Id, DateTime.MinValue) == oldest)
+            .Where(line =>
+                history.TryGetLastPlayedAt(line.Id, out var playedAt)
+                && playedAt == oldest)
             .ToArray();
         return WeightedLineChoice(history.PreferSurfaceExposure(leastRecent), random);
     }

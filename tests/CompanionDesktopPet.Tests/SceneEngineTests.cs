@@ -85,6 +85,51 @@ public sealed class SceneEngineTests
     }
 
     [Fact]
+    public void History_TryGetLastPlayedAtReturnsTheLatestRecordedPlaybackForALine()
+    {
+        var scene = SceneCatalog.PersonaScenes.First();
+        var line = scene.Lines[0];
+        var firstPlayedAt = new DateTime(2026, 7, 25, 15, 0, 0, DateTimeKind.Local);
+        var latestPlayedAt = firstPlayedAt.AddMinutes(9);
+        var history = new SceneHistory();
+        history.Record(scene, firstPlayedAt, line);
+        history.Record(scene, latestPlayedAt, line);
+
+        var found = history.TryGetLastPlayedAt(line.Id, out var playedAt);
+
+        Assert.True(found);
+        Assert.Equal(latestPlayedAt, playedAt);
+    }
+
+    [Fact]
+    public void History_TryGetLastPlayedAtRebuildsTheLineIndexWhenEntriesAreRestored()
+    {
+        var scene = SceneCatalog.PersonaScenes.First();
+        var line = scene.Lines[0];
+        var firstPlayedAt = new DateTime(2026, 7, 25, 15, 0, 0, DateTimeKind.Local);
+        var latestPlayedAt = firstPlayedAt.AddMinutes(9);
+        var history = new SceneHistory();
+        history.Record(scene, firstPlayedAt, line);
+        history.Record(scene, latestPlayedAt, line);
+
+        history.Restore(history.Entries.Reverse());
+
+        Assert.True(history.TryGetLastPlayedAt(line.Id, out var playedAt));
+        Assert.Equal(latestPlayedAt, playedAt);
+    }
+
+    [Fact]
+    public void History_TryGetLastPlayedAtReturnsFalseForAnUnseenLine()
+    {
+        var history = new SceneHistory();
+
+        var found = history.TryGetLastPlayedAt("line-never-played", out var playedAt);
+
+        Assert.False(found);
+        Assert.Equal(default, playedAt);
+    }
+
+    [Fact]
     public void History_EntriesExposeAReadOnlyFacade()
     {
         var history = new SceneHistory();

@@ -151,6 +151,18 @@ public sealed class SceneHistory
         _lastByLineId.GetValueOrDefault(line.Id) is { } previous
         && Elapsed(now, previous.PlayedAt) < line.Cooldown;
 
+    internal bool TryGetLastPlayedAt(string lineId, out DateTime playedAt)
+    {
+        if (_lastByLineId.TryGetValue(lineId, out var previous))
+        {
+            playedAt = previous.PlayedAt;
+            return true;
+        }
+
+        playedAt = default;
+        return false;
+    }
+
     public bool IsSemanticGroupCoolingDown(SceneDefinition scene, DateTime now) =>
         _lastBySemanticGroup.GetValueOrDefault(scene.SemanticGroup) is { } previous
         && Elapsed(now, previous.PlayedAt) < scene.SemanticCooldown;
