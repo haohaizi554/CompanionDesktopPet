@@ -304,6 +304,7 @@ class PersonaContractFileTests(unittest.TestCase):
     def test_lexical_exposure_contract_is_single_source_and_identity_safe(self) -> None:
         contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
         seasoning = contract["lexical_exposure"]["seasoning"]
+        privacy = contract["privacy"]
 
         self.assertEqual([0.03, 0.06], seasoning["playback_acceptance"])
         self.assertEqual(20, seasoning["recent_window"])
@@ -316,13 +317,12 @@ class PersonaContractFileTests(unittest.TestCase):
             {"policy": "observation_only"},
             seasoning["inventory_profiles"]["expanded_runtime"],
         )
-        self.assertEqual(
-            ["玥玥", "小玥", "雷琳玥"], seasoning["identity_markers_excluded"]
-        )
+        self.assertEqual(["雷琳玥", "小玥", "玥玥"], privacy["pii_markers"])
+        self.assertNotIn("identity_markers_excluded", seasoning)
         markers = set(seasoning["substring_markers"]) | set(
             seasoning["token_patterns"]
         )
-        self.assertTrue(set(seasoning["identity_markers_excluded"]).isdisjoint(markers))
+        self.assertTrue(set(privacy["pii_markers"]).isdisjoint(markers))
 
     def test_csharp_contract_is_generated_and_current(self) -> None:
         generator = ROOT / "tools/generate_persona_contract_cs.py"

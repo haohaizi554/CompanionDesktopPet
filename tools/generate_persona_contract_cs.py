@@ -101,6 +101,9 @@ def render_contract() -> str:
         "            " + f"[{_quoted(str(marker))}] = {_quoted(str(pattern))}"
         for marker, pattern in token_patterns.items()
     )
+    # The generated member is a set. Preserve its existing display order while
+    # deriving it from the sole privacy-marker source instead of a second list.
+    seasoning_excluded_identity_markers = tuple(reversed(PERSONA_CONTRACT.pii_markers))
     identity_rules = ",\n".join(
         "            "
         f"[{_quoted(item.line_id)}] = new({_quoted(item.source_reference)}, "
@@ -223,7 +226,7 @@ internal static class PersonaContractGenerated
     public static IReadOnlySet<string> SeasoningExcludedIdentityMarkers {{ get; }} =
         new HashSet<string>(StringComparer.Ordinal)
         {{
-{_set_lines(seasoning['identity_markers_excluded'])}
+{_set_lines(seasoning_excluded_identity_markers)}
         }};
 
     public static bool ContainsSeasoningMarker(string text)

@@ -126,6 +126,13 @@
       "story_timer"
     ]
   },
+  "privacy": {
+    "pii_markers": [
+      "雷琳玥",
+      "小玥",
+      "玥玥"
+    ]
+  },
   "scheduler": {
     "category_group_weights": {
       "technical": 0.18,
@@ -252,11 +259,6 @@
         "666": "(?<![\\w.])666(?![\\w.])",
         "NB": "(?<!\\w)NB(?!\\w)"
       },
-      "identity_markers_excluded": [
-        "玥玥",
-        "小玥",
-        "雷琳玥"
-      ],
       "inventory_profiles": {
         "curated_core": {
           "policy": "maximum",

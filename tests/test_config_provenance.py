@@ -89,8 +89,15 @@ class ConfigSchemaContractTests(unittest.TestCase):
         invalid_dawn["temporal"]["context_token_hours"]["time:dawn"] = [[6, 4]]
         missing_trigger = deepcopy(config)
         del missing_trigger["temporal"]["context_token_trigger"]["time:dawn"]
+        empty_pii_markers = deepcopy(config)
+        empty_pii_markers["privacy"]["pii_markers"] = []
 
-        for invalid in (missing_daypart, invalid_dawn, missing_trigger):
+        for invalid in (
+            missing_daypart,
+            invalid_dawn,
+            missing_trigger,
+            empty_pii_markers,
+        ):
             with self.subTest(invalid=invalid["temporal"]):
                 with self.assertRaises(ValidationError):
                     validator.validate(invalid)

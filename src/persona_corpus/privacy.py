@@ -10,12 +10,12 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from .contract import PERSONA_CONTRACT
 
-PII_MARKERS = (
-    "雷琳玥",
-    "小玥",
-    "玥玥",
-)
+
+# Compatibility export for existing consumers. The canonical, immutable source
+# is the shared contract; privacy classification must not maintain a copy.
+PII_MARKERS = PERSONA_CONTRACT.pii_markers
 PII_PATTERNS = (
     re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)"),
     re.compile(r"(?<!\d)\d{17}[\dXx](?!\d)"),

@@ -5,7 +5,7 @@
   "type": "object",
   "required": [
     "$schema", "schema_version", "inventory", "release_inventory",
-    "category_groups", "categories", "controlled_values", "scheduler",
+    "category_groups", "categories", "controlled_values", "privacy", "scheduler",
     "dry_sharp", "lexical_exposure", "temporal", "lineage"
   ],
   "properties": {
@@ -39,6 +39,7 @@
     },
     "categories": { "$ref": "#/$defs/categories" },
     "controlled_values": { "$ref": "#/$defs/controlledValues" },
+    "privacy": { "$ref": "#/$defs/privacy" },
     "scheduler": { "$ref": "#/$defs/scheduler" },
     "dry_sharp": { "$ref": "#/$defs/drySharp" },
     "lexical_exposure": { "$ref": "#/$defs/lexicalExposure" },
@@ -297,6 +298,19 @@
       },
       "additionalProperties": false
     },
+    "privacy": {
+      "type": "object",
+      "required": ["pii_markers"],
+      "properties": {
+        "pii_markers": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "minItems": 1,
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
     "drySharp": {
       "type": "object",
       "required": [
@@ -340,7 +354,7 @@
           "type": "object",
           "required": [
             "normalization", "substring_markers", "token_patterns",
-            "identity_markers_excluded", "inventory_profiles", "playback_acceptance",
+            "inventory_profiles", "playback_acceptance",
             "recent_window", "recent_max"
           ],
           "properties": {
@@ -358,10 +372,6 @@
                 "NB": { "type": "string", "minLength": 1 }
               },
               "additionalProperties": false
-            },
-            "identity_markers_excluded": {
-              "type": "array", "items": { "type": "string", "minLength": 1 },
-              "uniqueItems": true
             },
             "inventory_profiles": {
               "type": "object",

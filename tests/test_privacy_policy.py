@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import ast
+import json
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -9,6 +11,51 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class PrivacyPolicyContractTests(unittest.TestCase):
+    def test_known_identity_markers_are_the_immutable_contract_source(self) -> None:
+        """Changing the contract marker set must change every privacy consumer together."""
+        from src.persona_corpus.contract import PERSONA_CONTRACT
+        from src.persona_corpus.privacy import PII_MARKERS, classify_pii
+
+        expected_markers = (
+            "\u96f7\u7433\u73a5",
+            "\u5c0f\u73a5",
+            "\u73a5\u73a5",
+        )
+        self.assertEqual(expected_markers, PERSONA_CONTRACT.pii_markers)
+        self.assertIs(PII_MARKERS, PERSONA_CONTRACT.pii_markers)
+        self.assertEqual(
+            [
+                ("known_identity", marker)
+                for marker in expected_markers
+            ],
+            [
+                (finding.kind, finding.evidence)
+                for marker in expected_markers
+                for finding in classify_pii(marker)
+            ],
+        )
+        with self.assertRaises(TypeError):
+            PERSONA_CONTRACT.pii_markers[0] = "changed"  # type: ignore[index]
+
+    def test_contract_loader_rejects_an_empty_identity_marker_set(self) -> None:
+        from src.persona_corpus.contract import (
+            DEFAULT_CONTRACT_PATH,
+            PersonaContractError,
+            load_persona_contract,
+        )
+
+        payload = json.loads(DEFAULT_CONTRACT_PATH.read_text(encoding="utf-8"))
+        payload["privacy"] = {"pii_markers": []}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "persona-contract.json"
+            path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+            with self.assertRaisesRegex(
+                PersonaContractError,
+                r"privacy\.pii_markers must be a non-empty unique string array",
+            ):
+                load_persona_contract(path)
+
     def test_direct_identifiers_have_the_same_findings_at_every_stage(self) -> None:
         from src.persona_corpus.privacy import (
             ENABLED_CONTENT_POLICY,

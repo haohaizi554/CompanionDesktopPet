@@ -21,6 +21,7 @@ _TOP_LEVEL_KEYS = frozenset(
         "category_groups",
         "categories",
         "controlled_values",
+        "privacy",
         "scheduler",
         "dry_sharp",
         "lexical_exposure",
@@ -129,6 +130,7 @@ class PersonaContract:
     context_tokens: frozenset[str]
     mvp_triggers: frozenset[str]
     future_triggers: frozenset[str]
+    pii_markers: tuple[str, ...]
     scheduler: Mapping[str, object]
     dry_sharp: Mapping[str, object]
     lexical_exposure: Mapping[str, object]
@@ -220,6 +222,11 @@ def load_persona_contract(path: Path = DEFAULT_CONTRACT_PATH) -> PersonaContract
     )
     if mvp_triggers & future_triggers:
         raise PersonaContractError("MVP and future trigger partitions must be disjoint")
+
+    privacy = _mapping(raw.get("privacy"), "privacy")
+    if set(privacy) != {"pii_markers"}:
+        raise PersonaContractError("privacy must contain exactly pii_markers")
+    pii_markers = _string_tuple(privacy.get("pii_markers"), "privacy.pii_markers")
 
     scheduler = _mapping(raw.get("scheduler"), "scheduler")
     if set(scheduler) != {
@@ -427,7 +434,6 @@ def load_persona_contract(path: Path = DEFAULT_CONTRACT_PATH) -> PersonaContract
         "normalization",
         "substring_markers",
         "token_patterns",
-        "identity_markers_excluded",
         "inventory_profiles",
         "playback_acceptance",
         "recent_window",
@@ -438,10 +444,6 @@ def load_persona_contract(path: Path = DEFAULT_CONTRACT_PATH) -> PersonaContract
     substring_markers = _string_tuple(
         seasoning.get("substring_markers"), "seasoning.substring_markers"
     )
-    identity_exclusions = _string_tuple(
-        seasoning.get("identity_markers_excluded"),
-        "seasoning.identity_markers_excluded",
-    )
     token_patterns = _mapping(
         seasoning.get("token_patterns"), "seasoning.token_patterns"
     )
@@ -449,7 +451,7 @@ def load_persona_contract(path: Path = DEFAULT_CONTRACT_PATH) -> PersonaContract
         seasoning.get("normalization") != "NFKC_casefold"
         or any(not isinstance(pattern, str) or not pattern for pattern in token_patterns.values())
         or set(substring_markers) & set(token_patterns)
-        or (set(substring_markers) | set(token_patterns)) & set(identity_exclusions)
+        or (set(substring_markers) | set(token_patterns)) & set(pii_markers)
     ):
         raise PersonaContractError("lexical seasoning marker policy is invalid")
     try:
@@ -557,6 +559,7 @@ def load_persona_contract(path: Path = DEFAULT_CONTRACT_PATH) -> PersonaContract
         context_tokens=context_tokens,
         mvp_triggers=mvp_triggers,
         future_triggers=future_triggers,
+        pii_markers=pii_markers,
         scheduler=frozen_raw["scheduler"],
         dry_sharp=frozen_raw["dry_sharp"],
         lexical_exposure=frozen_raw["lexical_exposure"],
