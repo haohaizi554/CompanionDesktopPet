@@ -58,10 +58,6 @@ public sealed class OfflineCompanionAgent : ICompanionDialogueAgent
 
     public IReadOnlyList<string> RecentLines => _recentLines.ToArray();
 
-    public CharacterState? State => _state;
-
-    public SceneHistory History => _history;
-
     public DateTime? NextStoryDueAt => _state?.ActiveStories.Count > 0
         ? _state.ActiveStories.Min(story => story.DueAt)
         : null;

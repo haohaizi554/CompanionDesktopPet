@@ -1,12 +1,23 @@
 using CompanionDesktopPet.Services;
 using System.Diagnostics;
 using System.IO;
+using System.Reflection;
 
 namespace CompanionDesktopPet.Tests;
 
 [Collection(PerformanceTestCollection.Name)]
 public sealed class OfflineCompanionAgentTests
 {
+    [Theory]
+    [InlineData("State")]
+    [InlineData("History")]
+    public void LiveMutableStateAndHistory_AreNotExposedByTheAgent(string propertyName)
+    {
+        Assert.Null(typeof(OfflineCompanionAgent).GetProperty(
+            propertyName,
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic));
+    }
+
     [Fact]
     public void CreateSnapshot_ReturnsDetachedCharacterStateAndStoryCollection()
     {
@@ -16,15 +27,21 @@ public sealed class OfflineCompanionAgentTests
         var first = agent.CreateSnapshot();
         var expectedEnergy = first.State.Energy;
         var injectedStory = new StoryProgress("external-mutation", 0, now.AddHours(1));
+        var firstHistory = Assert.IsType<SceneHistoryEntry[]>(first.History);
+        var expectedHistoryEntry = Assert.Single(firstHistory);
 
         first.State.Energy = 0;
         first.State.ActiveStories.Add(injectedStory);
+        firstHistory[0] = expectedHistoryEntry with { SceneId = "external-mutation" };
         var second = agent.CreateSnapshot();
+        var secondHistory = Assert.IsType<SceneHistoryEntry[]>(second.History);
 
         Assert.NotSame(first.State, second.State);
         Assert.NotSame(first.State.ActiveStories, second.State.ActiveStories);
+        Assert.NotSame(firstHistory, secondHistory);
         Assert.Equal(expectedEnergy, second.State.Energy);
         Assert.DoesNotContain(injectedStory, second.State.ActiveStories);
+        Assert.Equal(expectedHistoryEntry, Assert.Single(secondHistory));
     }
 
     [Fact]
@@ -181,7 +198,7 @@ public sealed class OfflineCompanionAgentTests
                 }
             }
 
-            var seedPlayback = agent.History.Entries.ToArray();
+            var seedPlayback = agent.CreateSnapshot().History.ToArray();
             Assert.Equal(days * publicationHours.Length, seedPlayback.Length);
             AssertEasterEggRecentQuota(seedPlayback, seed);
             var seedEasterEggRatio = seedPlayback.Count(entry =>
@@ -221,7 +238,7 @@ public sealed class OfflineCompanionAgentTests
             agent.Respond(CompanionEvent.Automatic, start.AddHours(turn * 8), random);
         }
 
-        var entries = agent.History.Entries;
+        var entries = agent.CreateSnapshot().History;
         var blocked = DialogueForest.BlockAdjacentCategoryGroups;
         for (var index = 1; index < entries.Count; index++)
         {
@@ -267,7 +284,7 @@ public sealed class OfflineCompanionAgentTests
         Assert.True(reply.ShouldDisplayText);
 
         var restored = new OfflineCompanionAgent(agent.CreateSnapshot());
-        var entry = Assert.Single(restored.History.Entries);
+        var entry = Assert.Single(restored.CreateSnapshot().History);
         Assert.Equal(reply.SourceLine!.Id, entry.DialogueLineId);
         Assert.Equal(reply.SourceLine.CategoryGroup, entry.CategoryGroup);
         Assert.Equal(reply.SourceLine.OutputMode, entry.OutputMode);
@@ -300,7 +317,7 @@ public sealed class OfflineCompanionAgentTests
         var reply = agent.Respond(CompanionEvent.StoryTimerDue, now, new Random(1));
 
         Assert.False(reply.ShouldDisplayText);
-        Assert.True(Assert.Single(agent.State!.ActiveStories).DueAt > now);
+        Assert.True(Assert.Single(agent.CreateSnapshot().State.ActiveStories).DueAt > now);
     }
 
     [Fact]
@@ -321,7 +338,7 @@ public sealed class OfflineCompanionAgentTests
             var click = agent.Respond(CompanionEvent.Click, now.AddSeconds(1), random);
             Assert.True(
                 click.ShouldDisplayText,
-                $"Click became silent at minute {minute}; history={agent.History.Entries.Count}, scene={click.SceneId}.");
+                $"Click became silent at minute {minute}; scene={click.SceneId}.");
         }
     }
 
@@ -337,23 +354,29 @@ public sealed class OfflineCompanionAgentTests
         var start = new DateTime(2026, 7, 24, 9, 0, 0, DateTimeKind.Local);
         string? previousLineId = null;
         var usedDeepFallback = false;
-        var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        // CreateSnapshot deliberately copies the whole history. Keep a test-only
+        // mirror from the actual replies so those observer allocations do not
+        // pollute the measured Respond hot path.
+        var observedHistory = new SceneHistory();
+        long allocatedBytes = 0;
         var stopwatch = Stopwatch.StartNew();
         var clickLatencies = new double[900];
 
         for (var clickIndex = 0; clickIndex < 900; clickIndex++)
         {
             var now = start.AddSeconds(clickIndex * 10);
-            var historyBefore = agent.History.Entries.ToArray();
+            var historyBefore = observedHistory.Entries;
+            var allocatedBeforeClick = GC.GetAllocatedBytesForCurrentThread();
             var clickStarted = Stopwatch.GetTimestamp();
             var click = agent.Respond(
                 CompanionEvent.Click,
                 now,
                 random);
             clickLatencies[clickIndex] = Stopwatch.GetElapsedTime(clickStarted).TotalMilliseconds;
+            allocatedBytes += GC.GetAllocatedBytesForCurrentThread() - allocatedBeforeClick;
             Assert.True(
                 click.ShouldDisplayText,
-                $"Click became silent at index {clickIndex}; history={agent.History.Entries.Count}, scene={click.SceneId}.");
+                $"Click became silent at index {clickIndex}; history={historyBefore.Count}, scene={click.SceneId}.");
             Assert.NotNull(click.SourceLine);
             Assert.True(click.SourceLine!.Enabled);
             Assert.NotEqual("intentional_silence", click.SceneId);
@@ -381,17 +404,17 @@ public sealed class OfflineCompanionAgentTests
                                 || lineWasCoolingDown
                                 || dailyCount >= click.SourceLine.MaxPerDay;
             previousLineId = click.SourceLine.Id;
+            observedHistory.Record(scene, now, click.SourceLine);
         }
 
         stopwatch.Stop();
-        var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
         var orderedLatencies = clickLatencies.Order().ToArray();
         var meanLatency = clickLatencies.Average();
         var p95Latency = orderedLatencies[(int)Math.Ceiling(orderedLatencies.Length * 0.95) - 1];
         var p99Latency = orderedLatencies[(int)Math.Ceiling(orderedLatencies.Length * 0.99) - 1];
         var coldLatency = clickLatencies[0];
         var warmMaximumLatency = clickLatencies.Skip(1).Max();
-        var playback = agent.History.Entries.ToArray();
+        var playback = observedHistory.Entries.ToArray();
         var seasoningRatio = playback.Count(entry => entry.WasSeasoning is true) / (double)playback.Length;
         var drySharpRatio = playback.Count(entry => entry.WasDrySharp) / (double)playback.Length;
         var openingRepeatRatio = RecentSurfaceRepeatRatio(playback, entry => entry.SurfaceOpening);
@@ -400,7 +423,7 @@ public sealed class OfflineCompanionAgentTests
         Console.WriteLine(
             $"900 clicks: mean={meanLatency:F3}ms p95={p95Latency:F3}ms "
             + $"p99={p99Latency:F3}ms cold={coldLatency:F3}ms warm_max={warmMaximumLatency:F3}ms "
-            + $"allocated={allocatedBytes:N0} elapsed={stopwatch.Elapsed} "
+            + $"agent_allocated={allocatedBytes:N0} elapsed={stopwatch.Elapsed} "
             + $"seasoning={seasoningRatio:P2} dry_sharp={drySharpRatio:P2} "
             + $"recent20_opening_repeat={openingRepeatRatio:P2} "
             + $"ending_repeat={endingRepeatRatio:P2} template_repeat={templateRepeatRatio:P2}");
@@ -546,7 +569,7 @@ public sealed class OfflineCompanionAgentTests
         {
             var now = start.AddSeconds(clickIndex * 10);
             var historyBefore = new SceneHistory();
-            historyBefore.Restore(original.History.Entries);
+            historyBefore.Restore(original.CreateSnapshot().History);
             var reply = original.Respond(CompanionEvent.Click, now, random);
 
             Assert.True(reply.ShouldDisplayText);
@@ -582,9 +605,10 @@ public sealed class OfflineCompanionAgentTests
                 Assert.True(reply.ShouldDisplayText);
                 Assert.NotNull(reply.SourceLine);
                 Assert.True(reply.SourceLine!.Enabled);
-                Assert.Equal(130 + clickIndex, restored.History.Entries.Count);
-                Assert.Equal(reply.SourceLine.Id, restored.History.Entries[^1].DialogueLineId);
-                Assert.Equal(reply.SceneId, restored.History.Entries[^1].SceneId);
+                var restoredSnapshot = restored.CreateSnapshot();
+                Assert.Equal(130 + clickIndex, restoredSnapshot.History.Count);
+                Assert.Equal(reply.SourceLine.Id, restoredSnapshot.History[^1].DialogueLineId);
+                Assert.Equal(reply.SceneId, restoredSnapshot.History[^1].SceneId);
             }
         }
         finally

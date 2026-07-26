@@ -246,7 +246,7 @@ public sealed class AgentMemoryServiceTests : IDisposable
 
         Assert.Equal(original.TurnCount, restored.TurnCount);
         Assert.Equal(original.RecentLines, restored.RecentLines);
-        Assert.Equal(original.History.Entries.Count, restored.History.Entries.Count);
+        Assert.Equal(snapshot.History.Count, restored.CreateSnapshot().History.Count);
     }
 
     [Fact]
