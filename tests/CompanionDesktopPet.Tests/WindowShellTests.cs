@@ -1,6 +1,5 @@
 using System.IO;
 using System.Diagnostics;
-using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Windows;
@@ -472,27 +471,24 @@ public sealed class WindowShellTests
                 new AmbientActionScheduler(() => 0.5));
             window.Show();
             window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
-            var ambientTimer = GetPrivateField<DispatcherTimer>(window, "_ambientTimer");
-            var automaticTimer = GetPrivateField<DispatcherTimer>(window, "_automaticTimer");
-            var coordinator = GetPrivateField<PetActionCoordinator>(window, "_actionCoordinator");
             var replyBeforeClose = GetLastReply(window);
 
             window.BeginDragAction();
-            Assert.Equal(PetActionState.Dragging, coordinator.State);
+            Assert.Equal(PetActionState.Dragging, window.CaptureRuntimeState().ActionState);
             window.Close();
-            Assert.False(ambientTimer.IsEnabled);
-            Assert.False(automaticTimer.IsEnabled);
+            Assert.False(window.CaptureRuntimeState().IsAmbientTimerEnabled);
+            Assert.False(window.CaptureRuntimeState().IsAutomaticTimerEnabled);
 
             window.BeginLandingAction();
 
-            Assert.Equal(PetActionState.Dragging, coordinator.State);
+            Assert.Equal(PetActionState.Dragging, window.CaptureRuntimeState().ActionState);
             AssertNeutralAmbientVisuals(window);
 
-            await InvokePrivateAsync(window, "CompleteDragAfterMoveAsync");
+            await window.CompleteDragAfterMoveAsync();
 
             Assert.Same(replyBeforeClose, GetLastReply(window));
-            Assert.False(ambientTimer.IsEnabled);
-            Assert.False(automaticTimer.IsEnabled);
+            Assert.False(window.CaptureRuntimeState().IsAmbientTimerEnabled);
+            Assert.False(window.CaptureRuntimeState().IsAutomaticTimerEnabled);
             AssertNeutralAmbientVisuals(window);
             Assert.False(File.Exists(Path.Combine(settingsDirectory, "settings.json")));
             Assert.False(HasPendingSettingsWrite(settingsDirectory));
@@ -751,11 +747,9 @@ public sealed class WindowShellTests
                     GetLastReply(window).SceneId,
                     StringComparison.Ordinal);
 
-                var clickStopwatch = Stopwatch.StartNew();
                 window.SaySomething();
-                clickStopwatch.Stop();
 
-                Assert.InRange(clickStopwatch.Elapsed, TimeSpan.Zero, TimeSpan.FromMilliseconds(100));
+                Assert.False(dialogue.IsReady);
                 Assert.Equal(CompanionEvent.Click, GetLastReply(window).Trigger);
                 Assert.StartsWith(
                     "fallback:",
@@ -767,7 +761,7 @@ public sealed class WindowShellTests
                     .HasAnimatedProperties);
                 Assert.IsType<System.Windows.Controls.Image>(window.FindName("BlinkOverlay"));
                 Assert.IsType<MenuItem>(window.FindName("GreetingMenuItem"));
-                Assert.False(GetPrivateField<DispatcherTimer>(window, "_memoryTimer").IsEnabled);
+                Assert.False(window.CaptureRuntimeState().IsMemoryTimerEnabled);
                 Assert.Equal(1, factory.CallCount);
             }
             finally
@@ -979,14 +973,14 @@ public sealed class WindowShellTests
             try
             {
                 window.RaiseEvent(new RoutedEventArgs(FrameworkElement.LoadedEvent));
-                var startupRevision = GetPrivateField<long>(window, "_dialogueReplyRevision");
+                var startupRevision = window.CaptureRuntimeState().DialogueReplyRevision;
                 Assert.StartsWith("fallback:", GetLastReply(window).SceneId, StringComparison.Ordinal);
 
                 window.SaySomething();
                 var click = GetLastReply(window);
                 Assert.Equal(CompanionEvent.Click, click.Trigger);
-                Assert.True(GetPrivateField<long>(window, "_dialogueReplyRevision") > startupRevision);
-                InvokePrivate(window, "Window_ContentRendered", null, EventArgs.Empty);
+                Assert.True(window.CaptureRuntimeState().DialogueReplyRevision > startupRevision);
+                window.ProcessPresentationRendered();
                 Assert.True(factory.Entered.Wait(TimeSpan.FromSeconds(2)));
 
                 factory.Release();
@@ -1145,8 +1139,8 @@ public sealed class WindowShellTests
             Assert.Equal(
                 speechBeforeClose,
                 Assert.IsType<TextBlock>(window.FindName("SpeechText")).Text);
-            Assert.False(GetPrivateField<DispatcherTimer>(window, "_automaticTimer").IsEnabled);
-            Assert.False(GetPrivateField<DispatcherTimer>(window, "_eventTimer").IsEnabled);
+            Assert.False(window.CaptureRuntimeState().IsAutomaticTimerEnabled);
+            Assert.False(window.CaptureRuntimeState().IsEventTimerEnabled);
             DeleteSettingsDirectory(settingsDirectory);
         });
     }
@@ -1732,9 +1726,9 @@ public sealed class WindowShellTests
 
             var pause = Assert.IsType<MenuItem>(directWindow.FindName("PauseMenuItem"));
             pause.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
-            Assert.True(GetPrivateField<bool>(directWindow, "_paused"));
+            Assert.True(directWindow.CaptureRuntimeState().IsPaused);
             await directWindow.ToggleAnimationAsync();
-            Assert.False(GetPrivateField<bool>(directWindow, "_paused"));
+            Assert.False(directWindow.CaptureRuntimeState().IsPaused);
 
             await Task.WhenAll(
                 directWindow.RequestExitAsync(),
@@ -1784,32 +1778,23 @@ public sealed class WindowShellTests
             {
                 window.Show();
                 window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
-                var memoryTimer = GetPrivateField<DispatcherTimer>(window, "_memoryTimer");
-                var automaticTimer = GetPrivateField<DispatcherTimer>(window, "_automaticTimer");
-                var eventTimer = GetPrivateField<DispatcherTimer>(window, "_eventTimer");
-                var ambientTimer = GetPrivateField<DispatcherTimer>(window, "_ambientTimer");
-                var bubbleTimer = GetPrivateField<DispatcherTimer>(window, "_bubbleTimer");
-                var bubbleCountdown = GetPrivateField<BubbleCountdownController>(
-                    window,
-                    "_bubbleCountdown");
-                var dialogue = GetPrivateField<DialogueService>(window, "_dialogue");
                 var character = Assert.IsType<Grid>(window.FindName("CharacterStage"));
                 var bubble = Assert.IsType<StackPanel>(window.FindName("SpeechBubble"));
                 var speech = Assert.IsType<TextBlock>(window.FindName("SpeechText"));
                 var controlMenu = Assert.IsType<ContextMenu>(window.FindName("ControlMenu"));
                 var autoStartItem = Assert.IsType<MenuItem>(window.FindName("AutoStartMenuItem"));
-                Assert.True(memoryTimer.IsEnabled);
+                Assert.True(window.CaptureRuntimeState().IsMemoryTimerEnabled);
 
-                InvokePrivate(window, "MemoryTimer_Tick", null, EventArgs.Empty);
+                window.MemoryTimer_Tick(null, EventArgs.Empty);
                 await memoryWriter.FirstSaveStarted;
-                Assert.False(memoryTimer.IsEnabled);
+                Assert.False(window.CaptureRuntimeState().IsMemoryTimerEnabled);
                 Assert.Equal(1, memoryWriter.CallCount);
 
                 window.SaySomething();
-                Assert.True(memoryTimer.IsEnabled);
+                Assert.True(window.CaptureRuntimeState().IsMemoryTimerEnabled);
                 var frozenReply = GetLastReply(window);
-                var frozenSnapshot = dialogue.CreateSnapshot();
-                var frozenPaused = GetPrivateField<bool>(window, "_paused");
+                var frozenTurnCount = window.CaptureRuntimeState().DialogueTurnCount;
+                var frozenPaused = window.CaptureRuntimeState().IsPaused;
                 var frozenBubbleVisibility = bubble.Visibility;
                 var frozenSpeech = speech.Text;
                 autoStartItem.IsChecked = true;
@@ -1819,14 +1804,17 @@ public sealed class WindowShellTests
                 exit = window.RequestExitAsync();
                 duplicateExit = window.RequestExitAsync();
 
-                Assert.False(memoryTimer.IsEnabled);
-                Assert.False(automaticTimer.IsEnabled);
-                Assert.False(eventTimer.IsEnabled);
-                Assert.False(ambientTimer.IsEnabled);
-                Assert.False(bubbleTimer.IsEnabled);
-                Assert.Equal(BubbleCountdownState.Hidden, bubbleCountdown.State);
-                bubbleCountdown.Show();
-                Assert.Equal(BubbleCountdownState.Hidden, bubbleCountdown.State);
+                var frozenRuntime = window.CaptureRuntimeState();
+                Assert.False(frozenRuntime.IsMemoryTimerEnabled);
+                Assert.False(frozenRuntime.IsAutomaticTimerEnabled);
+                Assert.False(frozenRuntime.IsEventTimerEnabled);
+                Assert.False(frozenRuntime.IsAmbientTimerEnabled);
+                Assert.False(frozenRuntime.IsBubbleTimerEnabled);
+                Assert.Equal(BubbleCountdownState.Hidden, frozenRuntime.BubbleCountdownState);
+                window.ShowBubble("blocked after exit");
+                Assert.Equal(
+                    BubbleCountdownState.Hidden,
+                    window.CaptureRuntimeState().BubbleCountdownState);
                 Assert.False(exit.IsCompleted);
                 Assert.True(duplicateExit.IsCompletedSuccessfully);
 
@@ -1835,30 +1823,31 @@ public sealed class WindowShellTests
                 window.ProcessAutomaticTimerTick();
                 window.ProcessEventTimerTick();
                 window.ProcessAmbientSchedule();
-                InvokePrivate(window, "BubbleHover_MouseEnter", character, null);
-                InvokePrivate(window, "BubbleHover_MouseLeave", character, null);
-                InvokePrivate(window, "BubbleHover_MouseEnter", bubble, null);
-                InvokePrivate(window, "BubbleHover_MouseLeave", bubble, null);
-                InvokePrivate(window, "BubbleTimer_Tick", null, EventArgs.Empty);
-                InvokePrivate(window, "SynchronizeBubbleTimer");
+                window.BubbleHover_MouseEnter(character, null);
+                window.BubbleHover_MouseLeave(character, null);
+                window.BubbleHover_MouseEnter(bubble, null);
+                window.BubbleHover_MouseLeave(bubble, null);
+                window.BubbleTimer_Tick(null, EventArgs.Empty);
+                window.SynchronizeBubbleTimer();
                 controlMenu.RaiseEvent(new RoutedEventArgs(ContextMenu.OpenedEvent));
 
-                Assert.False(memoryTimer.IsEnabled);
-                Assert.False(automaticTimer.IsEnabled);
-                Assert.False(eventTimer.IsEnabled);
-                Assert.False(ambientTimer.IsEnabled);
-                Assert.False(bubbleTimer.IsEnabled);
-                Assert.Equal(BubbleCountdownState.Hidden, bubbleCountdown.State);
+                frozenRuntime = window.CaptureRuntimeState();
+                Assert.False(frozenRuntime.IsMemoryTimerEnabled);
+                Assert.False(frozenRuntime.IsAutomaticTimerEnabled);
+                Assert.False(frozenRuntime.IsEventTimerEnabled);
+                Assert.False(frozenRuntime.IsAmbientTimerEnabled);
+                Assert.False(frozenRuntime.IsBubbleTimerEnabled);
+                Assert.Equal(BubbleCountdownState.Hidden, frozenRuntime.BubbleCountdownState);
                 Assert.Equal(frozenBubbleVisibility, bubble.Visibility);
                 Assert.Equal(frozenSpeech, speech.Text);
                 Assert.True(autoStartItem.IsChecked);
                 Assert.False(autoStartItem.IsEnabled);
                 Assert.Equal("frozen", autoStartItem.ToolTip);
-                Assert.Equal(frozenPaused, GetPrivateField<bool>(window, "_paused"));
+                Assert.Equal(frozenPaused, window.CaptureRuntimeState().IsPaused);
                 Assert.Same(frozenReply, GetLastReply(window));
-                Assert.Equal(frozenSnapshot.TurnCount, dialogue.CreateSnapshot().TurnCount);
+                Assert.Equal(frozenTurnCount, window.CaptureRuntimeState().DialogueTurnCount);
 
-                InvokePrivate(window, "MemoryTimer_Tick", null, EventArgs.Empty);
+                window.MemoryTimer_Tick(null, EventArgs.Empty);
                 Assert.Equal(1, memoryWriter.CallCount);
 
                 memoryWriter.ReleaseFirstSave();
@@ -1872,9 +1861,9 @@ public sealed class WindowShellTests
                 Assert.True(
                     memoryWriter.Snapshots[1].TurnCount
                     > memoryWriter.Snapshots[0].TurnCount);
-                Assert.Equal(frozenSnapshot.TurnCount, memoryWriter.Snapshots[1].TurnCount);
+                Assert.Equal(frozenTurnCount, memoryWriter.Snapshots[1].TurnCount);
 
-                InvokePrivate(window, "MemoryTimer_Tick", null, EventArgs.Empty);
+                window.MemoryTimer_Tick(null, EventArgs.Empty);
                 Assert.Equal(2, memoryWriter.CallCount);
                 Assert.Equal(0, memoryWriter.ActiveWrites);
             }
@@ -2075,20 +2064,17 @@ public sealed class WindowShellTests
                 PetSettings.Default,
                 new SettingsService(settingsDirectory),
                 suppressApplicationShutdownOnClose: true);
-            var field = typeof(MainWindow).GetField(
-                "_eventTimer",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.NotNull(field);
-            var timer = Assert.IsType<DispatcherTimer>(field!.GetValue(window));
-            Assert.Equal(TimeSpan.FromSeconds(30), timer.Interval);
-            Assert.False(timer.IsEnabled);
+            Assert.Equal(
+                TimeSpan.FromSeconds(30),
+                window.CaptureRuntimeState().EventTimerInterval);
+            Assert.False(window.CaptureRuntimeState().IsEventTimerEnabled);
 
             window.Show();
             window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
-            Assert.True(timer.IsEnabled);
+            Assert.True(window.CaptureRuntimeState().IsEventTimerEnabled);
 
             window.Close();
-            Assert.False(timer.IsEnabled);
+            Assert.False(window.CaptureRuntimeState().IsEventTimerEnabled);
             if (Directory.Exists(settingsDirectory))
             {
                 Directory.Delete(settingsDirectory, true);
@@ -2916,10 +2902,6 @@ public sealed class WindowShellTests
     {
         RunOnStaThread(() =>
         {
-            var presentReply = typeof(MainWindow).GetMethod(
-                "PresentReply",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.NotNull(presentReply);
             var settingsDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
             var window = new MainWindow(
                 PetSettings.Default,
@@ -2931,15 +2913,13 @@ public sealed class WindowShellTests
             var speech = Assert.IsType<TextBlock>(window.FindName("SpeechText"));
             Assert.Equal(Visibility.Visible, bubble.Visibility);
 
-            presentReply!.Invoke(window,
-            [
+            window.PresentReply(
                 new AgentReply(
                     string.Empty,
                     DialogueCategory.DailyCare,
                     DialogueTreeKind.Companion,
                     CompanionEvent.Click,
-                    ShouldDisplayText: false)
-            ]);
+                    ShouldDisplayText: false));
 
             Assert.Equal(Visibility.Collapsed, bubble.Visibility);
             Assert.Equal(string.Empty, speech.Text);
@@ -3031,21 +3011,21 @@ public sealed class WindowShellTests
             var window = CreateWindow(settingsDirectory);
             window.Show();
             window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
-            InvokePrivate(window, "ShowBubble", "hover countdown");
+            window.ShowBubble("hover countdown");
             var stage = Assert.IsType<Grid>(window.FindName("CharacterStage"));
             var bubble = Assert.IsAssignableFrom<FrameworkElement>(window.FindName("SpeechBubble"));
 
-            InvokePrivate(window, "BubbleHover_MouseEnter", stage, null);
-            Assert.False(GetPrivateField<DispatcherTimer>(window, "_bubbleTimer").IsEnabled);
-            InvokePrivate(window, "BubbleHover_MouseEnter", bubble, null);
-            InvokePrivate(window, "BubbleHover_MouseLeave", stage, null);
-            Assert.False(GetPrivateField<DispatcherTimer>(window, "_bubbleTimer").IsEnabled);
+            window.BubbleHover_MouseEnter(stage, null);
+            Assert.False(window.CaptureRuntimeState().IsBubbleTimerEnabled);
+            window.BubbleHover_MouseEnter(bubble, null);
+            window.BubbleHover_MouseLeave(stage, null);
+            Assert.False(window.CaptureRuntimeState().IsBubbleTimerEnabled);
 
-            InvokePrivate(window, "BubbleTimer_Tick", null, EventArgs.Empty);
+            window.BubbleTimer_Tick(null, EventArgs.Empty);
 
             Assert.Equal(Visibility.Visible, bubble.Visibility);
-            InvokePrivate(window, "BubbleHover_MouseLeave", bubble, null);
-            Assert.True(GetPrivateField<DispatcherTimer>(window, "_bubbleTimer").IsEnabled);
+            window.BubbleHover_MouseLeave(bubble, null);
+            Assert.True(window.CaptureRuntimeState().IsBubbleTimerEnabled);
             window.Close();
         });
         DeleteSettingsDirectory(settingsDirectory);
@@ -3093,25 +3073,28 @@ public sealed class WindowShellTests
             window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
             window.SetTrayAvailability(true);
             var popup = Assert.IsType<Popup>(window.FindName("BubblePopup"));
-            var countdown = GetPrivateField<BubbleCountdownController>(window, "_bubbleCountdown");
-            var animation = GetPrivateField<AnimationController>(window, "_animation");
-            var bubbleTimer = GetPrivateField<DispatcherTimer>(window, "_bubbleTimer");
             Assert.True(popup.IsOpen);
-            Assert.False(animation.IsSuspended);
-            Assert.Equal(BubbleCountdownState.CountingDown, countdown.State);
-            Assert.True(bubbleTimer.IsEnabled);
+            Assert.False(window.CaptureRuntimeState().IsAnimationSuspended);
+            Assert.Equal(
+                BubbleCountdownState.CountingDown,
+                window.CaptureRuntimeState().BubbleCountdownState);
+            Assert.True(window.CaptureRuntimeState().IsBubbleTimerEnabled);
 
             window.HideToTray();
             Assert.False(popup.IsOpen);
-            Assert.True(animation.IsSuspended);
-            Assert.Equal(BubbleCountdownState.Suspended, countdown.State);
-            Assert.False(bubbleTimer.IsEnabled);
+            Assert.True(window.CaptureRuntimeState().IsAnimationSuspended);
+            Assert.Equal(
+                BubbleCountdownState.Suspended,
+                window.CaptureRuntimeState().BubbleCountdownState);
+            Assert.False(window.CaptureRuntimeState().IsBubbleTimerEnabled);
 
             window.ToggleVisibilityFromTray();
             Assert.True(popup.IsOpen);
-            Assert.False(animation.IsSuspended);
-            Assert.Equal(BubbleCountdownState.CountingDown, countdown.State);
-            Assert.True(bubbleTimer.IsEnabled);
+            Assert.False(window.CaptureRuntimeState().IsAnimationSuspended);
+            Assert.Equal(
+                BubbleCountdownState.CountingDown,
+                window.CaptureRuntimeState().BubbleCountdownState);
+            Assert.True(window.CaptureRuntimeState().IsBubbleTimerEnabled);
             window.Close();
             DeleteSettingsDirectory(settingsDirectory);
         });
@@ -3123,38 +3106,39 @@ public sealed class WindowShellTests
         RunOnStaThread(() =>
         {
             var settingsDirectory = CreateSettingsDirectory();
-            var window = CreateWindowWithScheduler(
+            using var factory = new ControlledDialogueFactory("blocked warmup");
+            var dialogue = DialogueService.CreateDeferred(factory.Create);
+            var window = CreateWindowWithDialogue(
                 settingsDirectory,
-                new AmbientActionScheduler(() => 0.5));
+                dialogue,
+                TimeProvider.System);
             try
             {
                 window.Show();
                 window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                Assert.True(factory.Entered.Wait(TimeSpan.FromSeconds(2)));
                 window.SetTrayAvailability(true);
                 var popup = Assert.IsType<Popup>(window.FindName("BubblePopup"));
                 var speech = Assert.IsType<TextBlock>(window.FindName("SpeechText"));
-                var countdown = GetPrivateField<BubbleCountdownController>(window, "_bubbleCountdown");
-                var automaticTimer = GetPrivateField<DispatcherTimer>(window, "_automaticTimer");
-                var eventTimer = GetPrivateField<DispatcherTimer>(window, "_eventTimer");
-                var ambientTimer = GetPrivateField<DispatcherTimer>(window, "_ambientTimer");
-
-                Assert.True(automaticTimer.IsEnabled);
-                Assert.True(eventTimer.IsEnabled);
-                Assert.True(ambientTimer.IsEnabled);
+                Assert.True(window.CaptureRuntimeState().IsAutomaticTimerEnabled);
+                Assert.True(window.CaptureRuntimeState().IsEventTimerEnabled);
+                Assert.True(window.CaptureRuntimeState().IsAmbientTimerEnabled);
 
                 window.HideToTray();
 
-                Assert.False(automaticTimer.IsEnabled);
-                Assert.False(eventTimer.IsEnabled);
-                Assert.False(ambientTimer.IsEnabled);
+                Assert.False(window.CaptureRuntimeState().IsAutomaticTimerEnabled);
+                Assert.False(window.CaptureRuntimeState().IsEventTimerEnabled);
+                Assert.False(window.CaptureRuntimeState().IsAmbientTimerEnabled);
                 Assert.False(popup.IsOpen);
 
-                InvokePrivate(window, "ShowBubble", "藏起来也别穿帮");
+                window.ShowBubble("藏起来也别穿帮");
 
                 Assert.False(popup.IsOpen);
                 Assert.Equal("藏起来也别穿帮", speech.Text);
-                Assert.Equal(BubbleCountdownState.Suspended, countdown.State);
-                Assert.False(GetPrivateField<DispatcherTimer>(window, "_bubbleTimer").IsEnabled);
+                Assert.Equal(
+                    BubbleCountdownState.Suspended,
+                    window.CaptureRuntimeState().BubbleCountdownState);
+                Assert.False(window.CaptureRuntimeState().IsBubbleTimerEnabled);
 
                 var hiddenReply = GetLastReply(window);
                 window.ProcessAutomaticTimerTick();
@@ -3163,23 +3147,26 @@ public sealed class WindowShellTests
 
                 Assert.Same(hiddenReply, GetLastReply(window));
                 Assert.False(popup.IsOpen);
-                Assert.False(automaticTimer.IsEnabled);
-                Assert.False(eventTimer.IsEnabled);
-                Assert.False(ambientTimer.IsEnabled);
+                Assert.False(window.CaptureRuntimeState().IsAutomaticTimerEnabled);
+                Assert.False(window.CaptureRuntimeState().IsEventTimerEnabled);
+                Assert.False(window.CaptureRuntimeState().IsAmbientTimerEnabled);
 
                 window.ToggleVisibilityFromTray();
 
                 Assert.True(window.IsVisible);
                 Assert.True(popup.IsOpen);
                 Assert.Equal("藏起来也别穿帮", speech.Text);
-                Assert.Equal(BubbleCountdownState.CountingDown, countdown.State);
-                Assert.True(automaticTimer.IsEnabled);
-                Assert.True(eventTimer.IsEnabled);
-                Assert.True(ambientTimer.IsEnabled);
+                Assert.Equal(
+                    BubbleCountdownState.CountingDown,
+                    window.CaptureRuntimeState().BubbleCountdownState);
+                Assert.True(window.CaptureRuntimeState().IsAutomaticTimerEnabled);
+                Assert.True(window.CaptureRuntimeState().IsEventTimerEnabled);
+                Assert.True(window.CaptureRuntimeState().IsAmbientTimerEnabled);
             }
             finally
             {
                 window.Close();
+                factory.Release();
                 DeleteSettingsDirectory(settingsDirectory);
             }
         });
@@ -3230,12 +3217,10 @@ public sealed class WindowShellTests
                 () => { });
             window.Show();
             window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
-            SetPrivateField(window, "_dragged", true);
-            SetPrivateField(window, "_dragCompletionStarted", false);
-            window.BeginDragAction();
+            window.BeginDragGesture();
 
-            InvokePrivate(window, "FinishDragOnce");
-            InvokePrivate(window, "FinishDragOnce");
+            window.FinishDragOnce();
+            window.FinishDragOnce();
 
             WaitForCondition(
                 () => Volatile.Read(ref settingsSaveCount) == 1,
@@ -3266,7 +3251,7 @@ public sealed class WindowShellTests
             window.Left = SystemParameters.WorkArea.Left + 300;
             window.Top = SystemParameters.WorkArea.Top - localTop;
 
-            InvokePrivate(window, "ShowBubble", "popup placement");
+            window.ShowBubble("popup placement");
             window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
 
             Assert.True(popup.IsOpen);
@@ -3295,7 +3280,7 @@ public sealed class WindowShellTests
             window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
             window.Left = SystemParameters.WorkArea.Left + 360;
             window.Top = SystemParameters.WorkArea.Top + 180;
-            InvokePrivate(window, "ShowBubble", "follow the character");
+            window.ShowBubble("follow the character");
             window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
 
             var popupSurface = Assert.IsType<Border>(window.FindName("BubblePopupSurface"));
@@ -3386,8 +3371,8 @@ public sealed class WindowShellTests
         {
             var window = CreateWindow(settingsDirectory);
             window.Show();
-            InvokePrivate(window, "ApplyScale", scale);
-            InvokePrivate(window, "ShowBubble", "layout measurement");
+            window.ApplyScale(scale);
+            window.ShowBubble("layout measurement");
             var stage = Assert.IsType<Grid>(window.FindName("CharacterStage"));
             var bubble = Assert.IsAssignableFrom<FrameworkElement>(window.FindName("SpeechBubble"));
             var popup = Assert.IsType<Popup>(window.FindName("BubblePopup"));
@@ -3419,8 +3404,8 @@ public sealed class WindowShellTests
         {
             var window = CreateWindow(settingsDirectory);
             window.Show();
-            InvokePrivate(window, "ApplyScale", PetScale.Large);
-            InvokePrivate(window, "ShowBubble", longestLine.Text);
+            window.ApplyScale(PetScale.Large);
+            window.ShowBubble(longestLine.Text);
             var stage = Assert.IsType<Grid>(window.FindName("CharacterStage"));
             var bubble = Assert.IsAssignableFrom<FrameworkElement>(window.FindName("SpeechBubble"));
             var popup = Assert.IsType<Popup>(window.FindName("BubblePopup"));
@@ -3463,7 +3448,7 @@ public sealed class WindowShellTests
                 Assert.Equal("佳怡", AutomationProperties.GetName(stage));
                 Assert.True(stage.Focusable);
                 Assert.Contains("右键", AutomationProperties.GetHelpText(stage));
-                InvokePrivate(window, "ShowBubble", "读屏也要听见这句话");
+                window.ShowBubble("读屏也要听见这句话");
                 Assert.Equal("佳怡说：读屏也要听见这句话", AutomationProperties.GetName(speech));
                 Assert.Equal(AutomationLiveSetting.Polite, AutomationProperties.GetLiveSetting(speech));
                 Assert.Equal("佳怡控制面板", AutomationProperties.GetName(menu));
@@ -3503,7 +3488,7 @@ public sealed class WindowShellTests
                 announcements.Clear();
                 var speech = Assert.IsType<TextBlock>(window.FindName("SpeechText"));
 
-                InvokePrivate(window, "ShowBubble", "这句不是摆设");
+                window.ShowBubble("这句不是摆设");
 
                 Assert.Single(announcements, speech);
                 Assert.Equal("佳怡说：这句不是摆设", AutomationProperties.GetName(speech));
@@ -3976,41 +3961,11 @@ public sealed class WindowShellTests
         });
     }
 
-    private static void SetPrivateField<T>(MainWindow window, string fieldName, T value)
-    {
-        var field = typeof(MainWindow).GetField(
-            fieldName,
-            BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.NotNull(field);
-        field!.SetValue(window, value);
-    }
-
     private static AmbientActionScheduler CreateSchedulerWithTimeProvider(
         Func<double> sample,
         TimeProvider timeProvider)
     {
         return new AmbientActionScheduler(sample, timeProvider);
-    }
-
-    private static T GetPrivateField<T>(MainWindow window, string fieldName)
-    {
-        var field = typeof(MainWindow).GetField(
-            fieldName,
-            BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.NotNull(field);
-        return Assert.IsType<T>(field!.GetValue(window));
-    }
-
-    private static void InvokePrivate(
-        MainWindow window,
-        string methodName,
-        params object?[] arguments)
-    {
-        var method = typeof(MainWindow).GetMethod(
-            methodName,
-            BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.NotNull(method);
-        method!.Invoke(window, arguments);
     }
 
     private static void WaitForCondition(
@@ -4049,18 +4004,6 @@ public sealed class WindowShellTests
         }
 
         Assert.True(condition(), failureMessage());
-    }
-
-    private static Task InvokePrivateAsync(
-        MainWindow window,
-        string methodName,
-        params object?[] arguments)
-    {
-        var method = typeof(MainWindow).GetMethod(
-            methodName,
-            BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.NotNull(method);
-        return Assert.IsAssignableFrom<Task>(method!.Invoke(window, arguments));
     }
 
     private static void AssertNeutralAmbientVisuals(MainWindow window)

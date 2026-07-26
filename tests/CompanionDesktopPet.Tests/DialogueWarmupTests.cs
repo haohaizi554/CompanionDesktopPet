@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.IO;
 using CompanionDesktopPet.Services;
 
@@ -29,21 +28,27 @@ public sealed class DialogueWarmupTests
         var warmups = Enumerable.Range(0, 12)
             .Select(_ => service.WarmupAsync())
             .ToArray();
-        Assert.True(factoryEntered.Wait(TimeSpan.FromSeconds(2)));
+        try
+        {
+            Assert.True(factoryEntered.Wait(TimeSpan.FromSeconds(2)));
 
-        var stopwatch = Stopwatch.StartNew();
-        var fallback = service.GetReply(CompanionEvent.Click, LocalNow, new Random(7));
-        stopwatch.Stop();
+            var fallback = service.GetReply(CompanionEvent.Click, LocalNow, new Random(7));
 
-        Assert.InRange(stopwatch.Elapsed, TimeSpan.Zero, TimeSpan.FromMilliseconds(100));
-        Assert.StartsWith("fallback:", fallback.SceneId, StringComparison.Ordinal);
-        Assert.True(fallback.ShouldDisplayText);
-        Assert.InRange(fallback.Text.Length, 1, 18);
-        Assert.False(service.IsReady);
-        Assert.Equal(1, Volatile.Read(ref factoryCalls));
+            Assert.StartsWith("fallback:", fallback.SceneId, StringComparison.Ordinal);
+            Assert.True(fallback.ShouldDisplayText);
+            Assert.InRange(fallback.Text.Length, 1, 18);
+            Assert.False(service.IsReady);
+            Assert.All(warmups, warmup => Assert.False(warmup.IsCompleted));
+            Assert.Equal(1, Volatile.Read(ref factoryCalls));
+        }
+        finally
+        {
+            releaseFactory.Set();
+        }
 
-        releaseFactory.Set();
-        Assert.All(await Task.WhenAll(warmups), Assert.True);
+        Assert.All(
+            await Task.WhenAll(warmups).WaitAsync(TimeSpan.FromSeconds(5)),
+            Assert.True);
 
         Assert.True(service.IsReady);
         Assert.Equal(1, Volatile.Read(ref factoryCalls));

@@ -84,6 +84,21 @@ public partial class MainWindow : Window
 
     internal AgentReply? LastReply { get; private set; }
 
+    internal MainWindowRuntimeSnapshot CaptureRuntimeState() =>
+        new(
+            _paused,
+            _memoryTimer.IsEnabled,
+            _automaticTimer.IsEnabled,
+            _eventTimer.IsEnabled,
+            _eventTimer.Interval,
+            _ambientTimer.IsEnabled,
+            _bubbleTimer.IsEnabled,
+            _bubbleCountdown.State,
+            _animation is AnimationController { IsSuspended: true },
+            _actionCoordinator.State,
+            _dialogueReplyRevision,
+            _dialogue.CreateSnapshot().TurnCount);
+
     private bool InteractionFrozen => _exitCommandRunning || _isClosed;
     private bool PresentationSuspended => InteractionFrozen || _isHiddenToTray;
 
@@ -750,9 +765,7 @@ public partial class MainWindow : Window
 
         if (!_dragged)
         {
-            _dragged = true;
-            BeginDragAction();
-            _lastDragLeft = Left;
+            BeginDragGesture();
         }
 
         var workAreas = WorkAreaService.GetWorkAreas();
@@ -770,7 +783,15 @@ public partial class MainWindow : Window
         Top = target.Y;
     }
 
-    private async Task CompleteDragAfterMoveAsync()
+    internal void BeginDragGesture()
+    {
+        _dragged = true;
+        _dragCompletionStarted = false;
+        BeginDragAction();
+        _lastDragLeft = Left;
+    }
+
+    internal async Task CompleteDragAfterMoveAsync()
     {
         if (InteractionFrozen)
         {
@@ -818,7 +839,7 @@ public partial class MainWindow : Window
     private void PetImage_LostMouseCapture(object sender, MouseEventArgs e) =>
         FinishDragOnce();
 
-    private void FinishDragOnce()
+    internal void FinishDragOnce()
     {
         if (!_dragged || _dragCompletionStarted)
         {
@@ -903,7 +924,7 @@ public partial class MainWindow : Window
         });
     }
 
-    private void ShowBubble(string text)
+    internal void ShowBubble(string text)
     {
         if (InteractionFrozen)
         {
@@ -944,7 +965,7 @@ public partial class MainWindow : Window
         ArmAutomaticTimer(localTime, fullscreen);
     }
 
-    private void BubbleHover_MouseEnter(object sender, MouseEventArgs? e)
+    internal void BubbleHover_MouseEnter(object sender, MouseEventArgs? e)
     {
         if (InteractionFrozen)
         {
@@ -957,7 +978,7 @@ public partial class MainWindow : Window
         SynchronizeBubbleTimer();
     }
 
-    private void BubbleHover_MouseLeave(object sender, MouseEventArgs? e)
+    internal void BubbleHover_MouseLeave(object sender, MouseEventArgs? e)
     {
         if (InteractionFrozen)
         {
@@ -970,7 +991,7 @@ public partial class MainWindow : Window
         SynchronizeBubbleTimer();
     }
 
-    private void BubbleTimer_Tick(object? sender, EventArgs e)
+    internal void BubbleTimer_Tick(object? sender, EventArgs e)
     {
         if (InteractionFrozen)
         {
@@ -1068,7 +1089,7 @@ public partial class MainWindow : Window
         BubblePopup.VerticalOffset = placement.Origin.Y - BubbleShadowSafety;
     }
 
-    private void SynchronizeBubbleTimer()
+    internal void SynchronizeBubbleTimer()
     {
         _bubbleTimer.Stop();
         if (PresentationSuspended)
@@ -1469,7 +1490,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private bool PresentReply(AgentReply reply)
+    internal bool PresentReply(AgentReply reply)
     {
         if (reply.ShouldDisplayText)
         {
@@ -1483,7 +1504,7 @@ public partial class MainWindow : Window
         return reply.ShouldDisplayText;
     }
 
-    private async void MemoryTimer_Tick(object? sender, EventArgs e)
+    internal async void MemoryTimer_Tick(object? sender, EventArgs e)
     {
         _memoryTimer.Stop();
         if (InteractionFrozen)
@@ -1595,7 +1616,7 @@ public partial class MainWindow : Window
         await SaveSettingsAsync(skipWhenExiting: true);
     }
 
-    private void ApplyScale(PetScale scale)
+    internal void ApplyScale(PetScale scale)
     {
         var size = scale switch
         {
@@ -2118,3 +2139,17 @@ public partial class MainWindow : Window
         Closed
     }
 }
+
+internal readonly record struct MainWindowRuntimeSnapshot(
+    bool IsPaused,
+    bool IsMemoryTimerEnabled,
+    bool IsAutomaticTimerEnabled,
+    bool IsEventTimerEnabled,
+    TimeSpan EventTimerInterval,
+    bool IsAmbientTimerEnabled,
+    bool IsBubbleTimerEnabled,
+    BubbleCountdownState BubbleCountdownState,
+    bool IsAnimationSuspended,
+    PetActionState ActionState,
+    long DialogueReplyRevision,
+    int DialogueTurnCount);
