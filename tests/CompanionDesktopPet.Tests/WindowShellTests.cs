@@ -1381,6 +1381,69 @@ public sealed class WindowShellTests
     }
 
     [Fact]
+    public void MainWindow_SystemCommands_NearDeadlineAutoStartWriteFailureRearmsFromVisibleFeedback()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var time = new ManualTimeProvider();
+            time.SetLocalNow(new DateTime(2026, 7, 26, 10, 0, 0));
+            var detector = new SequenceFullscreenDetector(false, false);
+            var agent = new RecordingDialogueAgent();
+            var schedulerRandom = new EndpointRandom();
+            var autoStart = new FakeAutoStartService
+            {
+                Enabled = true,
+                SetSucceeds = false
+            };
+            var window = CreateWindowWithCadence(
+                settingsDirectory,
+                time,
+                detector,
+                agent,
+                schedulerRandom,
+                autoStart);
+            try
+            {
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                var menu = Assert.IsType<ContextMenu>(window.FindName("ControlMenu"));
+                var autoStartItem = Assert.IsType<MenuItem>(window.FindName("AutoStartMenuItem"));
+                var bubble = Assert.IsType<StackPanel>(window.FindName("SpeechBubble"));
+                var replyBeforeFailure = GetLastReply(window);
+                menu.RaiseEvent(new RoutedEventArgs(ContextMenu.OpenedEvent));
+                time.Advance(TimeSpan.FromMinutes(4) + TimeSpan.FromSeconds(59));
+                time.SetLocalNow(new DateTime(2026, 7, 26, 10, 4, 59));
+                var timeReadsBeforeFailure = time.UtcNowReadCount;
+
+                autoStartItem.IsChecked = false;
+                autoStartItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+
+                var runtime = window.CaptureAutomaticDialogueRuntime();
+                Assert.Equal([false], autoStart.WriteRequests);
+                Assert.True(autoStartItem.IsChecked);
+                Assert.Equal(Visibility.Visible, bubble.Visibility);
+                Assert.Equal(timeReadsBeforeFailure + 1, time.UtcNowReadCount);
+                Assert.Equal(2, detector.ObserveCount);
+                Assert.Equal(2, schedulerRandom.NextCount);
+                Assert.Single(agent.Calls);
+                Assert.Same(replyBeforeFailure, GetLastReply(window));
+                Assert.True(runtime.IsScheduled);
+                Assert.Equal(
+                    (TimeSpan.FromMinutes(4) + TimeSpan.FromSeconds(59)).Ticks,
+                    runtime.ArmedAtTimestamp);
+                Assert.Equal(TimeSpan.FromMinutes(5), runtime.ScheduledDelay);
+                Assert.Equal(new FullscreenSnapshot(false, false), runtime.Fullscreen);
+            }
+            finally
+            {
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
     public void MainWindow_SystemCommands_TrayAutoStartUsesTheSuccessfulReadAsRollbackState()
     {
         RunOnStaThread(() =>
@@ -1435,6 +1498,61 @@ public sealed class WindowShellTests
                 Assert.Empty(autoStart.WriteRequests);
                 Assert.Same(replyBeforeFailure, GetLastReply(window));
                 Assert.Equal("Windows 暂时不允许读取开机启动设置。", speech.Text);
+            }
+            finally
+            {
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
+    public void MainWindow_SystemCommands_NearDeadlineTrayAutoStartReadFailureRearmsFromVisibleFeedback()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var time = new ManualTimeProvider();
+            time.SetLocalNow(new DateTime(2026, 7, 26, 10, 0, 0));
+            var detector = new SequenceFullscreenDetector(false, false);
+            var agent = new RecordingDialogueAgent();
+            var schedulerRandom = new EndpointRandom();
+            var autoStart = new FakeAutoStartService { ReadSucceeds = false };
+            var window = CreateWindowWithCadence(
+                settingsDirectory,
+                time,
+                detector,
+                agent,
+                schedulerRandom,
+                autoStart);
+            try
+            {
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                var bubble = Assert.IsType<StackPanel>(window.FindName("SpeechBubble"));
+                var replyBeforeFailure = GetLastReply(window);
+                time.Advance(TimeSpan.FromMinutes(4) + TimeSpan.FromSeconds(59));
+                time.SetLocalNow(new DateTime(2026, 7, 26, 10, 4, 59));
+                var timeReadsBeforeFailure = time.UtcNowReadCount;
+
+                window.ToggleAutoStartFromTray();
+
+                var runtime = window.CaptureAutomaticDialogueRuntime();
+                Assert.Equal(1, autoStart.ReadCount);
+                Assert.Empty(autoStart.WriteRequests);
+                Assert.Equal(Visibility.Visible, bubble.Visibility);
+                Assert.Equal(timeReadsBeforeFailure + 1, time.UtcNowReadCount);
+                Assert.Equal(2, detector.ObserveCount);
+                Assert.Equal(2, schedulerRandom.NextCount);
+                Assert.Single(agent.Calls);
+                Assert.Same(replyBeforeFailure, GetLastReply(window));
+                Assert.True(runtime.IsScheduled);
+                Assert.Equal(
+                    (TimeSpan.FromMinutes(4) + TimeSpan.FromSeconds(59)).Ticks,
+                    runtime.ArmedAtTimestamp);
+                Assert.Equal(TimeSpan.FromMinutes(5), runtime.ScheduledDelay);
+                Assert.Equal(new FullscreenSnapshot(false, false), runtime.Fullscreen);
             }
             finally
             {
@@ -1974,6 +2092,94 @@ public sealed class WindowShellTests
             if (Directory.Exists(settingsDirectory))
             {
                 Directory.Delete(settingsDirectory, true);
+            }
+        });
+    }
+
+    [Fact]
+    public async Task MainWindow_SystemCommands_TrayHiddenPauseAndResumeAvoidDialogueCadenceSideEffects()
+    {
+        await RunOnStaThreadAsync(async () =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var time = new ManualTimeProvider();
+            time.SetLocalNow(new DateTime(2026, 7, 26, 10, 0, 0));
+            var detector = new SequenceFullscreenDetector(false, false, false);
+            var dialogue = new DialogueService();
+            var animations = new ControlledAnimationController();
+            var savedSettings = new List<PetSettings>();
+            var window = new MainWindow(new MainWindowDependencies(
+                PetSettings.Default,
+                new SettingsService(settingsDirectory))
+            {
+                SuppressApplicationShutdownOnClose = true,
+                AmbientScheduler = new AmbientActionScheduler(() => 0.5),
+                AutoStartService = DisabledAutoStartService.Instance,
+                DialogueService = dialogue,
+                TimeProvider = time,
+                ForegroundFullscreenDetector = detector,
+                DialogueScheduler = new DialogueScheduler(new EndpointRandom()),
+                AnimationController = animations,
+                SaveSettingsAsync = settings =>
+                {
+                    savedSettings.Add(settings);
+                    return Task.CompletedTask;
+                }
+            });
+            using var sourceIcon = new DrawingIcon(
+                Path.Combine(AppContext.BaseDirectory, "Assets", "pet.ico"));
+            var tray = new TrayIconService(
+                window.Dispatcher,
+                sourceIcon,
+                window.GetTrayMenuState,
+                window.ToggleVisibilityFromTray,
+                window.SaySomething,
+                window.ToggleAnimationAsync,
+                window.ToggleAutoStartFromTray,
+                window.RequestExitAsync,
+                publishIcon: false);
+            try
+            {
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                var replyBeforeHide = GetLastReply(window);
+                var memoryBeforeHide = dialogue.CreateSnapshot();
+                window.SetTrayAvailability(true);
+                window.HideToTray();
+
+                tray.PauseMenuItem.PerformClick();
+                WaitForCondition(
+                    () => savedSettings.Count == 1,
+                    TimeSpan.FromSeconds(5),
+                    () => "The hidden tray pause command did not save its setting.");
+
+                Assert.True(window.GetTrayMenuState().IsPaused);
+                Assert.True(savedSettings[0].AnimationPaused);
+                Assert.Equal(1, animations.PauseIdleCount);
+
+                tray.PauseMenuItem.PerformClick();
+                WaitForCondition(
+                    () => savedSettings.Count == 2,
+                    TimeSpan.FromSeconds(5),
+                    () => "The hidden tray resume command did not save its setting.");
+                await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+
+                var memoryAfterResume = dialogue.CreateSnapshot();
+                Assert.False(window.GetTrayMenuState().IsPaused);
+                Assert.False(savedSettings[1].AnimationPaused);
+                Assert.Equal(1, animations.ResumeIdleCount);
+                Assert.Equal(1, detector.ObserveCount);
+                Assert.Equal(memoryBeforeHide.TurnCount, memoryAfterResume.TurnCount);
+                Assert.Equal(memoryBeforeHide.History, memoryAfterResume.History);
+                Assert.Equal(memoryBeforeHide.RecentLines, memoryAfterResume.RecentLines);
+                Assert.Same(replyBeforeHide, GetLastReply(window));
+                Assert.False(window.CaptureAutomaticDialogueRuntime().IsScheduled);
+            }
+            finally
+            {
+                tray.Dispose();
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
             }
         });
     }
@@ -3751,7 +3957,8 @@ public sealed class WindowShellTests
         TimeProvider timeProvider,
         IForegroundFullscreenDetector fullscreenDetector,
         RecordingDialogueAgent agent,
-        EndpointRandom? schedulerRandom = null)
+        EndpointRandom? schedulerRandom = null,
+        IAutoStartService? autoStartService = null)
     {
         var dialogue = DialogueService.CreateDeferred(_ => agent, timeProvider);
         Assert.True(dialogue.WarmupAsync().GetAwaiter().GetResult());
@@ -3761,7 +3968,7 @@ public sealed class WindowShellTests
         {
             SuppressApplicationShutdownOnClose = true,
             AmbientScheduler = new AmbientActionScheduler(() => 0.5),
-            AutoStartService = DisabledAutoStartService.Instance,
+            AutoStartService = autoStartService ?? DisabledAutoStartService.Instance,
             DialogueService = dialogue,
             TimeProvider = timeProvider,
             ForegroundFullscreenDetector = fullscreenDetector,
@@ -3890,6 +4097,9 @@ public sealed class WindowShellTests
     {
         private Action? _ambientCompletion;
 
+        public int PauseIdleCount { get; private set; }
+        public int ResumeIdleCount { get; private set; }
+
         public void CompleteAmbientAction()
         {
             var completion = _ambientCompletion;
@@ -3908,10 +4118,12 @@ public sealed class WindowShellTests
 
         public void PauseIdle()
         {
+            PauseIdleCount++;
         }
 
         public void ResumeIdle()
         {
+            ResumeIdleCount++;
         }
 
         public void PlayClickReaction()
@@ -4066,7 +4278,13 @@ public sealed class WindowShellTests
 
         public override long GetTimestamp() => _timestamp;
 
-        public override DateTimeOffset GetUtcNow() => _utcNow;
+        public int UtcNowReadCount { get; private set; }
+
+        public override DateTimeOffset GetUtcNow()
+        {
+            UtcNowReadCount++;
+            return _utcNow;
+        }
 
         public void Advance(TimeSpan elapsed) => _timestamp += elapsed.Ticks;
 

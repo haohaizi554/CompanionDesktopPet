@@ -931,6 +931,19 @@ public partial class MainWindow : Window
         SynchronizeBubbleTimer();
     }
 
+    private void ShowLocalFeedbackWhenVisible(string text)
+    {
+        if (PresentationSuspended)
+        {
+            return;
+        }
+
+        var localTime = LocalNow;
+        var fullscreen = ObserveFullscreen();
+        ShowBubble(text);
+        ArmAutomaticTimer(localTime, fullscreen);
+    }
+
     private void BubbleHover_MouseEnter(object sender, MouseEventArgs? e)
     {
         if (InteractionFrozen)
@@ -1538,10 +1551,14 @@ public partial class MainWindow : Window
         }
 
         UpdatePauseLabel();
-        ShowEventBubble(
-            _paused ? CompanionEvent.AnimationPaused : CompanionEvent.AnimationResumed,
-            LocalNow,
-            ObserveFullscreen());
+        if (!PresentationSuspended)
+        {
+            ShowEventBubble(
+                _paused ? CompanionEvent.AnimationPaused : CompanionEvent.AnimationResumed,
+                LocalNow,
+                ObserveFullscreen());
+        }
+
         await SaveSettingsAsync(skipWhenExiting: true);
     }
 
@@ -1787,7 +1804,7 @@ public partial class MainWindow : Window
         if (!_autoStartService.TryGetEnabled(out var current))
         {
             MarkAutoStartUnavailable();
-            ShowBubble("Windows 暂时不允许读取开机启动设置。");
+            ShowLocalFeedbackWhenVisible("Windows 暂时不允许读取开机启动设置。");
             return;
         }
 
@@ -1947,7 +1964,7 @@ public partial class MainWindow : Window
 
         _lastKnownAutoStart = previous;
         AutoStartMenuItem.IsChecked = previous;
-        ShowBubble("开机启动没设置上，Windows 不让改。");
+        ShowLocalFeedbackWhenVisible("开机启动没设置上，Windows 不让改。");
     }
 
     private async void Exit_Click(object sender, RoutedEventArgs e)
