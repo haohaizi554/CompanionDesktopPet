@@ -214,9 +214,9 @@ public sealed partial class SceneScheduler
         IReadOnlyList<SceneDefinition> scenes,
         IEnumerable<SceneContext> contexts)
     {
-        var history = new SceneHistory();
         foreach (var context in contexts)
         {
+            var history = CoverageHistory(context);
             var contextTokens = ContextTokens(context);
             foreach (var scene in scenes)
             {
@@ -232,6 +232,22 @@ public sealed partial class SceneScheduler
                 }
             }
         }
+    }
+
+    private static SceneHistory CoverageHistory(SceneContext context)
+    {
+        var history = new SceneHistory();
+        if (context.Trigger == CompanionEvent.Automatic)
+        {
+            history.Restore([
+                new SceneHistoryEntry(
+                    "safe-feedback-coverage-pressure",
+                    "safe-feedback.coverage-pressure",
+                    context.Now.AddMinutes(-1),
+                    "safe-feedback coverage pressure")
+            ]);
+        }
+        return history;
     }
 
     private static void RequireCapacity(

@@ -123,6 +123,28 @@ public sealed class SceneCatalogSafetyTests
     }
 
     [Fact]
+    public void SafeFeedbackCoverage_LongSilenceCapacityDoesNotCoverRecentAutomaticPressure()
+    {
+        var ordinaryFirst = SceneCatalog.CreateScene(
+            "ordinary-first",
+            [SafeFeedbackLine("ordinary-first", "ordinary.first", "ordinary first")]);
+        var ordinarySecond = SceneCatalog.CreateScene(
+            "ordinary-second",
+            [SafeFeedbackLine("ordinary-second", "ordinary.second", "ordinary second")]);
+        var longSilence = SceneCatalog.CreateScene(
+            "long-silence",
+            [SafeFeedbackLine("long-silence", "long.silence", "long silence") with
+            {
+                Trigger = DialogueTrigger.LongSilence,
+                MaxPerDay = 144
+            }]);
+
+        Assert.Throws<InvalidDataException>(() =>
+            SceneScheduler.ValidateSafeFeedbackCoverage(
+                [ordinaryFirst, ordinarySecond, longSilence]));
+    }
+
+    [Fact]
     public void LoadPersonaScenes_CoverageFailureRecordsDegradedFallbackWithoutValidatingFallback()
     {
         var primary = SafeFeedbackLine("primary", "primary.group", "primary safe line");
