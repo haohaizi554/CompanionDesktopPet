@@ -54,6 +54,9 @@ public sealed partial class SceneScheduler
         };
         bool?[] observations = [null, false, true];
         var dayHours = new[] { 10, 20, 2, 5 };
+        var directTriggers = Enum.GetValues<CompanionEvent>()
+            .Where(DialogueEventPolicy.IsDirectFeedback)
+            .ToArray();
 
         foreach (var date in dates)
         {
@@ -64,29 +67,57 @@ public sealed partial class SceneScheduler
                     var now = date.AddHours(hour);
                     var context = RuntimeContext(CompanionEvent.Automatic, now, observed);
                     scheduler.RequireTwoSafeLines(scenes, context);
+                    foreach (var trigger in directTriggers)
+                    {
+                        scheduler.RequireTwoSafeLines(
+                            scenes,
+                            RuntimeContext(trigger, now, observed));
+                    }
                 }
 
-                RequireCapacity(
-                    scheduler.SafeLinesForContexts(
-                        scenes,
-                        [RuntimeContext(CompanionEvent.Automatic, date.AddHours(10), observed)]),
-                    DaytimeSafeCapacity,
-                    $"Daytime on {date:yyyy-MM-dd} with fullscreen={FormatObserved(observed)}");
-                RequireCapacity(
-                    scheduler.SafeLinesForContexts(
-                        scenes,
-                        [RuntimeContext(CompanionEvent.Automatic, date.AddHours(20), observed)]),
-                    EveningSafeCapacity,
-                    $"Evening on {date:yyyy-MM-dd} with fullscreen={FormatObserved(observed)}");
-                RequireCapacity(
-                    scheduler.SafeLinesForContexts(
-                        scenes,
-                        [
-                            RuntimeContext(CompanionEvent.Automatic, date.AddHours(2), observed),
-                            RuntimeContext(CompanionEvent.Automatic, date.AddHours(5), observed)
-                        ]),
-                    LateNightAndDawnSafeCapacity,
-                    $"LateNight+Dawn on {date:yyyy-MM-dd} with fullscreen={FormatObserved(observed)}");
+                var bands = new[]
+                {
+                    new SafeCapacityBand(
+                        "Daytime",
+                        DaytimeSafeCapacity,
+                        scheduler.SafeLinesForContexts(
+                            scenes,
+                            [RuntimeContext(CompanionEvent.Automatic, date.AddHours(10), observed)])
+                            .ToArray()),
+                    new SafeCapacityBand(
+                        "Evening",
+                        EveningSafeCapacity,
+                        scheduler.SafeLinesForContexts(
+                            scenes,
+                            [RuntimeContext(CompanionEvent.Automatic, date.AddHours(20), observed)])
+                            .ToArray()),
+                    new SafeCapacityBand(
+                        "LateNight+Dawn",
+                        LateNightAndDawnSafeCapacity,
+                        scheduler.SafeLinesForContexts(
+                            scenes,
+                            [
+                                RuntimeContext(CompanionEvent.Automatic, date.AddHours(2), observed),
+                                RuntimeContext(CompanionEvent.Automatic, date.AddHours(5), observed)
+                            ])
+                            .ToArray())
+                };
+
+                foreach (var band in bands)
+                {
+                    RequireCapacity(
+                        band.Lines,
+                        band.Required,
+                        $"{band.Name} on {date:yyyy-MM-dd} "
+                        + $"with fullscreen={FormatObserved(observed)}");
+                }
+
+                if (observed is not true)
+                {
+                    RequireSharedDailyCapacity(
+                        bands,
+                        $"{date:yyyy-MM-dd} with fullscreen={FormatObserved(observed)}");
+                }
             }
 
             RequireCapacity(
@@ -96,12 +127,6 @@ public sealed partial class SceneScheduler
                         RuntimeContext(CompanionEvent.Automatic, date.AddHours(hour), observed: true))),
                 FullscreenSafeCapacity,
                 $"Fullscreen full day on {date:yyyy-MM-dd}");
-        }
-
-        var directNow = dates[0].AddHours(10);
-        foreach (var trigger in Enum.GetValues<CompanionEvent>().Where(DialogueEventPolicy.IsDirectFeedback))
-        {
-            scheduler.RequireTwoSafeLines(scenes, RuntimeContext(trigger, directNow, observed: false));
         }
     }
 
@@ -255,15 +280,39 @@ public sealed partial class SceneScheduler
         int required,
         string scenario)
     {
-        var capacity = lines
-            .GroupBy(line => line.Id, StringComparer.Ordinal)
-            .Sum(group => group.Max(line => line.MaxPerDay));
+        var capacity = DistinctLineCapacity(lines);
         if (capacity < required)
         {
             throw new InvalidDataException(
                 $"Safe-feedback capacity for {scenario} must be at least {required}; found {capacity}.");
         }
     }
+
+    private static void RequireSharedDailyCapacity(
+        IReadOnlyList<SafeCapacityBand> bands,
+        string scenario)
+    {
+        for (var mask = 1; mask < 1 << bands.Count; mask++)
+        {
+            var selected = bands
+                .Where((_, index) => (mask & 1 << index) != 0)
+                .ToArray();
+            var required = selected.Sum(band => band.Required);
+            var capacity = DistinctLineCapacity(selected.SelectMany(band => band.Lines));
+            if (capacity < required)
+            {
+                var bandNames = string.Join(" + ", selected.Select(band => band.Name));
+                throw new InvalidDataException(
+                    $"Safe-feedback shared daily capacity for {scenario} across {bandNames} "
+                    + $"must be at least {required}; found {capacity}.");
+            }
+        }
+    }
+
+    private static int DistinctLineCapacity(IEnumerable<DialogueLine> lines) =>
+        lines
+            .GroupBy(line => line.Id, StringComparer.Ordinal)
+            .Sum(group => group.Max(line => line.MaxPerDay));
 
     private static bool IsSafeFeedbackScene(SceneDefinition scene) =>
         scene.StoryArcId is null
@@ -289,4 +338,9 @@ public sealed partial class SceneScheduler
             EffectiveFullscreen: observed is true);
 
     private static string FormatObserved(bool? observed) => observed?.ToString() ?? "unknown";
+
+    private sealed record SafeCapacityBand(
+        string Name,
+        int Required,
+        IReadOnlyList<DialogueLine> Lines);
 }

@@ -145,6 +145,72 @@ public sealed class SceneCatalogSafetyTests
     }
 
     [Fact]
+    public void SafeFeedbackCoverage_DirectFeedbackRestrictedToWeekdayMorningFailsFullRuntimeMatrix()
+    {
+        var scenes = new[]
+        {
+            SafeFeedbackScene("automatic-daytime", 2, 72, DialogueTrigger.Morning),
+            SafeFeedbackScene("automatic-evening", 2, 15, DialogueTrigger.Evening),
+            SafeFeedbackScene("automatic-late", 2, 7, DialogueTrigger.LateNight),
+            SafeFeedbackScene(
+                "direct-weekday-morning",
+                2,
+                1,
+                DialogueTrigger.Any,
+                ["day:weekday", "time:morning"])
+        };
+
+        var error = Assert.Throws<InvalidDataException>(() =>
+            SceneScheduler.ValidateSafeFeedbackCoverage(scenes));
+
+        Assert.Contains(
+            "Click at 2026-07-27 20:00 with fullscreen=unknown",
+            error.Message,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SafeFeedbackCoverage_SharedGenericCapacityCannotBeCountedForEveryDailyBand()
+    {
+        var genericCapacity = SafeFeedbackScene(
+            "generic-shared-capacity",
+            lineCount: 2,
+            maxPerDay: 72);
+
+        var error = Assert.Throws<InvalidDataException>(() =>
+            SceneScheduler.ValidateSafeFeedbackCoverage([genericCapacity]));
+
+        Assert.Contains("shared daily capacity", error.Message, StringComparison.Ordinal);
+        Assert.Contains("must be at least 174; found 144", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SafeFeedbackCoverage_DayAndEveningPairNeedsEnoughNeighborCapacity()
+    {
+        var genericCapacity = SafeFeedbackScene(
+            "pair-generic",
+            lineCount: 2,
+            maxPerDay: 15);
+        var daytimeOnlyCapacity = SafeFeedbackScene(
+            "pair-daytime",
+            lineCount: 1,
+            maxPerDay: 114,
+            DialogueTrigger.Morning);
+        var lateOnlyCapacity = SafeFeedbackScene(
+            "pair-late",
+            lineCount: 1,
+            maxPerDay: 44,
+            DialogueTrigger.LateNight);
+
+        var error = Assert.Throws<InvalidDataException>(() =>
+            SceneScheduler.ValidateSafeFeedbackCoverage(
+                [genericCapacity, daytimeOnlyCapacity, lateOnlyCapacity]));
+
+        Assert.Contains("Daytime + Evening", error.Message, StringComparison.Ordinal);
+        Assert.Contains("must be at least 174; found 144", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void LoadPersonaScenes_CoverageFailureRecordsDegradedFallbackWithoutValidatingFallback()
     {
         var primary = SafeFeedbackLine("primary", "primary.group", "primary safe line");
@@ -172,7 +238,33 @@ public sealed class SceneCatalogSafetyTests
                     && selection.Scene.OutputMode != DialogueOutputMode.UserDirect);
     }
 
-    private static DialogueLine SafeFeedbackLine(string id, string semanticGroup, string text)
+    private static SceneDefinition SafeFeedbackScene(
+        string id,
+        int lineCount,
+        int maxPerDay,
+        DialogueTrigger trigger = DialogueTrigger.Any,
+        IReadOnlyList<string>? requiredContext = null)
+    {
+        var semanticGroup = id + ".group";
+        var lines = Enumerable.Range(1, lineCount)
+            .Select(index => SafeFeedbackLine(
+                $"{id}-{index}",
+                semanticGroup,
+                $"{id} safe text {index}",
+                maxPerDay) with
+            {
+                Trigger = trigger,
+                RequiredContext = requiredContext ?? ["none"]
+            })
+            .ToArray();
+        return SceneCatalog.CreateScene(id, lines);
+    }
+
+    private static DialogueLine SafeFeedbackLine(
+        string id,
+        string semanticGroup,
+        string text,
+        int maxPerDay = 1)
     {
         var basis = PersonaCorpus.All.First(line =>
             line.Enabled
@@ -189,7 +281,7 @@ public sealed class SceneCatalogSafetyTests
             TopicId = id + ".topic",
             SemanticGroup = semanticGroup,
             Text = text,
-            MaxPerDay = 1,
+            MaxPerDay = maxPerDay,
             RequiresReply = false,
             Enabled = true
         };
