@@ -6,10 +6,38 @@ internal sealed record SafeFeedbackSelection(SceneDefinition Scene, DialogueLine
 
 public sealed partial class SceneScheduler
 {
-    private const int DaytimeSafeCapacity = 144;
-    private const int EveningSafeCapacity = 30;
-    private const int LateNightAndDawnSafeCapacity = 14;
-    private const int FullscreenSafeCapacity = 24;
+    private static readonly SafeFeedbackCoveragePeriod[] CoveragePeriods =
+    [
+        new("Dawn", 5, "time:dawn", NonFullscreenRequired: 4, FullscreenRequired: 2),
+        new("Morning", 10, "time:morning", NonFullscreenRequired: 60, FullscreenRequired: 5),
+        new("Noon", 11, "time:noon", NonFullscreenRequired: 36, FullscreenRequired: 3),
+        new("Afternoon", 14, "time:afternoon", NonFullscreenRequired: 48, FullscreenRequired: 4),
+        new("Evening", 20, "time:evening", NonFullscreenRequired: 30, FullscreenRequired: 5),
+        new("LateNight", 2, "time:late_night", NonFullscreenRequired: 10, FullscreenRequired: 5)
+    ];
+
+    private static readonly SafeFeedbackCoverageDate[] CoverageDates =
+    [
+        new(new DateTime(2200, 3, 3), "spring", IsWeekend: false, IsHoliday: false),
+        new(new DateTime(2201, 3, 7), "spring", IsWeekend: true, IsHoliday: false),
+        new(new DateTime(2026, 3, 3), "spring", IsWeekend: false, IsHoliday: true),
+        new(new DateTime(2200, 3, 8), "spring", IsWeekend: true, IsHoliday: true),
+        new(new DateTime(2200, 6, 2), "summer", IsWeekend: false, IsHoliday: false),
+        new(new DateTime(2200, 6, 7), "summer", IsWeekend: true, IsHoliday: false),
+        new(new DateTime(2026, 6, 19), "summer", IsWeekend: false, IsHoliday: true),
+        new(new DateTime(2027, 8, 8), "summer", IsWeekend: true, IsHoliday: true),
+        new(new DateTime(2200, 9, 2), "autumn", IsWeekend: false, IsHoliday: false),
+        new(new DateTime(2200, 9, 6), "autumn", IsWeekend: true, IsHoliday: false),
+        new(new DateTime(2200, 9, 10), "autumn", IsWeekend: false, IsHoliday: true),
+        new(new DateTime(2201, 10, 24), "autumn", IsWeekend: true, IsHoliday: true),
+        new(new DateTime(2200, 12, 22), "winter", IsWeekend: false, IsHoliday: false),
+        new(new DateTime(2200, 12, 20), "winter", IsWeekend: true, IsHoliday: false),
+        new(new DateTime(2026, 2, 17), "winter", IsWeekend: false, IsHoliday: true),
+        new(new DateTime(2201, 2, 14), "winter", IsWeekend: true, IsHoliday: true)
+    ];
+
+    internal static IReadOnlyList<DateTime> SafeFeedbackCoverageDates { get; } =
+        Array.AsReadOnly(CoverageDates.Select(coverage => coverage.Date).ToArray());
 
     internal SafeFeedbackSelection? SelectSafeFeedback(
         IReadOnlyList<SceneDefinition> scenes,
@@ -45,88 +73,47 @@ public sealed partial class SceneScheduler
     internal static void ValidateSafeFeedbackCoverage(IReadOnlyList<SceneDefinition> scenes)
     {
         ArgumentNullException.ThrowIfNull(scenes);
-        var scheduler = new SceneScheduler();
-        var dates = new[]
-        {
-            new DateTime(2026, 7, 27, 0, 0, 0, DateTimeKind.Local),
-            new DateTime(2026, 8, 1, 0, 0, 0, DateTimeKind.Local),
-            new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Local)
-        };
+        var coverage = SafeFeedbackCoverageIndex.Create(scenes);
         bool?[] observations = [null, false, true];
-        var dayHours = new[] { 10, 20, 2, 5 };
         var directTriggers = Enum.GetValues<CompanionEvent>()
             .Where(DialogueEventPolicy.IsDirectFeedback)
             .ToArray();
 
-        foreach (var date in dates)
+        foreach (var coverageDate in ValidatedCoverageDates())
         {
             foreach (var observed in observations)
             {
-                foreach (var hour in dayHours)
+                var bands = new List<SafeCapacityBand>(CoveragePeriods.Length);
+                foreach (var period in CoveragePeriods)
                 {
-                    var now = date.AddHours(hour);
+                    var now = coverageDate.Date.AddHours(period.Hour);
                     var context = RuntimeContext(CompanionEvent.Automatic, now, observed);
-                    scheduler.RequireTwoSafeLines(scenes, context);
+                    RequireCoveragePeriodToken(context, period);
+                    RequireTwoSafeLines(coverage, context);
                     foreach (var trigger in directTriggers)
                     {
-                        scheduler.RequireTwoSafeLines(
-                            scenes,
-                            RuntimeContext(trigger, now, observed));
+                        RequireTwoSafeLines(coverage, RuntimeContext(trigger, now, observed));
                     }
-                }
 
-                var bands = new[]
-                {
-                    new SafeCapacityBand(
-                        "Daytime",
-                        DaytimeSafeCapacity,
-                        scheduler.SafeLinesForContexts(
-                            scenes,
-                            [RuntimeContext(CompanionEvent.Automatic, date.AddHours(10), observed)])
-                            .ToArray()),
-                    new SafeCapacityBand(
-                        "Evening",
-                        EveningSafeCapacity,
-                        scheduler.SafeLinesForContexts(
-                            scenes,
-                            [RuntimeContext(CompanionEvent.Automatic, date.AddHours(20), observed)])
-                            .ToArray()),
-                    new SafeCapacityBand(
-                        "LateNight+Dawn",
-                        LateNightAndDawnSafeCapacity,
-                        scheduler.SafeLinesForContexts(
-                            scenes,
-                            [
-                                RuntimeContext(CompanionEvent.Automatic, date.AddHours(2), observed),
-                                RuntimeContext(CompanionEvent.Automatic, date.AddHours(5), observed)
-                            ])
-                            .ToArray())
-                };
+                    bands.Add(new SafeCapacityBand(
+                        period.Name,
+                        observed is true ? period.FullscreenRequired : period.NonFullscreenRequired,
+                        coverage.CandidatesFor(context)));
+                }
 
                 foreach (var band in bands)
                 {
                     RequireCapacity(
-                        band.Lines,
+                        band.Candidates,
                         band.Required,
-                        $"{band.Name} on {date:yyyy-MM-dd} "
+                        $"{band.Name} on {coverageDate.Date:yyyy-MM-dd} "
                         + $"with fullscreen={FormatObserved(observed)}");
                 }
 
-                if (observed is not true)
-                {
-                    RequireSharedDailyCapacity(
-                        bands,
-                        $"{date:yyyy-MM-dd} with fullscreen={FormatObserved(observed)}");
-                }
+                RequireSharedDailyCapacity(
+                    bands,
+                    $"{coverageDate.Date:yyyy-MM-dd} with fullscreen={FormatObserved(observed)}");
             }
-
-            RequireCapacity(
-                scheduler.SafeLinesForContexts(
-                    scenes,
-                    dayHours.Select(hour =>
-                        RuntimeContext(CompanionEvent.Automatic, date.AddHours(hour), observed: true))),
-                FullscreenSafeCapacity,
-                $"Fullscreen full day on {date:yyyy-MM-dd}");
         }
     }
 
@@ -219,43 +206,17 @@ public sealed partial class SceneScheduler
         return WeightedLineChoice(history.PreferSurfaceExposure(leastRecent), random);
     }
 
-    private void RequireTwoSafeLines(IReadOnlyList<SceneDefinition> scenes, SceneContext context)
+    private static void RequireTwoSafeLines(
+        SafeFeedbackCoverageIndex coverage,
+        SceneContext context)
     {
-        var safe = SafeLinesForContexts(scenes, [context])
-            .Select(line => line.Text)
-            .Distinct(StringComparer.Ordinal)
-            .Take(2)
-            .Count();
+        var safe = coverage.CandidatesFor(context).DistinctTextCountAtMostTwo();
         if (safe < 2)
         {
             throw new InvalidDataException(
                 $"Safe-feedback coverage requires at least two distinct lines for "
                 + $"{context.Trigger} at {context.Now:yyyy-MM-dd HH:mm} "
                 + $"with fullscreen={FormatObserved(context.IsFullscreen)}; found {safe}.");
-        }
-    }
-
-    private IEnumerable<DialogueLine> SafeLinesForContexts(
-        IReadOnlyList<SceneDefinition> scenes,
-        IEnumerable<SceneContext> contexts)
-    {
-        foreach (var context in contexts)
-        {
-            var history = CoverageHistory(context);
-            var contextTokens = ContextTokens(context);
-            foreach (var scene in scenes)
-            {
-                if (!IsSafeFeedbackScene(scene)
-                    || !TriggerAndContextMatch(scene, context, contextTokens, history))
-                {
-                    continue;
-                }
-                foreach (var line in scene.Lines.Where(line =>
-                             IsSafeFeedbackLine(scene, line) && line.MaxPerDay > 0))
-                {
-                    yield return line;
-                }
-            }
         }
     }
 
@@ -275,12 +236,49 @@ public sealed partial class SceneScheduler
         return history;
     }
 
+    private static IReadOnlyList<SafeFeedbackCoverageDate> ValidatedCoverageDates()
+    {
+        foreach (var coverage in CoverageDates)
+        {
+            var now = coverage.Date.AddHours(12);
+            var context = RuntimeContext(CompanionEvent.Automatic, now, observed: null);
+            var tokens = ContextTokens(context);
+            var actualWeekend = now.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday;
+            var actualHoliday = TemporalDialogueService.GetFestivals(now).Count > 0;
+            if (actualWeekend != coverage.IsWeekend
+                || actualHoliday != coverage.IsHoliday
+                || !tokens.Contains($"season:{coverage.Season}")
+                || !tokens.Contains(coverage.IsWeekend ? "day:weekend" : "day:weekday")
+                || coverage.IsHoliday != tokens.Contains("holiday")
+                || coverage.IsHoliday != tokens.Contains("date:holiday")
+                || tokens.Contains("date:month_boundary"))
+            {
+                throw new InvalidOperationException(
+                    $"Safe-feedback coverage date {coverage.Date:yyyy-MM-dd} no longer matches its "
+                    + $"expected season/day/holiday matrix.");
+            }
+        }
+
+        return CoverageDates;
+    }
+
+    private static void RequireCoveragePeriodToken(
+        SceneContext context,
+        SafeFeedbackCoveragePeriod period)
+    {
+        if (!ContextTokens(context).Contains(period.ContextToken))
+        {
+            throw new InvalidOperationException(
+                $"Safe-feedback coverage hour {period.Hour:00}:00 must produce {period.ContextToken}.");
+        }
+    }
+
     private static void RequireCapacity(
-        IEnumerable<DialogueLine> lines,
+        SafeFeedbackCoverageCandidates candidates,
         int required,
         string scenario)
     {
-        var capacity = DistinctLineCapacity(lines);
+        var capacity = candidates.DistinctLineCapacity();
         if (capacity < required)
         {
             throw new InvalidDataException(
@@ -298,7 +296,8 @@ public sealed partial class SceneScheduler
                 .Where((_, index) => (mask & 1 << index) != 0)
                 .ToArray();
             var required = selected.Sum(band => band.Required);
-            var capacity = DistinctLineCapacity(selected.SelectMany(band => band.Lines));
+            var capacity = SafeFeedbackCoverageCandidates.DistinctLineCapacity(
+                selected.Select(band => band.Candidates));
             if (capacity < required)
             {
                 var bandNames = string.Join(" + ", selected.Select(band => band.Name));
@@ -308,11 +307,6 @@ public sealed partial class SceneScheduler
             }
         }
     }
-
-    private static int DistinctLineCapacity(IEnumerable<DialogueLine> lines) =>
-        lines
-            .GroupBy(line => line.Id, StringComparer.Ordinal)
-            .Sum(group => group.Max(line => line.MaxPerDay));
 
     private static bool IsSafeFeedbackScene(SceneDefinition scene) =>
         scene.StoryArcId is null
@@ -342,5 +336,204 @@ public sealed partial class SceneScheduler
     private sealed record SafeCapacityBand(
         string Name,
         int Required,
-        IReadOnlyList<DialogueLine> Lines);
+        SafeFeedbackCoverageCandidates Candidates);
+
+    private sealed record SafeFeedbackCoveragePeriod(
+        string Name,
+        int Hour,
+        string ContextToken,
+        int NonFullscreenRequired,
+        int FullscreenRequired);
+
+    private sealed record SafeFeedbackCoverageDate(
+        DateTime Date,
+        string Season,
+        bool IsWeekend,
+        bool IsHoliday);
+
+    private sealed class SafeFeedbackCoverageIndex
+    {
+        private readonly IReadOnlyList<SafeFeedbackCoverageProfile> _profiles;
+        private readonly bool _lineIdsAreUnique;
+
+        private SafeFeedbackCoverageIndex(
+            IReadOnlyList<SafeFeedbackCoverageProfile> profiles,
+            bool lineIdsAreUnique)
+        {
+            _profiles = profiles;
+            _lineIdsAreUnique = lineIdsAreUnique;
+        }
+
+        public static SafeFeedbackCoverageIndex Create(IReadOnlyList<SceneDefinition> scenes)
+        {
+            var profiles = new Dictionary<SafeFeedbackCoverageProfileKey, SafeFeedbackCoverageProfileBuilder>();
+            var seenLineIds = new HashSet<string>(StringComparer.Ordinal);
+            var lineIdsAreUnique = true;
+
+            foreach (var scene in scenes)
+            {
+                if (!IsSafeFeedbackScene(scene))
+                {
+                    continue;
+                }
+
+                var lines = scene.Lines
+                    .Where(line => IsSafeFeedbackLine(scene, line) && line.MaxPerDay > 0)
+                    .ToArray();
+                if (lines.Length == 0)
+                {
+                    continue;
+                }
+
+                var key = SafeFeedbackCoverageProfileKey.Create(scene);
+                if (!profiles.TryGetValue(key, out var profile))
+                {
+                    profile = new SafeFeedbackCoverageProfileBuilder(scene);
+                    profiles.Add(key, profile);
+                }
+
+                foreach (var line in lines)
+                {
+                    lineIdsAreUnique &= seenLineIds.Add(line.Id);
+                    profile.Add(line);
+                }
+            }
+
+            return new SafeFeedbackCoverageIndex(
+                profiles.Values.Select(profile => profile.Build()).ToArray(),
+                lineIdsAreUnique);
+        }
+
+        public SafeFeedbackCoverageCandidates CandidatesFor(SceneContext context)
+        {
+            var history = CoverageHistory(context);
+            var contextTokens = ContextTokens(context);
+            var matching = _profiles
+                .Where(profile => TriggerAndContextMatch(
+                    profile.MatchScene,
+                    context,
+                    contextTokens,
+                    history))
+                .ToArray();
+            return new SafeFeedbackCoverageCandidates(matching, _lineIdsAreUnique);
+        }
+    }
+
+    private sealed class SafeFeedbackCoverageCandidates
+    {
+        private readonly IReadOnlyList<SafeFeedbackCoverageProfile> _profiles;
+        private readonly bool _lineIdsAreUnique;
+
+        public SafeFeedbackCoverageCandidates(
+            IReadOnlyList<SafeFeedbackCoverageProfile> profiles,
+            bool lineIdsAreUnique)
+        {
+            _profiles = profiles;
+            _lineIdsAreUnique = lineIdsAreUnique;
+        }
+
+        public int DistinctTextCountAtMostTwo()
+        {
+            var distinct = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var profile in _profiles)
+            {
+                foreach (var text in profile.Texts)
+                {
+                    distinct.Add(text);
+                    if (distinct.Count == 2)
+                    {
+                        return 2;
+                    }
+                }
+            }
+
+            return distinct.Count;
+        }
+
+        public int DistinctLineCapacity() =>
+            DistinctLineCapacity([this]);
+
+        public static int DistinctLineCapacity(
+            IEnumerable<SafeFeedbackCoverageCandidates> candidates)
+        {
+            var profiles = candidates
+                .SelectMany(candidate => candidate._profiles)
+                .Distinct()
+                .ToArray();
+            var lineIdsAreUnique = candidates.All(candidate => candidate._lineIdsAreUnique);
+            if (lineIdsAreUnique)
+            {
+                return profiles.Sum(profile => profile.Capacity);
+            }
+
+            var capacities = new Dictionary<string, int>(StringComparer.Ordinal);
+            foreach (var profile in profiles)
+            {
+                foreach (var (lineId, maxPerDay) in profile.LineCapacities)
+                {
+                    capacities[lineId] = Math.Max(
+                        capacities.GetValueOrDefault(lineId),
+                        maxPerDay);
+                }
+            }
+
+            return capacities.Values.Sum();
+        }
+    }
+
+    private sealed class SafeFeedbackCoverageProfileBuilder
+    {
+        private readonly SceneDefinition _matchScene;
+        private readonly HashSet<string> _texts = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, int> _lineCapacities = new(StringComparer.Ordinal);
+
+        public SafeFeedbackCoverageProfileBuilder(SceneDefinition matchScene) =>
+            _matchScene = matchScene;
+
+        public void Add(DialogueLine line)
+        {
+            _texts.Add(line.Text);
+            _lineCapacities[line.Id] = Math.Max(
+                _lineCapacities.GetValueOrDefault(line.Id),
+                line.MaxPerDay);
+        }
+
+        public SafeFeedbackCoverageProfile Build() => new(
+            _matchScene,
+            _texts.ToArray(),
+            new Dictionary<string, int>(_lineCapacities, StringComparer.Ordinal));
+    }
+
+    private sealed class SafeFeedbackCoverageProfile
+    {
+        public SafeFeedbackCoverageProfile(
+            SceneDefinition matchScene,
+            IReadOnlyList<string> texts,
+            IReadOnlyDictionary<string, int> lineCapacities)
+        {
+            MatchScene = matchScene;
+            Texts = texts;
+            LineCapacities = lineCapacities;
+            Capacity = lineCapacities.Values.Sum();
+        }
+
+        public SceneDefinition MatchScene { get; }
+
+        public IReadOnlyList<string> Texts { get; }
+
+        public IReadOnlyDictionary<string, int> LineCapacities { get; }
+
+        public int Capacity { get; }
+    }
+
+    private sealed record SafeFeedbackCoverageProfileKey(
+        DialogueTrigger DialogueTrigger,
+        string RequiredContext,
+        string EventTriggers)
+    {
+        public static SafeFeedbackCoverageProfileKey Create(SceneDefinition scene) => new(
+            scene.DialogueTrigger,
+            string.Join("\u001f", scene.RequiredContext.OrderBy(token => token, StringComparer.Ordinal)),
+            string.Join(",", scene.Triggers.OrderBy(trigger => trigger).Select(trigger => (int)trigger)));
+    }
 }

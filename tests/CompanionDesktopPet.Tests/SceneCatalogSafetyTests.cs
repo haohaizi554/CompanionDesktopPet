@@ -164,7 +164,7 @@ public sealed class SceneCatalogSafetyTests
             SceneScheduler.ValidateSafeFeedbackCoverage(scenes));
 
         Assert.Contains(
-            "Click at 2026-07-27 20:00 with fullscreen=unknown",
+            "Click at 2200-03-03 05:00 with fullscreen=unknown",
             error.Message,
             StringComparison.Ordinal);
     }
@@ -181,33 +181,184 @@ public sealed class SceneCatalogSafetyTests
             SceneScheduler.ValidateSafeFeedbackCoverage([genericCapacity]));
 
         Assert.Contains("shared daily capacity", error.Message, StringComparison.Ordinal);
-        Assert.Contains("must be at least 174; found 144", error.Message, StringComparison.Ordinal);
+        Assert.Contains("must be at least 148; found 144", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void SafeFeedbackCoverage_DayAndEveningPairNeedsEnoughNeighborCapacity()
+    public void SafeFeedbackCoverage_DuplicateLineIdsUseMaximumDailyCapacityNotSum()
+    {
+        var primary = SafeFeedbackScene(
+            "duplicate-capacity-primary",
+            lineCount: 2,
+            maxPerDay: 90);
+        var duplicate = SceneCatalog.CreateScene(
+            "duplicate-capacity-secondary",
+            primary.Lines
+                .Select(line => line with
+                {
+                    SemanticGroup = "duplicate-capacity-secondary.group",
+                    Text = "secondary " + line.Text
+                })
+                .ToArray());
+
+        var error = Assert.Throws<InvalidDataException>(() =>
+            SceneScheduler.ValidateSafeFeedbackCoverage([primary, duplicate]));
+
+        Assert.Contains("shared daily capacity", error.Message, StringComparison.Ordinal);
+        Assert.Contains("must be at least 184; found 180", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SafeFeedbackCoverage_MorningAndNoonPairNeedsEnoughSharedCapacity()
     {
         var genericCapacity = SafeFeedbackScene(
             "pair-generic",
             lineCount: 2,
-            maxPerDay: 15);
-        var daytimeOnlyCapacity = SafeFeedbackScene(
-            "pair-daytime",
-            lineCount: 1,
-            maxPerDay: 114,
-            DialogueTrigger.Morning);
+            maxPerDay: 30);
+        var dawnOnlyCapacity = SafeFeedbackScene(
+            "pair-dawn",
+            lineCount: 2,
+            maxPerDay: 2,
+            DialogueTrigger.Any,
+            ["time:dawn"]);
+        var afternoonOnlyCapacity = SafeFeedbackScene(
+            "pair-afternoon",
+            lineCount: 2,
+            maxPerDay: 24,
+            DialogueTrigger.Any,
+            ["time:afternoon"]);
+        var eveningOnlyCapacity = SafeFeedbackScene(
+            "pair-evening",
+            lineCount: 2,
+            maxPerDay: 15,
+            DialogueTrigger.Any,
+            ["time:evening"]);
         var lateOnlyCapacity = SafeFeedbackScene(
             "pair-late",
-            lineCount: 1,
-            maxPerDay: 44,
-            DialogueTrigger.LateNight);
+            lineCount: 2,
+            maxPerDay: 5,
+            DialogueTrigger.Any,
+            ["time:late_night"]);
 
         var error = Assert.Throws<InvalidDataException>(() =>
             SceneScheduler.ValidateSafeFeedbackCoverage(
-                [genericCapacity, daytimeOnlyCapacity, lateOnlyCapacity]));
+                [
+                    genericCapacity,
+                    dawnOnlyCapacity,
+                    afternoonOnlyCapacity,
+                    eveningOnlyCapacity,
+                    lateOnlyCapacity
+                ]));
 
-        Assert.Contains("Daytime + Evening", error.Message, StringComparison.Ordinal);
-        Assert.Contains("must be at least 174; found 144", error.Message, StringComparison.Ordinal);
+        Assert.Contains("Morning + Noon", error.Message, StringComparison.Ordinal);
+        Assert.Contains("must be at least 96; found 60", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SafeFeedbackCoverage_NoNoonOrAfternoonRowsFailsTheFullRuntimeMatrix()
+    {
+        var scenes = new[]
+        {
+            SafeFeedbackScene("missing-noon-afternoon-morning", 2, 72, requiredContext: ["time:morning"]),
+            SafeFeedbackScene("missing-noon-afternoon-evening", 2, 15, requiredContext: ["time:evening"]),
+            SafeFeedbackScene("missing-noon-afternoon-late", 2, 7, requiredContext: ["time:late_night"]),
+            SafeFeedbackScene("missing-noon-afternoon-dawn", 2, 7, requiredContext: ["time:dawn"])
+        };
+
+        var error = Assert.Throws<InvalidDataException>(() =>
+            SceneScheduler.ValidateSafeFeedbackCoverage(scenes));
+
+        Assert.Contains("Automatic", error.Message, StringComparison.Ordinal);
+        Assert.Contains("11:00", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SafeFeedbackCoverage_LateNightCapacityCannotBeStrandedInDawnOnlyRows()
+    {
+        var scenes = CapacityScenes(
+            morningPerLine: 72,
+            noonPerLine: 18,
+            afternoonPerLine: 24,
+            eveningPerLine: 15,
+            lateNightPerLine: 2,
+            dawnPerLine: 5);
+
+        var error = Assert.Throws<InvalidDataException>(() =>
+            SceneScheduler.ValidateSafeFeedbackCoverage(scenes));
+
+        Assert.Contains("LateNight", error.Message, StringComparison.Ordinal);
+        Assert.Contains("must be at least 10; found 4", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SafeFeedbackCoverage_DawnCapacityCannotBeStrandedInLateNightOnlyRows()
+    {
+        var scenes = CapacityScenes(
+            morningPerLine: 72,
+            noonPerLine: 18,
+            afternoonPerLine: 24,
+            eveningPerLine: 15,
+            lateNightPerLine: 6,
+            dawnPerLine: 1);
+
+        var error = Assert.Throws<InvalidDataException>(() =>
+            SceneScheduler.ValidateSafeFeedbackCoverage(scenes));
+
+        Assert.Contains("Dawn", error.Message, StringComparison.Ordinal);
+        Assert.Contains("must be at least 4; found 2", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SafeFeedbackCoverage_SpringAndWinterAbsenceFailsTheFullRuntimeMatrix()
+    {
+        var scenes = new[] { "summer", "autumn" }
+            .SelectMany(season => CapacityScenes(
+                morningPerLine: 72,
+                noonPerLine: 18,
+                afternoonPerLine: 24,
+                eveningPerLine: 15,
+                lateNightPerLine: 5,
+                dawnPerLine: 2,
+                additionalContext: ["season:" + season]))
+            .ToArray();
+
+        var error = Assert.Throws<InvalidDataException>(() =>
+            SceneScheduler.ValidateSafeFeedbackCoverage(scenes));
+
+        Assert.Contains("Automatic", error.Message, StringComparison.Ordinal);
+        Assert.Contains("2200-03", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SafeFeedbackCoverageDates_UseEveryActualCalendarContextCombination()
+    {
+        var combinations = SceneScheduler.SafeFeedbackCoverageDates
+            .Select(date =>
+            {
+                var context = new SceneContext(
+                    CompanionEvent.Automatic,
+                    date.AddHours(12),
+                    CharacterState.Create(date.AddHours(12)));
+                var tokens = SceneScheduler.ContextTokens(context);
+                var season = tokens.Single(token => token.StartsWith("season:", StringComparison.Ordinal));
+                var day = tokens.Single(token => token.StartsWith("day:", StringComparison.Ordinal));
+                var holiday = TemporalDialogueService.GetFestivals(date).Count > 0;
+                Assert.Equal(holiday, tokens.Contains("holiday"));
+                Assert.Equal(holiday, tokens.Contains("date:holiday"));
+                Assert.DoesNotContain("date:month_boundary", tokens);
+                return (season, day, holiday);
+            })
+            .ToHashSet();
+
+        Assert.Equal(16, combinations.Count);
+        foreach (var season in new[] { "season:spring", "season:summer", "season:autumn", "season:winter" })
+        {
+            foreach (var day in new[] { "day:weekday", "day:weekend" })
+            {
+                Assert.Contains((season, day, false), combinations);
+                Assert.Contains((season, day, true), combinations);
+            }
+        }
     }
 
     [Fact]
@@ -258,6 +409,33 @@ public sealed class SceneCatalogSafetyTests
             })
             .ToArray();
         return SceneCatalog.CreateScene(id, lines);
+    }
+
+    private static IReadOnlyList<SceneDefinition> CapacityScenes(
+        int morningPerLine,
+        int noonPerLine,
+        int afternoonPerLine,
+        int eveningPerLine,
+        int lateNightPerLine,
+        int dawnPerLine,
+        IReadOnlyList<string>? additionalContext = null)
+    {
+        var contextPrefix = additionalContext ?? [];
+        return
+        [
+            SafeFeedbackScene("capacity-morning-" + string.Join('-', contextPrefix), 2, morningPerLine,
+                requiredContext: [.. contextPrefix, "time:morning"]),
+            SafeFeedbackScene("capacity-noon-" + string.Join('-', contextPrefix), 2, noonPerLine,
+                requiredContext: [.. contextPrefix, "time:noon"]),
+            SafeFeedbackScene("capacity-afternoon-" + string.Join('-', contextPrefix), 2, afternoonPerLine,
+                requiredContext: [.. contextPrefix, "time:afternoon"]),
+            SafeFeedbackScene("capacity-evening-" + string.Join('-', contextPrefix), 2, eveningPerLine,
+                requiredContext: [.. contextPrefix, "time:evening"]),
+            SafeFeedbackScene("capacity-late-" + string.Join('-', contextPrefix), 2, lateNightPerLine,
+                requiredContext: [.. contextPrefix, "time:late_night"]),
+            SafeFeedbackScene("capacity-dawn-" + string.Join('-', contextPrefix), 2, dawnPerLine,
+                requiredContext: [.. contextPrefix, "time:dawn"])
+        ];
     }
 
     private static DialogueLine SafeFeedbackLine(
