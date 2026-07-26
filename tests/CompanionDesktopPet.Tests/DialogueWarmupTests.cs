@@ -6,6 +6,7 @@ namespace CompanionDesktopPet.Tests;
 [Collection(PerformanceTestCollection.Name)]
 public sealed class DialogueWarmupTests
 {
+    private static readonly TimeSpan BlockingCallTimeout = TimeSpan.FromSeconds(10);
     private static readonly DateTime LocalNow =
         new(2026, 7, 24, 9, 30, 0, DateTimeKind.Local);
 
@@ -13,8 +14,8 @@ public sealed class DialogueWarmupTests
     [Trait("Category", "Performance")]
     public async Task WarmupAsync_ConcurrentCallersInitializeExactlyOnceWhileRepliesStayImmediate()
     {
-        using var factoryEntered = new ManualResetEventSlim();
-        using var releaseFactory = new ManualResetEventSlim();
+        var factoryEntered = new ManualResetEventSlim();
+        var releaseFactory = new ManualResetEventSlim();
         var factoryCalls = 0;
         var service = DialogueService.CreateDeferred(
             snapshot =>
@@ -28,11 +29,23 @@ public sealed class DialogueWarmupTests
         var warmups = Enumerable.Range(0, 12)
             .Select(_ => service.WarmupAsync())
             .ToArray();
+        var warmupsCompleted = Task.WhenAll(warmups);
+        _ = warmupsCompleted.ContinueWith(
+            _ =>
+            {
+                factoryEntered.Dispose();
+                releaseFactory.Dispose();
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
         try
         {
             Assert.True(factoryEntered.Wait(TimeSpan.FromSeconds(2)));
+            var fallbackCall = Task.Run(() =>
+                service.GetReply(CompanionEvent.Click, LocalNow, new Random(7)));
 
-            var fallback = service.GetReply(CompanionEvent.Click, LocalNow, new Random(7));
+            var fallback = await fallbackCall.WaitAsync(BlockingCallTimeout);
 
             Assert.StartsWith("fallback:", fallback.SceneId, StringComparison.Ordinal);
             Assert.True(fallback.ShouldDisplayText);
@@ -47,7 +60,7 @@ public sealed class DialogueWarmupTests
         }
 
         Assert.All(
-            await Task.WhenAll(warmups).WaitAsync(TimeSpan.FromSeconds(5)),
+            await warmupsCompleted.WaitAsync(TimeSpan.FromSeconds(5)),
             Assert.True);
 
         Assert.True(service.IsReady);

@@ -20,6 +20,7 @@ namespace CompanionDesktopPet.Tests;
 [Collection(WpfApplicationCollection.Name)]
 public sealed class WindowShellTests
 {
+    private static readonly TimeSpan BlockingCallTimeout = TimeSpan.FromSeconds(10);
     private static readonly Lazy<StaTestHost> StaHost = new(() => new StaTestHost());
 
     [Theory]
@@ -720,13 +721,13 @@ public sealed class WindowShellTests
 
     [Fact]
     [Trait("Category", "Performance")]
-    public void MainWindow_BlockedDialogueWarmupDoesNotBlockLoadedOrClickActions()
+    public async Task MainWindow_BlockedDialogueWarmupDoesNotBlockLoadedOrClickActions()
     {
-        RunOnStaThread(() =>
+        var settingsDirectory = CreateSettingsDirectory();
+        var factory = new ControlledDialogueFactory("全量回复");
+        var dialogue = DialogueService.CreateDeferred(factory.Create);
+        var scenario = RunOnStaThreadAsync(() =>
         {
-            var settingsDirectory = CreateSettingsDirectory();
-            using var factory = new ControlledDialogueFactory("全量回复");
-            var dialogue = DialogueService.CreateDeferred(factory.Create);
             var window = CreateWindowWithDialogue(
                 settingsDirectory,
                 dialogue,
@@ -763,14 +764,33 @@ public sealed class WindowShellTests
                 Assert.IsType<MenuItem>(window.FindName("GreetingMenuItem"));
                 Assert.False(window.CaptureRuntimeState().IsMemoryTimerEnabled);
                 Assert.Equal(1, factory.CallCount);
+                return Task.CompletedTask;
             }
             finally
             {
                 window.Close();
-                factory.Release();
                 DeleteSettingsDirectory(settingsDirectory);
             }
         });
+        _ = scenario.ContinueWith(
+            _ => factory.Dispose(),
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+
+        try
+        {
+            await scenario.WaitAsync(BlockingCallTimeout);
+        }
+        catch (TimeoutException)
+        {
+            factory.Release();
+            throw;
+        }
+        finally
+        {
+            factory.Release();
+        }
     }
 
     [Fact]
@@ -804,6 +824,39 @@ public sealed class WindowShellTests
                     clock.GetLocalNow().LocalDateTime,
                     factory.Agent.LastRespondedAt);
                 Assert.Equal(1, factory.CallCount);
+            }
+            finally
+            {
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
+    public void MainWindow_CaptureRuntimeState_DoesNotReadDialogueSnapshot()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var time = new ManualTimeProvider();
+            time.SetLocalNow(new DateTime(2026, 7, 26, 10, 0, 0));
+            var agent = new RecordingDialogueAgent();
+            var window = CreateWindowWithCadence(
+                settingsDirectory,
+                time,
+                new SequenceFullscreenDetector(false),
+                agent);
+            try
+            {
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                Assert.Equal(0, agent.CreateSnapshotCallCount);
+
+                var runtime = window.CaptureRuntimeState();
+
+                Assert.True(runtime.IsEventTimerEnabled);
+                Assert.Equal(0, agent.CreateSnapshotCallCount);
             }
             finally
             {
@@ -1769,7 +1822,11 @@ public sealed class WindowShellTests
             var settingsDirectory = CreateSettingsDirectory();
             var memoryWriter = new ControlledMemoryWriter();
             var closedCount = 0;
-            var window = CreateWindowWithMemoryWriter(settingsDirectory, memoryWriter.SaveAsync);
+            var dialogue = new DialogueService();
+            var window = CreateWindowWithMemoryWriter(
+                settingsDirectory,
+                memoryWriter.SaveAsync,
+                dialogue);
             window.Closed += (_, _) => closedCount++;
             Task? exit = null;
             Task? duplicateExit = null;
@@ -1793,7 +1850,7 @@ public sealed class WindowShellTests
                 window.SaySomething();
                 Assert.True(window.CaptureRuntimeState().IsMemoryTimerEnabled);
                 var frozenReply = GetLastReply(window);
-                var frozenTurnCount = window.CaptureRuntimeState().DialogueTurnCount;
+                var frozenTurnCount = dialogue.CreateSnapshot().TurnCount;
                 var frozenPaused = window.CaptureRuntimeState().IsPaused;
                 var frozenBubbleVisibility = bubble.Visibility;
                 var frozenSpeech = speech.Text;
@@ -1845,7 +1902,7 @@ public sealed class WindowShellTests
                 Assert.Equal("frozen", autoStartItem.ToolTip);
                 Assert.Equal(frozenPaused, window.CaptureRuntimeState().IsPaused);
                 Assert.Same(frozenReply, GetLastReply(window));
-                Assert.Equal(frozenTurnCount, window.CaptureRuntimeState().DialogueTurnCount);
+                Assert.Equal(frozenTurnCount, dialogue.CreateSnapshot().TurnCount);
 
                 window.MemoryTimer_Tick(null, EventArgs.Empty);
                 Assert.Equal(1, memoryWriter.CallCount);
@@ -3886,7 +3943,8 @@ public sealed class WindowShellTests
 
     private static MainWindow CreateWindowWithMemoryWriter(
         string settingsDirectory,
-        Func<AgentMemorySnapshot, Task> saveAgentMemoryAsync) =>
+        Func<AgentMemorySnapshot, Task> saveAgentMemoryAsync,
+        DialogueService dialogue) =>
         new(new MainWindowDependencies(
             PetSettings.Default,
             new SettingsService(settingsDirectory))
@@ -3895,7 +3953,7 @@ public sealed class WindowShellTests
             AmbientScheduler = new AmbientActionScheduler(() => 0.5),
             AutoStartService = DisabledAutoStartService.Instance,
             SaveAgentMemoryAsync = saveAgentMemoryAsync,
-            DialogueService = new DialogueService(),
+            DialogueService = dialogue,
             TimeProvider = TimeProvider.System
         });
 
@@ -4299,9 +4357,14 @@ public sealed class WindowShellTests
             []);
 
         public List<RecordedDialogueCall> Calls { get; } = [];
+        public int CreateSnapshotCallCount { get; private set; }
         public DateTime? NextStoryDueAt => null;
 
-        public AgentMemorySnapshot CreateSnapshot() => _snapshot;
+        public AgentMemorySnapshot CreateSnapshot()
+        {
+            CreateSnapshotCallCount++;
+            return _snapshot;
+        }
 
         public AgentReply Respond(
             CompanionEvent trigger,

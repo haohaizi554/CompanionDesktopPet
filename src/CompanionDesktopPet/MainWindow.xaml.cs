@@ -96,8 +96,7 @@ public partial class MainWindow : Window
             _bubbleCountdown.State,
             _animation is AnimationController { IsSuspended: true },
             _actionCoordinator.State,
-            _dialogueReplyRevision,
-            _dialogue.CreateSnapshot().TurnCount);
+            _dialogueReplyRevision);
 
     private bool InteractionFrozen => _exitCommandRunning || _isClosed;
     private bool PresentationSuspended => InteractionFrozen || _isHiddenToTray;
@@ -2151,5 +2150,4 @@ internal readonly record struct MainWindowRuntimeSnapshot(
     BubbleCountdownState BubbleCountdownState,
     bool IsAnimationSuspended,
     PetActionState ActionState,
-    long DialogueReplyRevision,
-    int DialogueTurnCount);
+    long DialogueReplyRevision);
