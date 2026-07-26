@@ -68,6 +68,8 @@ public partial class MainWindow : Window
     private BubblePlacementSide _bubbleSide = BubblePlacementSide.Above;
     private bool _bubbleSuspendedForWindowHide;
     private Task<DialogueWarmupOutcome>? _observedDialogueWarmup;
+    private (DialogueWarmupOutcome Outcome, long Generation)? _pendingDialogueWarmupOutcome;
+    private long _appliedDialogueWarmupGeneration;
     private long _dialogueReplyRevision;
     private long _dialogueWarmupGeneration;
     private long _startupFallbackReplyRevision;
@@ -1255,6 +1257,7 @@ public partial class MainWindow : Window
         }
 
         var generation = ++_dialogueWarmupGeneration;
+        _pendingDialogueWarmupOutcome = null;
         _ = CompleteDialogueWarmupAsync(warmup, generation);
     }
 
@@ -1337,10 +1340,42 @@ public partial class MainWindow : Window
         DialogueWarmupOutcome outcome,
         long generation)
     {
-        if (PresentationSuspended || generation != _dialogueWarmupGeneration)
+        if (InteractionFrozen || generation != _dialogueWarmupGeneration)
         {
+            DiscardPendingDialogueWarmupOutcome(generation);
             return;
         }
+
+        if (generation == _appliedDialogueWarmupGeneration)
+        {
+            DiscardPendingDialogueWarmupOutcome(generation);
+            return;
+        }
+
+        if (_isHiddenToTray)
+        {
+            _pendingDialogueWarmupOutcome = (outcome, generation);
+            return;
+        }
+
+        DiscardPendingDialogueWarmupOutcome(generation);
+        ApplyDialogueWarmupOutcomeVisible(outcome, generation);
+    }
+
+    private bool ApplyDialogueWarmupOutcomeVisible(
+        DialogueWarmupOutcome outcome,
+        long generation,
+        DateTime? localTime = null,
+        FullscreenSnapshot? fullscreen = null)
+    {
+        if (InteractionFrozen
+            || generation != _dialogueWarmupGeneration
+            || generation == _appliedDialogueWarmupGeneration)
+        {
+            return false;
+        }
+
+        _appliedDialogueWarmupGeneration = generation;
 
         if (outcome == DialogueWarmupOutcome.Ready)
         {
@@ -1354,16 +1389,19 @@ public partial class MainWindow : Window
                 && _startupFallbackReplyRevision == _dialogueReplyRevision;
             _replayUserClickAfterWarmupRequested = false;
             _replayStartupAfterWarmupRequested = false;
-            if (replayUserClick)
+            var replay = replayUserClick
+                ? CompanionEvent.Click
+                : replayStartup
+                    ? CompanionEvent.Startup
+                    : (CompanionEvent?)null;
+            if (replay is { } trigger)
             {
-                ShowEventBubble(CompanionEvent.Click, LocalNow, ObserveFullscreen());
-            }
-            else if (replayStartup)
-            {
-                ShowEventBubble(CompanionEvent.Startup, LocalNow, ObserveFullscreen());
+                var decisionTime = localTime ?? LocalNow;
+                var decisionFullscreen = fullscreen ?? ObserveFullscreen();
+                return ShowEventBubble(trigger, decisionTime, decisionFullscreen);
             }
 
-            return;
+            return false;
         }
 
         _dialogueWarmupViewState = DialogueWarmupViewState.RetryAvailable;
@@ -1372,6 +1410,50 @@ public partial class MainWindow : Window
         SayMenuItem.IsEnabled = true;
         AutomationProperties.SetHelpText(SayMenuItem, "重新加载佳怡的文库。");
         ShowBubble(DialogueWarmupFailureMessage);
+        return false;
+    }
+
+    private bool ConsumePendingDialogueWarmupOutcome(
+        DateTime localTime,
+        FullscreenSnapshot fullscreen)
+    {
+        CaptureCompletedDialogueWarmupOutcome();
+        var pending = _pendingDialogueWarmupOutcome;
+        _pendingDialogueWarmupOutcome = null;
+        return pending is { } value
+            && value.Generation == _dialogueWarmupGeneration
+            && ApplyDialogueWarmupOutcomeVisible(
+                value.Outcome,
+                value.Generation,
+                localTime,
+                fullscreen);
+    }
+
+    private void CaptureCompletedDialogueWarmupOutcome()
+    {
+        if (_pendingDialogueWarmupOutcome is not null
+            || _dialogueWarmupGeneration == _appliedDialogueWarmupGeneration
+            || _observedDialogueWarmup is not { IsCompletedSuccessfully: true } completed)
+        {
+            return;
+        }
+
+        var outcome = completed.Result;
+        if (outcome is DialogueWarmupOutcome.Ready
+            or DialogueWarmupOutcome.PermanentFailure
+            or DialogueWarmupOutcome.RetriesExhausted)
+        {
+            _pendingDialogueWarmupOutcome = (outcome, _dialogueWarmupGeneration);
+        }
+    }
+
+    private void DiscardPendingDialogueWarmupOutcome(long generation)
+    {
+        if (_pendingDialogueWarmupOutcome is { Generation: var pendingGeneration }
+            && pendingGeneration == generation)
+        {
+            _pendingDialogueWarmupOutcome = null;
+        }
     }
 
     private bool PresentReply(AgentReply reply)
@@ -1640,11 +1722,12 @@ public partial class MainWindow : Window
         WindowState = WindowState.Normal;
         UpdateLayout();
         EnsureCurrentPositionIsVisible();
+        var restoreTime = default(DateTime);
+        var restoreFullscreen = default(FullscreenSnapshot);
         if (resumingFromTray)
         {
-            var now = LocalNow;
-            var fullscreen = ObserveFullscreen();
-            ArmAutomaticTimer(now, fullscreen);
+            restoreTime = LocalNow;
+            restoreFullscreen = ObserveFullscreen();
         }
 
         if (_bubbleSuspendedForWindowHide
@@ -1661,6 +1744,14 @@ public partial class MainWindow : Window
         PositionBubble();
         if (resumingFromTray)
         {
+            var replayDisplayed = ConsumePendingDialogueWarmupOutcome(
+                restoreTime,
+                restoreFullscreen);
+            if (!replayDisplayed)
+            {
+                ArmAutomaticTimer(restoreTime, restoreFullscreen);
+            }
+
             _eventTimer.Start();
             ScheduleNextAmbientAction();
         }
@@ -1915,6 +2006,7 @@ public partial class MainWindow : Window
 
     private void FreezeInteractionForExit()
     {
+        _pendingDialogueWarmupOutcome = null;
         DisarmAutomaticTimer();
         _eventTimer.Stop();
         _memoryTimer.Stop();
@@ -1978,6 +2070,7 @@ public partial class MainWindow : Window
         _isClosed = true;
         _dialogueWarmupViewState = DialogueWarmupViewState.Closed;
         _dialogueWarmupGeneration++;
+        _pendingDialogueWarmupOutcome = null;
         _dialogueWarmupLifetime.Cancel();
         _dialogueWarmupLifetime.Dispose();
         _observedDialogueWarmup = null;

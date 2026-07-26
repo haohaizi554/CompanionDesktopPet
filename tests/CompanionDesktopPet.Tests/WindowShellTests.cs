@@ -820,7 +820,7 @@ public sealed class WindowShellTests
     }
 
     [Fact]
-    public async Task MainWindow_HiddenWarmupCompletionDoesNotReplayOrRearm()
+    public async Task MainWindow_HiddenReadyWarmupDefersReplayUntilRestore()
     {
         await RunOnStaThreadAsync(async () =>
         {
@@ -828,6 +828,7 @@ public sealed class WindowShellTests
             var time = new ManualTimeProvider();
             time.SetLocalNow(new DateTime(2026, 7, 26, 10, 0, 0));
             var detector = new SequenceFullscreenDetector(false, true);
+            var schedulerRandom = new EndpointRandom();
             using var factory = new ControlledDialogueFactory("hidden warmup reply");
             var dialogue = DialogueService.CreateDeferred(factory.Create, time);
             var coordinator = new DialogueWarmupCoordinator(dialogue, time);
@@ -842,7 +843,7 @@ public sealed class WindowShellTests
                 TimeProvider = time,
                 WarmupCoordinator = coordinator,
                 ForegroundFullscreenDetector = detector,
-                DialogueScheduler = new DialogueScheduler(new EndpointRandom())
+                DialogueScheduler = new DialogueScheduler(schedulerRandom)
             });
             try
             {
@@ -865,9 +866,101 @@ public sealed class WindowShellTests
                 Assert.Null(factory.Agent.LastRespondedAt);
                 Assert.Same(replyBeforeHide, GetLastReply(window));
                 Assert.False(window.CaptureAutomaticDialogueRuntime().IsScheduled);
+                Assert.Equal(1, schedulerRandom.NextCount);
+
+                window.ToggleVisibilityFromTray();
+
+                var say = Assert.IsType<MenuItem>(window.FindName("SayMenuItem"));
+                Assert.True(window.IsVisible);
+                Assert.Equal(2, detector.ObserveCount);
+                Assert.NotNull(factory.Agent.LastRespondedAt);
+                Assert.NotSame(replyBeforeHide, GetLastReply(window));
+                Assert.Equal(CompanionEvent.Startup, GetLastReply(window).Trigger);
+                Assert.Equal("full:test", GetLastReply(window).SceneId);
+                Assert.True(say.IsEnabled);
+                Assert.Equal("说句话 ♡", say.Header);
+                Assert.True(window.CaptureAutomaticDialogueRuntime().IsScheduled);
+                Assert.Equal(2, schedulerRandom.NextCount);
             }
             finally
             {
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
+    public async Task MainWindow_HiddenPermanentWarmupFailureBecomesRetryableOnRestore()
+    {
+        await RunOnStaThreadAsync(async () =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var time = new ManualTimeProvider();
+            time.SetLocalNow(new DateTime(2026, 7, 26, 10, 0, 0));
+            var detector = new SequenceFullscreenDetector(false, true);
+            var schedulerRandom = new EndpointRandom();
+            var factoryCalls = 0;
+            using var factoryEntered = new ManualResetEventSlim();
+            using var releaseFactory = new ManualResetEventSlim();
+            var dialogue = DialogueService.CreateDeferred(_ =>
+            {
+                Interlocked.Increment(ref factoryCalls);
+                factoryEntered.Set();
+                releaseFactory.Wait();
+                throw new InvalidDataException("permanent hidden warmup failure");
+            }, time);
+            var coordinator = new DialogueWarmupCoordinator(dialogue, time);
+            var window = new MainWindow(new MainWindowDependencies(
+                PetSettings.Default,
+                new SettingsService(settingsDirectory))
+            {
+                SuppressApplicationShutdownOnClose = true,
+                AmbientScheduler = new AmbientActionScheduler(() => 0.5),
+                AutoStartService = DisabledAutoStartService.Instance,
+                DialogueService = dialogue,
+                TimeProvider = time,
+                WarmupCoordinator = coordinator,
+                ForegroundFullscreenDetector = detector,
+                DialogueScheduler = new DialogueScheduler(schedulerRandom)
+            });
+            try
+            {
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                Assert.True(factoryEntered.Wait(TimeSpan.FromSeconds(2)));
+                var say = Assert.IsType<MenuItem>(window.FindName("SayMenuItem"));
+                var headerBeforeHide = say.Header;
+                var replyBeforeHide = GetLastReply(window);
+                var warmup = coordinator.StartAsync(CancellationToken.None);
+                window.SetTrayAvailability(true);
+                window.HideToTray();
+
+                releaseFactory.Set();
+                Assert.Equal(DialogueWarmupOutcome.PermanentFailure, await warmup);
+
+                Assert.Equal(1, detector.ObserveCount);
+                Assert.Equal(1, factoryCalls);
+                Assert.Same(replyBeforeHide, GetLastReply(window));
+                Assert.Equal(headerBeforeHide, say.Header);
+                Assert.False(window.CaptureAutomaticDialogueRuntime().IsScheduled);
+                Assert.Equal(1, schedulerRandom.NextCount);
+
+                window.ToggleVisibilityFromTray();
+
+                Assert.True(window.IsVisible);
+                Assert.Equal(2, detector.ObserveCount);
+                Assert.Equal(1, factoryCalls);
+                Assert.Same(replyBeforeHide, GetLastReply(window));
+                Assert.NotEqual(headerBeforeHide, say.Header);
+                Assert.True(say.IsEnabled);
+                Assert.True(coordinator.CanRetryAfterFailure);
+                Assert.True(window.CaptureAutomaticDialogueRuntime().IsScheduled);
+                Assert.Equal(2, schedulerRandom.NextCount);
+            }
+            finally
+            {
+                releaseFactory.Set();
                 window.Close();
                 DeleteSettingsDirectory(settingsDirectory);
             }
