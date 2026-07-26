@@ -17,7 +17,9 @@
 | 深夜与黎明 23:00–05:59 | 30–60 分钟 |
 | 明确检测到前台全屏 | 60–120 分钟，覆盖所有时段 |
 
-这里的窗口不是“后台重试间隔”。在文库已通过校验并完成加载、桌宠可见且没有退出或隐藏到托盘时，计时到期必须能选出并显示一条 `Automatic` 气泡，不能再被旧的每小时预算静默吞掉。
+这里的窗口不是“后台重试间隔”，而是从最近一次可见气泡或计时模式切换开始计算的下一条 `Automatic` 计划窗口。在文库已通过校验并完成加载、桌宠持续可见、Dispatcher 持续响应，且期间没有新的可见交互/事件气泡时，计时到期必须能选出并显示一条 `Automatic` 气泡，不能再被旧的每小时预算静默吞掉。
+
+系统睡眠、会话锁定、UI 线程长时间阻塞或系统时钟跳变不伪装成准时输出。若 tick 比原定截止时间迟到超过 1 分钟，则先重新采样全屏与当前时段，并从恢复时刻武装一个完整的新窗口，不在唤醒瞬间补发积压气泡。测试使用 `TimeProvider` 的时间戳识别迟到，不依赖可回拨的本地墙上时钟。
 
 用户主动点击、拖动结束和控制面板操作仍应立即反馈，不受上述自动频率限制。主动交互或其他事件已经显示气泡后，重新计算下一次自动气泡，避免两条气泡紧挨出现。
 
@@ -41,10 +43,10 @@
 1. `DialogueScheduler` 是 `Automatic` 的唯一频率门；
 2. `Automatic` 选择场景时绕过 `InterruptionBudget.CanPlay`；
 3. 绕过预算不等于绕过内容质量：上下文匹配、语义组冷却、相邻类别约束、近期比例、行冷却、每日上限和表面多样性继续生效；
-4. 若正常选择没有候选，进入仅供 `Automatic` 使用的安全降级选择：仍要求触发与上下文匹配、启用状态、稀有内容配额和非连续同句，优先未使用或最久未使用的 v2 运行时语料；
+4. 若正常选择没有候选，进入仅供节奏保障使用的 v2 安全反馈池：仍要求触发与上下文匹配、启用状态、非稀有、非彩蛋、非 `dry_sharp`、非 `user_direct` 和非连续同句，优先未使用或最久未使用的运行时语料；最后一级允许放宽语义/行冷却与普通相邻类别限制，但不放宽内容安全规则；
 5. 只有校验通过的运行时语料可参与降级，不引入网络内容，也不把 75,375 行原始 TSV 直接解析进 UI 热路径；
 6. 文库未就绪、校验失败、窗口隐藏或应用关闭属于明确的不可用状态，不伪装成已显示；不得用紧循环补偿；
-7. `Click`、`DragReleased`、`AnimationPaused`、`AnimationResumed`、`SizeChanged`、`PositionRestored` 作为用户直接动作绕过主动打扰预算；
+7. `Click`、`DragReleased`、`AnimationPaused`、`AnimationResumed`、`SizeChanged`、`PositionRestored` 作为用户直接动作绕过主动打扰预算；正常选择静默时也使用同一个 v2 安全反馈池，保证控制动作有文字反馈；
 8. `DayChanged`、`IdleReturned`、`StoryTimerDue`、`ClockTick` 等事件型输出继续使用 persona 打扰预算。成功显示后重置自动计时器；`intentional_silence` 不算可见气泡，也不错误延后已有自动计时。
 
 全屏 2 小时硬门槛不再叠加到 `Automatic`；全屏安静程度由 60–120 分钟节奏直接表达。事件型候选仍可使用单独的打扰预算，配置与文档必须明确其作用域，避免再次把它误解成自动计时器。
@@ -66,9 +68,19 @@ internal interface IForegroundFullscreenDetector
 - `false`：已可靠确认当前前台窗口不是这种全屏窗口；
 - `null`：前台切换竞态、桌宠自身窗口、受保护桌面或 Win32 查询失败，状态未知。
 
-`null` 不能写成 `false`，因此不会错误产生 `not_fullscreen` 内容 token。`MainWindow` 保存最后一次明确的 `true/false` 仅用于计时模式：一次未知观察不会打断已确认的安静模式；应用启动尚无明确观察时，按当前时段安排，避免桌宠首次获得焦点时被错误降到 60–120 分钟。
+`null` 不能写成 `false`，因此不会错误产生 `not_fullscreen` 内容 token。一次观察被整理为两个彼此独立的值：
 
-每次显示决策只采样一次。该次原始观察传入对话上下文，已确认状态用于选择计时窗口，避免前台窗口在一次操作中变化而得到互相矛盾的结果。
+```csharp
+internal readonly record struct FullscreenSnapshot(
+    bool? Observed,
+    bool EffectiveQuietMode);
+```
+
+- `Observed` 是本次原始三态，只供内容上下文决定是否添加 `not_fullscreen`；
+- `EffectiveQuietMode` 使用最后一次明确的 `true/false`，供自动计时和事件打扰预算判断；
+- 一次 `null` 不覆盖已确认状态；应用启动尚无明确观察时，`EffectiveQuietMode=false`，按当前时段安排，避免桌宠首次获得焦点时被错误降到 60–120 分钟。
+
+每次显示决策只采样一次，并把完整 `FullscreenSnapshot` 沿调用链传递。`SceneContext.IsFullscreen` 保存 `Observed`；事件型 `InterruptionBudget` 显式接收 `EffectiveQuietMode`，因此桌宠自身获焦导致的 `null` 不会解除已确认的全屏安静预算。
 
 ## 5. Windows 检测算法
 
@@ -76,11 +88,12 @@ internal interface IForegroundFullscreenDetector
 
 1. `GetForegroundWindow` 为零、等于桌宠自己的 HWND，或两次读取不稳定：返回 `null`；
 2. Desktop/Shell 窗口：返回 `false`；
-3. 无效、不可见、最小化、child 或 cloaked 窗口：返回 `false`；
-4. 查询 cloaked 状态、DWM 可见边界或显示器信息失败：返回 `null`；
-5. 用 `MonitorFromWindow(..., MONITOR_DEFAULTTONULL)` 找到相交最大的显示器；无显示器返回 `false`；
-6. 使用 `DWMWA_EXTENDED_FRAME_BOUNDS` 与 `MONITORINFO.rcMonitor` 比较四条边；每边误差不超过 1 个原生像素时返回 `true`，否则返回 `false`；
-7. 最后再次读取前台 HWND；若已经变化则重试一次，仍不稳定返回 `null`。
+3. HWND 在采样期间失效或基础查询失败：按前台竞态处理并重试，仍失败返回 `null`；
+4. 已确认稳定但不可见、最小化、child 或 cloaked 的窗口：返回 `false`；
+5. 查询 cloaked 状态、DWM 可见边界或显示器信息失败：返回 `null`；
+6. 用 `MonitorFromWindow(..., MONITOR_DEFAULTTONULL)` 找到相交最大的显示器；无显示器返回 `false`；
+7. 使用 `DWMWA_EXTENDED_FRAME_BOUNDS` 与 `MONITORINFO.rcMonitor` 比较四条边；每边误差不超过 1 个原生像素时返回 `true`，否则返回 `false`；
+8. 最后再次读取前台 HWND；若已经变化则重试一次，仍不稳定返回 `null`。
 
 不回退到受 DPI 虚拟化且包含不可见 resize border 的 `GetWindowRect`，不把 WPF DIP 与 native screen coordinates 混算，不缓存 `HMONITOR` 或显示器矩形。这样支持副屏负坐标、竖屏、RDP 动态分辨率和显示器热插拔。
 
@@ -108,16 +121,20 @@ internal interface IForegroundFullscreenDetector
 
 ```text
 MainWindow
-  -> DialogueScheduler.NextDelay(localTime, effectiveFullscreen)
-  -> DialogueService.GetReply(trigger, localTime, random, observedFullscreen)
-  -> ICompanionDialogueAgent.Respond(..., observedFullscreen)
+  -> FullscreenSnapshot(Observed, EffectiveQuietMode)
+  -> DialogueScheduler.NextDelay(localTime, EffectiveQuietMode)
+  -> DialogueService.GetReply(trigger, localTime, random, snapshot)
+  -> ICompanionDialogueAgent.Respond(..., snapshot)
   -> OfflineCompanionAgent
-  -> SceneContext.IsFullscreen
+  -> SceneContext.IsFullscreen = Observed
+  -> InterruptionBudget = EffectiveQuietMode
 ```
 
-`false` 才添加 `not_fullscreen`；`true` 和 `null` 都不伪造该 token。`MainWindowDependencies` 提供 detector 与可测试的 scheduler/clock 缝，生产默认实例由应用创建。
+只有 `Observed=false` 才添加 `not_fullscreen`；`true` 和 `null` 都不伪造该 token。`MainWindowDependencies` 提供 detector 与可测试的 scheduler/clock 缝，生产默认实例由应用创建。
 
-`ShowEventBubble` 返回本次是否真正显示文本。任何真正显示的用户交互或事件气泡都会从同一时间点重排自动计时；静默回复不覆盖当前可见气泡，也不制造高频重试。
+`ShowEventBubble` 返回本次是否真正显示文本。任何真正显示的用户交互或事件气泡都会从同一时间点重排自动计时；静默回复不覆盖当前可见气泡，也不制造高频重试。若 `Automatic` 在已经通过运行时不变量校验后仍无法从安全反馈池选词，视为可诊断的契约故障，记录一次非致命错误并从当前时刻重新武装完整窗口，不做秒级重试。
+
+运行时 warmup 必须验证：白天、傍晚、深夜/黎明在 `Observed=true/false/null` 下，以及每个直接反馈事件，均至少存在 2 条启用、非稀有、非彩蛋、非 `dry_sharp`、非 `user_direct`、触发与上下文匹配的安全行。该不变量失败时 warmup 明确失败并进入已有的可见重试状态，不能带着不完整文库假装就绪。
 
 ## 8. 测试策略
 
@@ -138,10 +155,12 @@ MainWindow
 - 事件型输出仍受预算控制，用户直接动作仍有反馈；
 - 可见 Click/事件输出后自动计时重排，静默回复不会造成气泡闪烁或紧循环；
 - 全屏计时不再与旧 2 小时门槛叠加。
+- 安全反馈池的时段 × 三态和所有直接动作组合均有至少 2 条候选；删除任一必需组合会让 warmup/契约测试失败；
+- 睡眠、会话恢复、Dispatcher 迟到超过 1 分钟和本地时钟回拨不会补发积压气泡，而是按恢复时的模式武装完整新窗口。
 
 ### 8.3 检测器
 
-- NULL 前台、桌宠自身 HWND、连续前台竞态：`null`；
+- NULL 前台、桌宠自身 HWND、失效 HWND、连续前台竞态：`null`；
 - Desktop/Shell、不可见、最小化、child、cloaked：`false`；
 - DWM/显示器查询失败：`null`；
 - 完整覆盖、每边 1 px：`true`；任一边超过 1 px：`false`；
@@ -151,7 +170,7 @@ MainWindow
 
 ### 8.4 WPF 生命周期与传播
 
-- 每个决策只调用 detector 一次；`true/false/null` 完整传播到 `SceneContext`；
+- 每个决策只调用 detector 一次；`Observed=true/false/null` 完整传播到 `SceneContext`，`EffectiveQuietMode` 独立传播到 scheduler 与事件预算；
 - 进入全屏、退出全屏和跨时段时旧计时器静默重排；
 - 桌宠自身获得前台不会把已知全屏降为非全屏；
 - 隐藏与关闭后不再探测，从托盘恢复重新探测；
@@ -181,9 +200,9 @@ README 和语料说明必须同步更新：
 
 功能完成必须同时满足：
 
-1. 健康运行时的 `Automatic` 可见输出符合四档目标窗口，旧预算不再静默吞掉它；
+1. 在持续运行、Dispatcher 可响应且没有后续可见交互/事件的前提下，健康运行时的 `Automatic` 可见输出符合四档目标窗口，旧预算不再静默吞掉它；
 2. 全屏检测在正常窗口、最大化、F11/无边框全屏、多显示器和查询失败下符合三态契约；
-3. 直接交互保持即时反馈，自动气泡不会紧跟在刚显示的交互/事件气泡之后；
+3. 直接交互由经过构建不变量验证的 v2 安全反馈池保持即时文字反馈，自动气泡不会紧跟在刚显示的交互/事件气泡之后；
 4. 没有新增窗口标题、进程内容、输入或网络采集；
 5. 全量 .NET、Python、语料校验、生成器一致性、打包与真实 EXE 冒烟全部通过；
 6. 每个实现阶段均有独立提交、远端推送和可追溯验证证据。
