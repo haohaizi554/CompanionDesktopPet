@@ -19,16 +19,36 @@ ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_TOOL = ROOT / "tools" / "build_authorship_manifest.py"
 
 
+def _fixture_category(batch_id: str) -> tuple[str, str, str]:
+    number = int(batch_id.removeprefix("b"))
+    if number <= 18:
+        return ("Debugging", "technical", "self_talk")
+    if number <= 28:
+        return ("Study", "growth", "self_talk")
+    if number <= 35:
+        return ("Career", "career", "self_talk")
+    if number <= 45:
+        return ("DailyCare", "daily_care", "ambient")
+    if number <= 55:
+        return ("EmotionalSupport", "emotional_reflection", "self_talk")
+    if number <= 82:
+        return ("ProactiveChat", "character_life", "self_talk")
+    if number <= 92:
+        return ("EasterEgg", "easter_egg", "self_talk")
+    return ("SystemAmbient", "system_ambient", "system_observe")
+
+
 def _row(batch_id: str, ordinal: int) -> tuple[str, ...]:
+    category, category_group, output_mode = _fixture_category(batch_id)
     return (
         f"authored.{batch_id}.technical.fixture.entry.{ordinal:04d}",
         batch_id,
-        "Debugging",
-        "technical",
+        category,
+        category_group,
         f"technical.fixture.{batch_id}",
         "fixture_entry",
         f"technical.fixture.{batch_id}",
-        "self_talk",
+        output_mode,
         "idle",
         "none",
         "dry",
@@ -111,6 +131,36 @@ class AuthoredCatalogTests(unittest.TestCase):
         from src.persona_corpus.contract import PERSONA_CONTRACT
 
         self.assertIs(RELATIONSHIP_PROFILES, PERSONA_CONTRACT.relationship_profiles)
+
+    def test_parse_authored_batches_rejects_a_group_output_mode_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            authored_dir, _ = write_valid_authored_fixture(Path(temporary_directory))
+            path = authored_dir / "b001.tsv"
+            lines = path.read_text(encoding="utf-8").splitlines()
+            for line_index in range(1, len(lines)):
+                fields = lines[line_index].split("\t")
+                fields[AUTHORED_HEADER.index("output_mode")] = "ambient"
+                lines[line_index] = "\t".join(fields)
+            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, r"output_mode.*technical"):
+                parse_authored_batches(authored_dir)
+
+    def test_parse_authored_batches_rejects_category_group_inventory_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            authored_dir, _ = write_valid_authored_fixture(Path(temporary_directory))
+            path = authored_dir / "b100.tsv"
+            lines = path.read_text(encoding="utf-8").splitlines()
+            for line_index in range(1, len(lines)):
+                fields = lines[line_index].split("\t")
+                fields[AUTHORED_HEADER.index("category")] = "DailyCare"
+                fields[AUTHORED_HEADER.index("category_group")] = "daily_care"
+                fields[AUTHORED_HEADER.index("output_mode")] = "ambient"
+                lines[line_index] = "\t".join(fields)
+            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "category_group inventory"):
+                parse_authored_batches(authored_dir)
 
     def test_parse_authored_batches_rejects_semantic_group_metadata_drift(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

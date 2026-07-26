@@ -12,7 +12,9 @@ import hashlib
 import json
 import math
 import re
+from collections import Counter
 from dataclasses import dataclass, field
+from fractions import Fraction
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Iterator, Mapping
@@ -258,6 +260,17 @@ def _parse_entry(path: Path, line_number: int, values: tuple[str, ...]) -> Autho
             f"category_group {row['category_group']!r} must match configured category mapping {expected_group!r}",
         )
 
+    expected_output_mode = PERSONA_CONTRACT.scheduler[
+        "category_group_output_modes"
+    ][expected_group]
+    if row["output_mode"] != expected_output_mode:
+        raise _error(
+            path,
+            line_number,
+            f"output_mode {row['output_mode']!r} must match configured "
+            f"category_group {expected_group!r} output mode {expected_output_mode!r}",
+        )
+
     if row["relationship_profile"] not in RELATIONSHIP_PROFILES:
         raise _error(
             path,
@@ -358,6 +371,31 @@ def _validate_semantic_group_metadata(entries: tuple[AuthoredEntry, ...]) -> Non
         raise AssertionError("semantic group metadata comparison must find a difference")
 
 
+def _expected_category_group_inventory() -> dict[str, int]:
+    weights = PERSONA_CONTRACT.scheduler["category_group_weights"]
+    expected: dict[str, int] = {}
+    for category_group in PERSONA_CONTRACT.category_groups:
+        weight = Fraction(str(weights[category_group]))
+        count = weight * EXPECTED_ENTRY_COUNT
+        if count.denominator != 1:
+            raise AuthoredCatalogError(
+                "configured category_group_weights cannot produce an exact authored "
+                f"inventory for {category_group!r}"
+            )
+        expected[category_group] = count.numerator
+    return expected
+
+
+def _validate_category_group_inventory(entries: tuple[AuthoredEntry, ...]) -> None:
+    expected = _expected_category_group_inventory()
+    actual = Counter(entry.category_group for entry in entries)
+    if actual != expected:
+        raise AuthoredCatalogError(
+            "category_group inventory must match configured scheduler weights: "
+            f"expected {expected!r}, found {dict(sorted(actual.items()))!r}"
+        )
+
+
 def parse_authored_batches(authored_dir: Path) -> tuple[AuthoredEntry, ...]:
     """Parse all 100 literal source batches, without reading a manifest."""
 
@@ -392,6 +430,7 @@ def parse_authored_batches(authored_dir: Path) -> tuple[AuthoredEntry, ...]:
     variant_ids = [entry.variant_id for entry in sorted_entries]
     if len(variant_ids) != len(set(variant_ids)):
         raise AuthoredCatalogError("authored batches contain duplicate variant_id")
+    _validate_category_group_inventory(sorted_entries)
     _validate_semantic_group_metadata(sorted_entries)
     texts = [entry.text for entry in sorted_entries]
     if len(texts) != len(set(texts)):
