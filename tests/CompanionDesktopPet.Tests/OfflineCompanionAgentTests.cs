@@ -31,7 +31,7 @@ public sealed class OfflineCompanionAgentTests
         var expectedHistoryEntry = Assert.Single(firstHistory);
 
         first.State.Energy = 0;
-        first.State.ActiveStories.Add(injectedStory);
+        first.State.ActiveStories = [.. first.State.ActiveStories, injectedStory];
         firstHistory[0] = expectedHistoryEntry with { SceneId = "external-mutation" };
         var second = agent.CreateSnapshot();
         var secondHistory = Assert.IsType<SceneHistoryEntry[]>(second.History);
@@ -55,8 +55,11 @@ public sealed class OfflineCompanionAgentTests
     {
         var now = new DateTime(2026, 7, 22, 15, 0, 0, DateTimeKind.Local);
         var state = CharacterState.Create(now);
-        state.ActiveStories.Add(new StoryProgress(StoryArcCatalog.All[0].Id, 1, now.AddHours(6)));
-        state.ActiveStories.Add(new StoryProgress(StoryArcCatalog.All[1].Id, 1, now.AddHours(3)));
+        state.ActiveStories =
+        [
+            new StoryProgress(StoryArcCatalog.All[0].Id, 1, now.AddHours(6)),
+            new StoryProgress(StoryArcCatalog.All[1].Id, 1, now.AddHours(3))
+        ];
         var snapshot = new AgentMemorySnapshot(state, [], 0, null, []);
         var agent = new OfflineCompanionAgent(snapshot);
         var service = new DialogueService(snapshot);
@@ -264,7 +267,7 @@ public sealed class OfflineCompanionAgentTests
         var now = new DateTime(2026, 7, 22, 15, 0, 0, DateTimeKind.Local);
         var arc = StoryArcCatalog.All[0];
         var state = CharacterState.Create(now);
-        state.ActiveStories.Add(new StoryProgress(arc.Id, 1, now.AddMinutes(-1)));
+        state.ActiveStories = [new StoryProgress(arc.Id, 1, now.AddMinutes(-1))];
         var snapshot = new AgentMemorySnapshot(state, [], 0, null, []);
         var reply = new OfflineCompanionAgent(snapshot)
             .Respond(CompanionEvent.StoryTimerDue, now, new Random(17));
@@ -299,7 +302,7 @@ public sealed class OfflineCompanionAgentTests
         var arc = StoryArcCatalog.All[0];
         var previous = arc.Nodes[0].Lines[0];
         var state = CharacterState.Create(now.AddMinutes(-1));
-        state.ActiveStories.Add(new StoryProgress(arc.Id, 1, now));
+        state.ActiveStories = [new StoryProgress(arc.Id, 1, now)];
         var history = new SceneHistoryEntry(
             arc.Nodes[0].Id,
             previous.SemanticGroup,

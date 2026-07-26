@@ -51,7 +51,7 @@ public sealed partial class SceneScheduler
         ArgumentNullException.ThrowIfNull(random);
 
         var contextTokens = ContextTokens(context);
-        var previousText = history.Entries.LastOrDefault()?.Variant;
+        var previousText = history.LastEntry?.Variant;
         var strict = SelectSafeFeedbackLayer(
             scenes,
             context,

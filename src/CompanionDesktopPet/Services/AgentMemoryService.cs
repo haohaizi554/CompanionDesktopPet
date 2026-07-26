@@ -73,7 +73,8 @@ public sealed class AgentMemoryService
             exception is IOException
                 or UnauthorizedAccessException
                 or JsonException
-                or NotSupportedException)
+                or NotSupportedException
+                or ArgumentNullException)
         {
             return null;
         }

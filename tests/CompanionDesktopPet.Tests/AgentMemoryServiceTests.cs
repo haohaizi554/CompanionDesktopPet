@@ -174,6 +174,20 @@ public sealed class AgentMemoryServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Load_NullActiveStoriesFallsBackToNoSnapshot()
+    {
+        var service = new AgentMemoryService(_directory);
+        await service.SaveAsync(CreateValidSnapshot());
+        var path = Path.Combine(_directory, "agent-memory.json");
+        var root = JsonNode.Parse(await File.ReadAllTextAsync(path))!.AsObject();
+        root["State"]!["ActiveStories"] = null;
+        await File.WriteAllTextAsync(path, root.ToJsonString());
+
+        Assert.Null(await service.LoadAsync());
+        Assert.Null(await service.LoadForDeferredWarmupAsync());
+    }
+
+    [Fact]
     public async Task DeferredWarmupLoad_UsesOnlyStructuralSafetyBeforeTheBackgroundCatalogGate()
     {
         var now = new DateTime(2026, 7, 24, 9, 0, 0, DateTimeKind.Local);
@@ -312,7 +326,10 @@ public sealed class AgentMemoryServiceTests : IDisposable
         var state = CharacterState.Create(now);
         state.Activity = PetActivity.Reading;
         var arc = StoryArcCatalog.All[0];
-        state.ActiveStories.Add(new StoryProgress(arc.Id, 1, now.AddHours(5)));
+        state.ActiveStories = [
+            .. state.ActiveStories,
+            new StoryProgress(arc.Id, 1, now.AddHours(5))
+        ];
 
         var scene = SceneCatalog.All.First(item => item.StoryArcId is null);
         var line = scene.Lines[0];

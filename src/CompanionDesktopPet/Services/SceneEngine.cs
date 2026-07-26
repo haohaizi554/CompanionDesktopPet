@@ -81,17 +81,23 @@ public sealed class SceneHistory
     public const int SeasoningRecentWindow = PersonaContractGenerated.SeasoningRecentWindow;
     public const int SeasoningRecentMaximum = PersonaContractGenerated.SeasoningRecentMaximum;
 
+    private readonly object _sync = new();
     private readonly List<SceneHistoryEntry> _entries = [];
     private readonly Dictionary<string, SceneHistoryEntry> _lastBySceneId = new(StringComparer.Ordinal);
     private readonly Dictionary<string, SceneHistoryEntry> _lastBySemanticGroup = new(StringComparer.Ordinal);
     private readonly Dictionary<string, SceneHistoryEntry> _lastByLineId = new(StringComparer.Ordinal);
     private readonly Dictionary<(string LineId, DateOnly Date), int> _dailyCounts = [];
     private readonly Dictionary<string, HashSet<string>> _seenLineIdsBySemanticGroup = new(StringComparer.Ordinal);
-    private readonly IReadOnlyList<SceneHistoryEntry> _entriesView;
-
-    public SceneHistory() => _entriesView = _entries.AsReadOnly();
-
-    public IReadOnlyList<SceneHistoryEntry> Entries => _entriesView;
+    public IReadOnlyList<SceneHistoryEntry> Entries
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _entries.ToArray();
+            }
+        }
+    }
 
     public void Record(SceneDefinition scene, DateTime playedAt, DialogueLine line)
     {
@@ -115,11 +121,14 @@ public sealed class SceneHistory
             surface.Opening,
             surface.Ending,
             surface.Template);
-        _entries.Add(entry);
-        Index(entry);
-        if (Trim())
+        lock (_sync)
         {
-            RebuildIndexes();
+            _entries.Add(entry);
+            Index(entry);
+            if (Trim())
+            {
+                RebuildIndexes();
+            }
         }
     }
 
@@ -132,223 +141,338 @@ public sealed class SceneHistory
     public void Restore(IEnumerable<SceneHistoryEntry> entries)
     {
         ArgumentNullException.ThrowIfNull(entries);
-        var restored = entries
-            .OrderBy(entry => entry.PlayedAt)
-            .TakeLast(2_000)
-            .ToArray();
-        _entries.Clear();
-        _entries.AddRange(restored);
-        RebuildIndexes();
+        lock (_sync)
+        {
+            var restored = entries
+                .OrderBy(entry => entry.PlayedAt)
+                .TakeLast(2_000)
+                .ToArray();
+            _entries.Clear();
+            _entries.AddRange(restored);
+            RebuildIndexes();
+        }
     }
 
-    public DateTime? LastSceneAt => _entries.Count == 0 ? null : _entries[^1].PlayedAt;
+    public DateTime? LastSceneAt
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _entries.Count == 0 ? null : _entries[^1].PlayedAt;
+            }
+        }
+    }
 
-    public bool IsSceneCoolingDown(SceneDefinition scene, DateTime now) =>
-        _lastBySceneId.GetValueOrDefault(scene.Id) is { } previous
-        && Elapsed(now, previous.PlayedAt) < scene.Cooldown;
+    internal SceneHistoryEntry? LastEntry
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _entries.LastOrDefault();
+            }
+        }
+    }
 
-    public bool IsLineCoolingDown(DialogueLine line, DateTime now) =>
-        _lastByLineId.GetValueOrDefault(line.Id) is { } previous
-        && Elapsed(now, previous.PlayedAt) < line.Cooldown;
+    internal SceneHistoryEntry[] SnapshotRecentEntries(int maximumCount)
+    {
+        if (maximumCount < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maximumCount));
+        }
+
+        lock (_sync)
+        {
+            var count = Math.Min(maximumCount, _entries.Count);
+            if (count == 0)
+            {
+                return [];
+            }
+
+            var snapshot = new SceneHistoryEntry[count];
+            _entries.CopyTo(_entries.Count - count, snapshot, 0, count);
+            return snapshot;
+        }
+    }
+
+    internal (int Total, int LateNight) CountOutputsInPreviousHour(DateTime now)
+    {
+        lock (_sync)
+        {
+            var total = 0;
+            var lateNight = 0;
+            foreach (var entry in _entries)
+            {
+                var elapsed = Elapsed(now, entry.PlayedAt);
+                if (elapsed < TimeSpan.Zero || elapsed >= TimeSpan.FromHours(1))
+                {
+                    continue;
+                }
+
+                total++;
+                lateNight += Convert.ToInt32(
+                    InterruptionBudget.DayPart(entry.PlayedAt) == DialogueTrigger.LateNight);
+            }
+
+            return (total, lateNight);
+        }
+    }
+
+    public bool IsSceneCoolingDown(SceneDefinition scene, DateTime now)
+    {
+        lock (_sync)
+        {
+            return _lastBySceneId.GetValueOrDefault(scene.Id) is { } previous
+                   && Elapsed(now, previous.PlayedAt) < scene.Cooldown;
+        }
+    }
+
+    public bool IsLineCoolingDown(DialogueLine line, DateTime now)
+    {
+        lock (_sync)
+        {
+            return _lastByLineId.GetValueOrDefault(line.Id) is { } previous
+                   && Elapsed(now, previous.PlayedAt) < line.Cooldown;
+        }
+    }
 
     internal bool TryGetLastPlayedAt(string lineId, out DateTime playedAt)
     {
-        if (_lastByLineId.TryGetValue(lineId, out var previous))
+        lock (_sync)
         {
-            playedAt = previous.PlayedAt;
-            return true;
-        }
+            if (_lastByLineId.TryGetValue(lineId, out var previous))
+            {
+                playedAt = previous.PlayedAt;
+                return true;
+            }
 
-        playedAt = default;
-        return false;
+            playedAt = default;
+            return false;
+        }
     }
 
-    public bool IsSemanticGroupCoolingDown(SceneDefinition scene, DateTime now) =>
-        _lastBySemanticGroup.GetValueOrDefault(scene.SemanticGroup) is { } previous
-        && Elapsed(now, previous.PlayedAt) < scene.SemanticCooldown;
+    public bool IsSemanticGroupCoolingDown(SceneDefinition scene, DateTime now)
+    {
+        lock (_sync)
+        {
+            return _lastBySemanticGroup.GetValueOrDefault(scene.SemanticGroup) is { } previous
+                   && Elapsed(now, previous.PlayedAt) < scene.SemanticCooldown;
+        }
+    }
 
     public bool IsBelowDailyMaximum(DialogueLine line, DateTime now)
     {
-        var localDate = DateOnly.FromDateTime(now);
-        return _dailyCounts.GetValueOrDefault((line.Id, localDate)) < line.MaxPerDay;
+        lock (_sync)
+        {
+            var localDate = DateOnly.FromDateTime(now);
+            return _dailyCounts.GetValueOrDefault((line.Id, localDate)) < line.MaxPerDay;
+        }
     }
 
     public bool MeetsAdjacencyAndRecentQuotas(SceneDefinition scene)
     {
-        var last = _entries.LastOrDefault();
-        if (last is not null
-            && DialogueForest.BlockAdjacentCategoryGroups.Contains(scene.CategoryGroup)
-            && last.CategoryGroup == scene.CategoryGroup)
+        lock (_sync)
         {
-            return false;
-        }
+            var last = _entries.LastOrDefault();
+            if (last is not null
+                && DialogueForest.BlockAdjacentCategoryGroups.Contains(scene.CategoryGroup)
+                && last.CategoryGroup == scene.CategoryGroup)
+            {
+                return false;
+            }
 
-        if (scene.CategoryGroup == DialogueCategoryGroup.Technical
-            && CandidateWindowCount(TechnicalRecentWindow,
-                entry => entry.CategoryGroup == DialogueCategoryGroup.Technical) > TechnicalRecentMaximum)
-        {
-            return false;
-        }
+            if (scene.CategoryGroup == DialogueCategoryGroup.Technical
+                && CandidateWindowCount(TechnicalRecentWindow,
+                    entry => entry.CategoryGroup == DialogueCategoryGroup.Technical) > TechnicalRecentMaximum)
+            {
+                return false;
+            }
 
-        if (!MeetsRareRecentQuotas(scene))
-        {
-            return false;
-        }
+            if (!MeetsRareRecentQuotas(scene))
+            {
+                return false;
+            }
 
-        return scene.OutputMode != DialogueOutputMode.UserDirect
-               || CandidateWindowCount(UserDirectRecentWindow,
-                   entry => entry.OutputMode == DialogueOutputMode.UserDirect) <= UserDirectRecentMaximum;
+            return scene.OutputMode != DialogueOutputMode.UserDirect
+                   || CandidateWindowCount(UserDirectRecentWindow,
+                       entry => entry.OutputMode == DialogueOutputMode.UserDirect) <= UserDirectRecentMaximum;
+        }
     }
 
     public bool MeetsRareRecentQuotas(SceneDefinition scene)
     {
-        if (scene.CategoryGroup == DialogueCategoryGroup.EasterEgg
-            && CandidateWindowCount(EasterEggRecentWindow,
-                entry => entry.CategoryGroup == DialogueCategoryGroup.EasterEgg) > EasterEggRecentMaximum)
+        lock (_sync)
         {
-            return false;
-        }
+            if (scene.CategoryGroup == DialogueCategoryGroup.EasterEgg
+                && CandidateWindowCount(EasterEggRecentWindow,
+                    entry => entry.CategoryGroup == DialogueCategoryGroup.EasterEgg) > EasterEggRecentMaximum)
+            {
+                return false;
+            }
 
-        return scene.Tone != "dry_sharp"
-               || (CandidateWindowCount(DrySharpRecentWindow, IsDrySharpEntry)
-                   <= DrySharpRecentMaximum
-                   && CandidateWindowCount(DrySharpPlaybackWindow, IsDrySharpEntry)
-                   <= DrySharpPlaybackMaximum);
+            return scene.Tone != "dry_sharp"
+                   || (CandidateWindowCount(DrySharpRecentWindow, IsDrySharpEntry)
+                       <= DrySharpRecentMaximum
+                       && CandidateWindowCount(DrySharpPlaybackWindow, IsDrySharpEntry)
+                       <= DrySharpPlaybackMaximum);
+        }
     }
 
-    public IReadOnlyList<DialogueLine> EligibleLines(SceneDefinition scene, DateTime now) =>
-        scene.Lines
-            .Where(line => MeetsLineExposureQuota(line)
-                           && !IsLineCoolingDown(line, now)
-                           && IsBelowDailyMaximum(line, now))
-            .ToArray();
+    public IReadOnlyList<DialogueLine> EligibleLines(SceneDefinition scene, DateTime now)
+    {
+        lock (_sync)
+        {
+            return scene.Lines
+                .Where(line => MeetsLineExposureQuota(line)
+                               && !IsLineCoolingDown(line, now)
+                               && IsBelowDailyMaximum(line, now))
+                .ToArray();
+        }
+    }
 
-    public bool MeetsLineExposureQuota(DialogueLine line) =>
-        !line.HasSeasoningMarker
-        || CandidateWindowCount(
-            SeasoningRecentWindow,
-            IsSeasoningEntry) <= SeasoningRecentMaximum;
+    public bool MeetsLineExposureQuota(DialogueLine line)
+    {
+        lock (_sync)
+        {
+            return !line.HasSeasoningMarker
+                   || CandidateWindowCount(
+                       SeasoningRecentWindow,
+                       IsSeasoningEntry) <= SeasoningRecentMaximum;
+        }
+    }
 
     public IReadOnlyList<DialogueLine> PreferSurfaceExposure(IReadOnlyList<DialogueLine> lines)
     {
-        if (lines.Count == 0)
+        lock (_sync)
         {
-            return lines;
-        }
+            if (lines.Count == 0)
+            {
+                return lines;
+            }
 
-        var recentStart = Math.Max(0, _entries.Count - SurfaceExposure.RecentWindow);
-        var diverse = new List<DialogueLine>(lines.Count);
-        var minimumConflicts = int.MaxValue;
-        foreach (var line in lines)
-        {
-            var profile = line.SurfaceExposureProfile;
-            var openingConflict = false;
-            var endingConflict = false;
-            var templateConflict = false;
-            for (var index = recentStart; index < _entries.Count; index++)
+            var recentStart = Math.Max(0, _entries.Count - SurfaceExposure.RecentWindow);
+            var diverse = new List<DialogueLine>(lines.Count);
+            var minimumConflicts = int.MaxValue;
+            foreach (var line in lines)
             {
-                var entry = _entries[index];
-                openingConflict |= profile.Opening.Length > 0
-                                   && entry.SurfaceOpening == profile.Opening;
-                endingConflict |= profile.Ending.Length > 0
-                                  && entry.SurfaceEnding == profile.Ending;
-                templateConflict |= profile.Template.Length > 0
-                                    && entry.SurfaceTemplate == profile.Template;
+                var profile = line.SurfaceExposureProfile;
+                var openingConflict = false;
+                var endingConflict = false;
+                var templateConflict = false;
+                for (var index = recentStart; index < _entries.Count; index++)
+                {
+                    var entry = _entries[index];
+                    openingConflict |= profile.Opening.Length > 0
+                                       && entry.SurfaceOpening == profile.Opening;
+                    endingConflict |= profile.Ending.Length > 0
+                                     && entry.SurfaceEnding == profile.Ending;
+                    templateConflict |= profile.Template.Length > 0
+                                        && entry.SurfaceTemplate == profile.Template;
+                }
+                var conflicts = Convert.ToInt32(openingConflict)
+                                + Convert.ToInt32(endingConflict)
+                                + Convert.ToInt32(templateConflict);
+                if (conflicts < minimumConflicts)
+                {
+                    diverse.Clear();
+                    minimumConflicts = conflicts;
+                }
+                if (conflicts == minimumConflicts)
+                {
+                    diverse.Add(line);
+                }
             }
-            var conflicts = Convert.ToInt32(openingConflict)
-                            + Convert.ToInt32(endingConflict)
-                            + Convert.ToInt32(templateConflict);
-            if (conflicts < minimumConflicts)
-            {
-                diverse.Clear();
-                minimumConflicts = conflicts;
-            }
-            if (conflicts == minimumConflicts)
-            {
-                diverse.Add(line);
-            }
-        }
 
-        var scoreStart = Math.Max(0, _entries.Count - 50);
-        var seasoningCount = 0;
-        for (var index = scoreStart; index < _entries.Count; index++)
-        {
-            seasoningCount += Convert.ToInt32(IsSeasoningEntry(_entries[index]));
+            var scoreStart = Math.Max(0, _entries.Count - 50);
+            var seasoningCount = 0;
+            for (var index = scoreStart; index < _entries.Count; index++)
+            {
+                seasoningCount += Convert.ToInt32(IsSeasoningEntry(_entries[index]));
+            }
+            var scoreCount = _entries.Count - scoreStart;
+            var observed = scoreCount == 0 ? 0 : seasoningCount / (double)scoreCount;
+            var target = (PersonaContractGenerated.SeasoningPlaybackMinimum
+                          + PersonaContractGenerated.SeasoningPlaybackMaximum) / 2;
+            var seasoning = new List<DialogueLine>(diverse.Count);
+            var neutral = new List<DialogueLine>(diverse.Count);
+            foreach (var line in diverse)
+            {
+                (line.HasSeasoningMarker ? seasoning : neutral).Add(line);
+            }
+            if (observed < target && seasoning.Count > 0)
+            {
+                return seasoning.ToArray();
+            }
+            if (observed > target && neutral.Count > 0)
+            {
+                return neutral.ToArray();
+            }
+            return diverse.ToArray();
         }
-        var scoreCount = _entries.Count - scoreStart;
-        var observed = scoreCount == 0 ? 0 : seasoningCount / (double)scoreCount;
-        var target = (PersonaContractGenerated.SeasoningPlaybackMinimum
-                      + PersonaContractGenerated.SeasoningPlaybackMaximum) / 2;
-        var seasoning = new List<DialogueLine>(diverse.Count);
-        var neutral = new List<DialogueLine>(diverse.Count);
-        foreach (var line in diverse)
-        {
-            (line.HasSeasoningMarker ? seasoning : neutral).Add(line);
-        }
-        if (observed < target && seasoning.Count > 0)
-        {
-            return seasoning.ToArray();
-        }
-        if (observed > target && neutral.Count > 0)
-        {
-            return neutral.ToArray();
-        }
-        return diverse.ToArray();
     }
 
     public bool HasEligibleLine(SceneDefinition scene, DateTime now)
     {
-        if (scene.Lines.Count == 0 || !scene.Lines[0].Enabled)
+        lock (_sync)
         {
+            if (scene.Lines.Count == 0 || !scene.Lines[0].Enabled)
+            {
+                return false;
+            }
+
+            _seenLineIdsBySemanticGroup.TryGetValue(scene.SemanticGroup, out var seen);
+            foreach (var line in scene.Lines)
+            {
+                if (!MeetsLineExposureQuota(line))
+                {
+                    continue;
+                }
+                if (seen is null || !seen.Contains(line.Id))
+                {
+                    return true;
+                }
+                if (!IsLineCoolingDown(line, now) && IsBelowDailyMaximum(line, now))
+                {
+                    return true;
+                }
+            }
             return false;
         }
-
-        _seenLineIdsBySemanticGroup.TryGetValue(scene.SemanticGroup, out var seen);
-        foreach (var line in scene.Lines)
-        {
-            if (!MeetsLineExposureQuota(line))
-            {
-                continue;
-            }
-            if (seen is null || !seen.Contains(line.Id))
-            {
-                return true;
-            }
-            if (!IsLineCoolingDown(line, now) && IsBelowDailyMaximum(line, now))
-            {
-                return true;
-            }
-        }
-        return false;
     }
 
     public DateTime NextEligibleAt(SceneDefinition scene, DateTime now)
     {
-        var next = now.AddHours(1);
-        if (LastSceneAt is { } lastScene)
+        lock (_sync)
         {
-            next = Later(next, lastScene.AddMinutes(InterruptionBudget.CostIntervalsMinutes[scene.InterruptionCost]));
-        }
-
-        if (_lastBySemanticGroup.GetValueOrDefault(scene.SemanticGroup) is { } semantic)
-        {
-            next = Later(next, semantic.PlayedAt + scene.SemanticCooldown);
-        }
-
-        var lineTimes = scene.Lines.Select(line =>
-        {
-            var candidate = now;
-            if (_lastByLineId.GetValueOrDefault(line.Id) is { } previous)
+            var next = now.AddHours(1);
+            if (_entries.Count > 0)
             {
-                candidate = Later(candidate, previous.PlayedAt + line.Cooldown);
+                next = Later(
+                    next,
+                    _entries[^1].PlayedAt.AddMinutes(InterruptionBudget.CostIntervalsMinutes[scene.InterruptionCost]));
             }
-            if (!IsBelowDailyMaximum(line, now))
+
+            if (_lastBySemanticGroup.GetValueOrDefault(scene.SemanticGroup) is { } semantic)
             {
-                candidate = Later(candidate, now.Date.AddDays(1));
+                next = Later(next, semantic.PlayedAt + scene.SemanticCooldown);
             }
-            return candidate;
-        });
-        return Later(next, lineTimes.Min());
+
+            var lineTimes = scene.Lines.Select(line =>
+            {
+                var candidate = now;
+                if (_lastByLineId.GetValueOrDefault(line.Id) is { } previous)
+                {
+                    candidate = Later(candidate, previous.PlayedAt + line.Cooldown);
+                }
+                if (!IsBelowDailyMaximum(line, now))
+                {
+                    candidate = Later(candidate, now.Date.AddDays(1));
+                }
+                return candidate;
+            });
+            return Later(next, lineTimes.Min());
+        }
     }
 
     public static TimeSpan Elapsed(DateTime now, DateTime then)
@@ -444,19 +568,14 @@ public static class InterruptionBudget
             }
         }
 
-        var recentHour = history.Entries.Where(entry =>
-        {
-            var elapsed = SceneHistory.Elapsed(now, entry.PlayedAt);
-            return elapsed >= TimeSpan.Zero && elapsed < TimeSpan.FromHours(1);
-        }).ToArray();
-        if (recentHour.Length >= MaximumOutputsPerHour)
+        var recentHour = history.CountOutputsInPreviousHour(now);
+        if (recentHour.Total >= MaximumOutputsPerHour)
         {
             return false;
         }
 
         return DayPart(now) != DialogueTrigger.LateNight
-               || recentHour.Count(entry => DayPart(entry.PlayedAt) == DialogueTrigger.LateNight)
-               < LateNightMaximumOutputsPerHour;
+               || recentHour.LateNight < LateNightMaximumOutputsPerHour;
     }
 
     public static bool CanInterrupt(
@@ -471,11 +590,7 @@ public static class InterruptionBudget
             return false;
         }
 
-        return history.Entries.Count(entry =>
-        {
-            var elapsed = SceneHistory.Elapsed(now, entry.PlayedAt);
-            return elapsed >= TimeSpan.Zero && elapsed < TimeSpan.FromHours(1);
-        }) < MaximumOutputsPerHour;
+        return history.CountOutputsInPreviousHour(now).Total < MaximumOutputsPerHour;
     }
 
     internal static DialogueTrigger DayPart(DateTime now) => TemporalDialogueService.GetDialogueTrigger(now);
@@ -630,7 +745,8 @@ public sealed partial class SceneScheduler
             return null;
         }
 
-        var lastLineId = history.Entries.LastOrDefault()?.DialogueLineId;
+        var playback = history.Entries;
+        var lastLineId = playback.LastOrDefault()?.DialogueLineId;
         var recent = RecentHistoryProfile.Create(history);
         var hasNonRepeatingLine = quotaEligibleScenes.Any(scene =>
             scene.Lines.Any(line =>
@@ -638,7 +754,7 @@ public sealed partial class SceneScheduler
                 && history.MeetsLineExposureQuota(line)
                 && line.Id != lastLineId));
         var lastPlayedAt = new Dictionary<string, DateTime>(StringComparer.Ordinal);
-        foreach (var entry in history.Entries)
+        foreach (var entry in playback)
         {
             lastPlayedAt[entry.DialogueLineId] = entry.PlayedAt;
         }
@@ -834,7 +950,7 @@ public sealed partial class SceneScheduler
             var categoryGroups = new Dictionary<DialogueCategoryGroup, int>();
             var outputModes = new Dictionary<DialogueOutputMode, int>();
             var categories = new Dictionary<DialogueCategory, int>();
-            var recent = history.Entries.TakeLast(50).ToArray();
+            var recent = history.SnapshotRecentEntries(50);
             var drySharpCount = 0;
             foreach (var entry in recent)
             {

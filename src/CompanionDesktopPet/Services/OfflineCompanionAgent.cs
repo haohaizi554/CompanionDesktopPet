@@ -32,12 +32,14 @@ public sealed class OfflineCompanionAgent : ICompanionDialogueAgent
 {
     public const int RecentMemoryLimit = 64;
 
+    private readonly object _sync = new();
     private readonly Queue<string> _recentLines = new(RecentMemoryLimit);
     private readonly HashSet<string> _usedThisSession = new(StringComparer.Ordinal);
     private readonly SceneHistory _history = new();
     private readonly SceneScheduler _scheduler = new();
     private CharacterState? _state;
     private DialogueCategory? _lastCategory;
+    private int _turnCount;
 
     public OfflineCompanionAgent(DialogueCategory? initialCategory = null) => _lastCategory = initialCategory;
 
@@ -46,7 +48,7 @@ public sealed class OfflineCompanionAgent : ICompanionDialogueAgent
         ArgumentNullException.ThrowIfNull(snapshot);
         _state = snapshot.State.Clone();
         _lastCategory = snapshot.LastCategory;
-        TurnCount = snapshot.TurnCount;
+        _turnCount = snapshot.TurnCount;
         _history.Restore(snapshot.History);
         foreach (var line in snapshot.RecentLines.TakeLast(RecentMemoryLimit))
         {
@@ -54,23 +56,54 @@ public sealed class OfflineCompanionAgent : ICompanionDialogueAgent
         }
     }
 
-    public int TurnCount { get; private set; }
+    public int TurnCount
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _turnCount;
+            }
+        }
+    }
 
-    public IReadOnlyList<string> RecentLines => _recentLines.ToArray();
+    public IReadOnlyList<string> RecentLines
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _recentLines.ToArray();
+            }
+        }
+    }
 
-    public DateTime? NextStoryDueAt => _state?.ActiveStories.Count > 0
-        ? _state.ActiveStories.Min(story => story.DueAt)
-        : null;
+    public DateTime? NextStoryDueAt
+    {
+        get
+        {
+            lock (_sync)
+            {
+                var stories = _state?.ActiveStories;
+                return stories is { Count: > 0 }
+                    ? stories.Min(story => story.DueAt)
+                    : null;
+            }
+        }
+    }
 
     public AgentMemorySnapshot CreateSnapshot()
     {
-        _state ??= CharacterState.Create(DateTime.Now);
-        return new AgentMemorySnapshot(
-            _state.Clone(),
-            _history.Entries.ToArray(),
-            TurnCount,
-            _lastCategory,
-            RecentLines);
+        lock (_sync)
+        {
+            _state ??= CharacterState.Create(DateTime.Now);
+            return new AgentMemorySnapshot(
+                _state.Clone(),
+                _history.Entries,
+                _turnCount,
+                _lastCategory,
+                _recentLines.ToArray());
+        }
     }
 
     internal void WarmUp()
@@ -108,10 +141,22 @@ public sealed class OfflineCompanionAgent : ICompanionDialogueAgent
         FullscreenSnapshot fullscreen)
     {
         ArgumentNullException.ThrowIfNull(random);
+        lock (_sync)
+        {
+            return RespondCoreLocked(trigger, localTime, random, fullscreen);
+        }
+    }
+
+    private AgentReply RespondCoreLocked(
+        CompanionEvent trigger,
+        DateTime localTime,
+        Random random,
+        FullscreenSnapshot fullscreen)
+    {
         _state ??= CharacterState.Create(localTime);
         _state.AdvanceTo(localTime);
 
-        var preferredTree = DialogueForest.SelectTree(trigger, _lastCategory, TurnCount, random);
+        var preferredTree = DialogueForest.SelectTree(trigger, _lastCategory, _turnCount, random);
         var context = new SceneContext(
             trigger,
             localTime,
@@ -132,7 +177,7 @@ public sealed class OfflineCompanionAgent : ICompanionDialogueAgent
             safe = _scheduler.SelectSafeFeedback(SceneCatalog.PersonaScenes, context, _history, random);
             scene = safe?.Scene;
         }
-        TurnCount++;
+        _turnCount++;
         if (scene is null)
         {
             if (trigger == CompanionEvent.StoryTimerDue)
@@ -236,8 +281,8 @@ public sealed class OfflineCompanionAgent : ICompanionDialogueAgent
         }
 
         var scene = StoryArcCatalog.All.Single(arc => arc.Id == due.ArcId).Nodes[due.NodeIndex];
-        _state.ActiveStories.Remove(due);
-        _state.ActiveStories.Add(due with { DueAt = _history.NextEligibleAt(scene, now) });
+        _state.RemoveActiveStory(due);
+        _state.AddActiveStory(due with { DueAt = _history.NextEligibleAt(scene, now) });
     }
 
     private void UpdateActivity(DialogueCategoryGroup group, DialogueCategory category)
@@ -263,7 +308,7 @@ public sealed class OfflineCompanionAgent : ICompanionDialogueAgent
             return;
         }
 
-        _state!.ActiveStories.RemoveAll(story => story.ArcId == scene.StoryArcId);
+        _state!.RemoveActiveStories(story => story.ArcId == scene.StoryArcId);
         var arc = StoryArcCatalog.All.Single(item => item.Id == scene.StoryArcId);
         if (scene.StoryNode >= arc.Nodes.Count - 1)
         {
@@ -273,7 +318,7 @@ public sealed class OfflineCompanionAgent : ICompanionDialogueAgent
         var delay = scene.StoryNode == 0
             ? TimeSpan.FromHours(4 + random.NextDouble() * 4)
             : TimeSpan.FromHours(12 + random.NextDouble() * 18);
-        _state.ActiveStories.Add(new StoryProgress(scene.StoryArcId, scene.StoryNode + 1, now + delay));
+        _state.AddActiveStory(new StoryProgress(scene.StoryArcId, scene.StoryNode + 1, now + delay));
     }
 
     private void Remember(string text)

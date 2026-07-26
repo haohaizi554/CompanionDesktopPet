@@ -106,7 +106,7 @@ public sealed class DialogueWarmupTests
     {
         var state = CharacterState.Create(LocalNow);
         var dueAt = LocalNow.AddMinutes(20);
-        state.ActiveStories.Add(new StoryProgress("pending-story", 2, dueAt));
+        state.ActiveStories = [new StoryProgress("pending-story", 2, dueAt)];
         var snapshot = new AgentMemorySnapshot(
             state,
             [],
@@ -137,7 +137,7 @@ public sealed class DialogueWarmupTests
     {
         var state = CharacterState.Create(LocalNow);
         var dueAt = LocalNow.AddMinutes(20);
-        state.ActiveStories.Add(new StoryProgress("pending-story", 2, dueAt));
+        state.ActiveStories = [new StoryProgress("pending-story", 2, dueAt)];
         var history = new List<SceneHistoryEntry>
         {
             new("scene", "semantic", LocalNow, "line")
@@ -158,11 +158,11 @@ public sealed class DialogueWarmupTests
                 return new FixedAgent(restored, "ready");
             });
 
-        initial.State.ActiveStories.Clear();
+        initial.State.ActiveStories = [];
         history.Clear();
         recentLines.Clear();
         var first = service.CreateSnapshot();
-        first.State.ActiveStories.Clear();
+        first.State.ActiveStories = [];
         Assert.IsType<SceneHistoryEntry[]>(first.History)[0] = new(
             "mutated", "mutated", LocalNow, "mutated");
         Assert.IsType<string[]>(first.RecentLines)[0] = "mutated";
@@ -181,7 +181,7 @@ public sealed class DialogueWarmupTests
         Assert.NotSame(second.State, factorySnapshot.State);
 
         var readyFirst = service.CreateSnapshot();
-        readyFirst.State.ActiveStories.Clear();
+        readyFirst.State.ActiveStories = [];
         Assert.IsType<SceneHistoryEntry[]>(readyFirst.History)[0] = new(
             "ready-mutated", "ready-mutated", LocalNow, "ready-mutated");
         Assert.IsType<string[]>(readyFirst.RecentLines)[0] = "ready-mutated";
@@ -235,10 +235,13 @@ public sealed class DialogueWarmupTests
         agent.Respond(CompanionEvent.Click, LocalNow, new Random(20260724));
         var compatible = agent.CreateSnapshot();
         var arc = StoryArcCatalog.All[0];
-        compatible.State.ActiveStories.Add(new StoryProgress(
-            arc.Id,
-            1,
-            LocalNow.AddHours(4)));
+        compatible.State.ActiveStories = [
+            .. compatible.State.ActiveStories,
+            new StoryProgress(
+                arc.Id,
+                1,
+                LocalNow.AddHours(4))
+        ];
         var service = DialogueService.CreateDeferred(compatible);
 
         Assert.True(await service.WarmupAsync());

@@ -32,6 +32,9 @@ public sealed record StoryProgress(
 
 public sealed class CharacterState
 {
+    private readonly object _activeStoriesSync = new();
+    private List<StoryProgress> _activeStories = [];
+
     [JsonRequired]
     public double Energy { get; set; }
 
@@ -57,7 +60,25 @@ public sealed class CharacterState
     public int AttachmentDays { get; set; }
 
     [JsonRequired]
-    public List<StoryProgress> ActiveStories { get; set; } = [];
+    public IReadOnlyList<StoryProgress> ActiveStories
+    {
+        get
+        {
+            lock (_activeStoriesSync)
+            {
+                return Array.AsReadOnly(_activeStories.ToArray());
+            }
+        }
+        set
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            var copied = value.ToArray();
+            lock (_activeStoriesSync)
+            {
+                _activeStories = [.. copied];
+            }
+        }
+    }
 
     public static CharacterState Create(DateTime now) => new()
     {
@@ -112,6 +133,33 @@ public sealed class CharacterState
         Boredom = Clamp(Boredom + scene.BoredomDelta);
     }
 
+    internal void AddActiveStory(StoryProgress story)
+    {
+        ArgumentNullException.ThrowIfNull(story);
+        lock (_activeStoriesSync)
+        {
+            _activeStories.Add(story);
+        }
+    }
+
+    internal bool RemoveActiveStory(StoryProgress story)
+    {
+        ArgumentNullException.ThrowIfNull(story);
+        lock (_activeStoriesSync)
+        {
+            return _activeStories.Remove(story);
+        }
+    }
+
+    internal int RemoveActiveStories(Predicate<StoryProgress> predicate)
+    {
+        ArgumentNullException.ThrowIfNull(predicate);
+        lock (_activeStoriesSync)
+        {
+            return _activeStories.RemoveAll(predicate);
+        }
+    }
+
     internal CharacterState Clone() => new()
     {
         Energy = Energy,
@@ -122,7 +170,7 @@ public sealed class CharacterState
         InstalledAt = InstalledAt,
         LastUpdatedAt = LastUpdatedAt,
         AttachmentDays = AttachmentDays,
-        ActiveStories = [.. ActiveStories]
+        ActiveStories = ActiveStories
     };
 
     private static double Clamp(double value) => Math.Clamp(value, 0, 1);
