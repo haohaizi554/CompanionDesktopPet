@@ -79,6 +79,11 @@
         "nostalgic", "curious", "intimate", "encouraging"
       ]
     },
+    "relationshipProfile": {
+      "enum": [
+        "neutral", "warm_friend", "playful_friend", "nickname_easter_egg"
+      ]
+    },
     "trigger": {
       "enum": [
         "any", "app_start", "morning", "noon", "afternoon", "evening",
@@ -154,8 +159,8 @@
     "controlledValues": {
       "type": "object",
       "required": [
-        "output_modes", "tones", "source_kinds", "context_tokens", "mvp_triggers",
-        "future_triggers"
+        "output_modes", "tones", "source_kinds", "relationship_profiles",
+        "context_tokens", "mvp_triggers", "future_triggers"
       ],
       "properties": {
         "output_modes": {
@@ -175,6 +180,11 @@
             ]
           },
           "minItems": 7, "maxItems": 7, "uniqueItems": true
+        },
+        "relationship_profiles": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/relationshipProfile" },
+          "minItems": 4, "maxItems": 4, "uniqueItems": true
         },
         "context_tokens": { "$ref": "#/$defs/contextTokens" },
         "mvp_triggers": { "$ref": "#/$defs/mvpTriggers" },

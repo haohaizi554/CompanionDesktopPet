@@ -106,6 +106,12 @@ class AuthoredCatalogTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "expected 100 batches"):
                 load_authored_catalog(root / "authored", root / "manifest.json")
 
+    def test_relationship_profile_allowlist_is_the_shared_contract_instance(self) -> None:
+        from src.persona_corpus.authored_catalog import RELATIONSHIP_PROFILES
+        from src.persona_corpus.contract import PERSONA_CONTRACT
+
+        self.assertIs(RELATIONSHIP_PROFILES, PERSONA_CONTRACT.relationship_profiles)
+
     def test_load_authored_catalog_rejects_manifest_text_hash_drift(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             authored_dir, manifest = write_valid_authored_fixture(Path(temporary_directory))

@@ -36,6 +36,21 @@ class ReleaseTestProjectContractTests(unittest.TestCase):
 
 
 class CSharpContractGeneratorTests(unittest.TestCase):
+    def test_render_emits_the_contract_controlled_relationship_profiles(self) -> None:
+        from tools import generate_persona_contract_cs as generator
+
+        rendered = generator.render_contract()
+
+        self.assertIn("ControlledRelationshipProfiles", rendered)
+        for profile in (
+            "neutral",
+            "warm_friend",
+            "playful_friend",
+            "nickname_easter_egg",
+        ):
+            with self.subTest(profile=profile):
+                self.assertIn(f'"{profile}"', rendered)
+
     def test_render_preserves_round_trip_double_literals_across_contract_fields(self) -> None:
         from tools import generate_persona_contract_cs as generator
 
@@ -177,6 +192,22 @@ class PersonaContractFileTests(unittest.TestCase):
         self.assertEqual(set(CATEGORY_GROUPS), set(CATEGORY_GROUP_BY_CATEGORY.values()))
         with self.assertRaises(TypeError):
             CATEGORY_GROUP_BY_CATEGORY["Career"] = "technical"  # type: ignore[index]
+
+    def test_relationship_profiles_are_a_single_immutable_contract_set(self) -> None:
+        payload = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
+        expected = {
+            "neutral",
+            "warm_friend",
+            "playful_friend",
+            "nickname_easter_egg",
+        }
+
+        from src.persona_corpus.contract import PERSONA_CONTRACT
+
+        self.assertEqual(expected, set(payload["controlled_values"]["relationship_profiles"]))
+        self.assertEqual(frozenset(expected), PERSONA_CONTRACT.relationship_profiles)
+        with self.assertRaises(AttributeError):
+            PERSONA_CONTRACT.relationship_profiles.add("exclusive")
 
     def test_contract_declares_uniform_half_open_context_ranges(self) -> None:
         payload = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))

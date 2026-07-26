@@ -199,6 +199,12 @@ internal static class PersonaContractGenerated
 {_set_lines(controlled['tones'])}
         }};
 
+    public static IReadOnlySet<string> ControlledRelationshipProfiles {{ get; }} =
+        new HashSet<string>(StringComparer.Ordinal)
+        {{
+{_set_lines(sorted(PERSONA_CONTRACT.relationship_profiles))}
+        }};
+
     public static IReadOnlySet<string> ControlledSourceKinds {{ get; }} =
         new HashSet<string>(StringComparer.Ordinal)
         {{

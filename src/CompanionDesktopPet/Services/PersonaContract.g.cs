@@ -131,6 +131,15 @@ internal static class PersonaContractGenerated
         "encouraging"
         };
 
+    public static IReadOnlySet<string> ControlledRelationshipProfiles { get; } =
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+        "neutral",
+        "nickname_easter_egg",
+        "playful_friend",
+        "warm_friend"
+        };
+
     public static IReadOnlySet<string> ControlledSourceKinds { get; } =
         new HashSet<string>(StringComparer.Ordinal)
         {

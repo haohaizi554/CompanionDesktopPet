@@ -17,7 +17,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Iterator, Mapping
 
-from .contract import PersonaContractError, category_group_for
+from .contract import PERSONA_CONTRACT, PersonaContractError, category_group_for
 from .schema import AUTHORED_HEADER, AUTHORED_LEDGER_HEADER
 
 
@@ -26,9 +26,9 @@ EXPECTED_BATCH_IDS = tuple(f"b{number:03d}" for number in range(1, 101))
 ROWS_PER_BATCH = 300
 EXPECTED_ENTRY_COUNT = len(EXPECTED_BATCH_IDS) * ROWS_PER_BATCH
 APPROVED_REVIEW_STATUS = "approved"
-RELATIONSHIP_PROFILES = frozenset(
-    {"neutral", "warm_friend", "playful_friend", "nickname_easter_egg"}
-)
+# Compatibility export for existing callers. The shared persona contract is the
+# only source that can authorize an authored relationship profile.
+RELATIONSHIP_PROFILES = PERSONA_CONTRACT.relationship_profiles
 
 _MANIFEST_KEYS = frozenset(
     {

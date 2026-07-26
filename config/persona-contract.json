@@ -80,6 +80,12 @@
       "archived_question",
       "manual_review"
     ],
+    "relationship_profiles": [
+      "neutral",
+      "warm_friend",
+      "playful_friend",
+      "nickname_easter_egg"
+    ],
     "context_tokens": [
       "none",
       "app_started",

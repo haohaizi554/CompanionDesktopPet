@@ -127,6 +127,7 @@ class PersonaContract:
     output_modes: frozenset[str]
     tones: frozenset[str]
     source_kinds: frozenset[str]
+    relationship_profiles: frozenset[str]
     context_tokens: frozenset[str]
     mvp_triggers: frozenset[str]
     future_triggers: frozenset[str]
@@ -202,6 +203,7 @@ def load_persona_contract(path: Path = DEFAULT_CONTRACT_PATH) -> PersonaContract
         "output_modes",
         "tones",
         "source_kinds",
+        "relationship_profiles",
         "context_tokens",
         "mvp_triggers",
         "future_triggers",
@@ -211,6 +213,18 @@ def load_persona_contract(path: Path = DEFAULT_CONTRACT_PATH) -> PersonaContract
     output_modes = frozenset(_string_tuple(controlled["output_modes"], "output_modes"))
     tones = frozenset(_string_tuple(controlled["tones"], "tones"))
     source_kinds = frozenset(_string_tuple(controlled["source_kinds"], "source_kinds"))
+    relationship_profiles = frozenset(
+        _string_tuple(controlled["relationship_profiles"], "relationship_profiles")
+    )
+    if relationship_profiles != {
+        "neutral",
+        "warm_friend",
+        "playful_friend",
+        "nickname_easter_egg",
+    }:
+        raise PersonaContractError(
+            "relationship_profiles must contain the exact controlled profile set"
+        )
     context_tokens = frozenset(
         _string_tuple(controlled["context_tokens"], "context_tokens")
     )
@@ -556,6 +570,7 @@ def load_persona_contract(path: Path = DEFAULT_CONTRACT_PATH) -> PersonaContract
         output_modes=output_modes,
         tones=tones,
         source_kinds=source_kinds,
+        relationship_profiles=relationship_profiles,
         context_tokens=context_tokens,
         mvp_triggers=mvp_triggers,
         future_triggers=future_triggers,
