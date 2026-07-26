@@ -130,6 +130,24 @@ class AuthoredCatalogTests(unittest.TestCase):
             ):
                 parse_authored_batches(authored_dir)
 
+    def test_parse_authored_batches_rejects_semantic_group_cooldown_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            authored_dir, _ = write_valid_authored_fixture(Path(temporary_directory))
+            path = authored_dir / "b002.tsv"
+            lines = path.read_text(encoding="utf-8").splitlines()
+            fields = lines[1].split("\t")
+            fields[AUTHORED_HEADER.index("semantic_group")] = _row(
+                "b001", 1
+            )[AUTHORED_HEADER.index("semantic_group")]
+            fields[AUTHORED_HEADER.index("semantic_cooldown_hours")] = "49"
+            lines[1] = "\t".join(fields)
+            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(
+                ValueError, r"semantic_group.*semantic_cooldown_hours"
+            ):
+                parse_authored_batches(authored_dir)
+
     def test_load_authored_catalog_rejects_manifest_text_hash_drift(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             authored_dir, manifest = write_valid_authored_fixture(Path(temporary_directory))
