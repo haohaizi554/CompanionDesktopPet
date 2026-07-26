@@ -26,6 +26,41 @@ V2_HEADER = (
     "rewrite_reason",
 )
 
+# Authored v1 source rows are intentionally separate from the generated v2
+# runtime contract.  The builder will derive runtime-only lineage fields such
+# as ``id`` and ``source_reference`` from these reviewable source records.
+AUTHORED_HEADER = (
+    "variant_id",
+    "batch_id",
+    "category",
+    "category_group",
+    "topic_id",
+    "editorial_role",
+    "semantic_group",
+    "output_mode",
+    "trigger",
+    "required_context",
+    "tone",
+    "interrupt_cost",
+    "cooldown_hours",
+    "semantic_cooldown_hours",
+    "max_per_day",
+    "weight",
+    "relationship_profile",
+    "text",
+    "review_status",
+)
+
+AUTHORED_LEDGER_HEADER = (
+    "batch_id",
+    "variant_id",
+    "text_sha256",
+    "metadata_sha256",
+    "review_status",
+    "relationship_profile",
+    "root_sha256",
+)
+
 ARCHIVE_HEADER = (
     "source_line",
     "category",
