@@ -1,5 +1,13 @@
 namespace CompanionDesktopPet.Services;
 
+internal enum AutomaticCadenceMode
+{
+    Daytime,
+    Evening,
+    LateNightOrDawn,
+    Fullscreen
+}
+
 public sealed class DialogueScheduler
 {
     private readonly Random _random;
@@ -12,16 +20,31 @@ public sealed class DialogueScheduler
 
     public TimeSpan NextDelay() => NextDelay(DateTime.Now);
 
-    public TimeSpan NextDelay(DateTime localTime, bool isFullscreen = false)
+    internal static AutomaticCadenceMode GetMode(DateTime localTime, bool effectiveQuietMode)
     {
-        if (isFullscreen)
+        if (effectiveQuietMode)
         {
-            return TimeSpan.FromSeconds(_random.Next(90 * 60, (150 * 60) + 1));
+            return AutomaticCadenceMode.Fullscreen;
         }
 
-        var period = TemporalDialogueService.GetTimePeriod(localTime);
-        return period is TimePeriod.LateNight or TimePeriod.Dawn
-            ? TimeSpan.FromSeconds(_random.Next(45 * 60, (90 * 60) + 1))
-            : TimeSpan.FromSeconds(_random.Next(20 * 60, (50 * 60) + 1));
+        return TemporalDialogueService.GetTimePeriod(localTime) switch
+        {
+            TimePeriod.Evening => AutomaticCadenceMode.Evening,
+            TimePeriod.LateNight or TimePeriod.Dawn => AutomaticCadenceMode.LateNightOrDawn,
+            _ => AutomaticCadenceMode.Daytime
+        };
+    }
+
+    public TimeSpan NextDelay(DateTime localTime, bool effectiveQuietMode = false)
+    {
+        var (minimum, maximum) = GetMode(localTime, effectiveQuietMode) switch
+        {
+            AutomaticCadenceMode.Daytime => (5, 15),
+            AutomaticCadenceMode.Evening => (10, 20),
+            AutomaticCadenceMode.LateNightOrDawn => (30, 60),
+            AutomaticCadenceMode.Fullscreen => (60, 120),
+            _ => throw new ArgumentOutOfRangeException()
+        };
+        return TimeSpan.FromSeconds(_random.Next(minimum * 60, maximum * 60 + 1));
     }
 }
