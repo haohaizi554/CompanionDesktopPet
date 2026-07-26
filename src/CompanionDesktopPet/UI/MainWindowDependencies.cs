@@ -30,6 +30,8 @@ internal sealed class MainWindowDependencies
     internal Func<PetSettings, Task>? SaveSettingsAsync { get; init; }
     internal DialogueService? DialogueService { get; init; }
     internal TimeProvider? TimeProvider { get; init; }
+    internal IForegroundFullscreenDetector? ForegroundFullscreenDetector { get; init; }
+    internal DialogueScheduler? DialogueScheduler { get; init; }
     internal DialogueWarmupCoordinator? WarmupCoordinator { get; init; }
     internal Action<FrameworkElement>? AnnounceLiveRegionChanged { get; init; }
     internal IPetAnimationController? AnimationController { get; init; }

@@ -646,8 +646,8 @@ public sealed class WindowShellTests
                 Assert.Contains("failed", failure, StringComparison.OrdinalIgnoreCase);
                 Assert.False(dialogue.IsReady);
 
-                InvokePrivate(window, "AutomaticTimer_Tick", null, EventArgs.Empty);
-                InvokePrivate(window, "AutomaticTimer_Tick", null, EventArgs.Empty);
+                window.ProcessAutomaticTimerTick();
+                window.ProcessAutomaticTimerTick();
                 Assert.False(await window.PrepareSmokeReadinessAsync(TimeSpan.FromSeconds(1)));
                 Assert.Equal(1, factoryCalls);
             }
@@ -1566,8 +1566,8 @@ public sealed class WindowShellTests
 
                 window.SaySomething();
                 postExitToggle = window.ToggleAnimationAsync();
-                InvokePrivate(window, "AutomaticTimer_Tick", null, EventArgs.Empty);
-                InvokePrivate(window, "EventTimer_Tick", null, EventArgs.Empty);
+                window.ProcessAutomaticTimerTick();
+                window.ProcessEventTimerTick();
                 window.ProcessAmbientSchedule();
                 InvokePrivate(window, "BubbleHover_MouseEnter", character, null);
                 InvokePrivate(window, "BubbleHover_MouseLeave", character, null);
@@ -1831,6 +1831,605 @@ public sealed class WindowShellTests
     }
 
     [Fact]
+    public void MainWindow_LoadedObservesOnceAndArmsFromTheStartupSnapshot()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var time = new ManualTimeProvider();
+            time.SetLocalNow(new DateTime(2026, 7, 26, 10, 0, 0));
+            var detector = new SequenceFullscreenDetector(true);
+            var agent = new RecordingDialogueAgent();
+            var schedulerRandom = new EndpointRandom();
+            var window = CreateWindowWithCadence(
+                settingsDirectory,
+                time,
+                detector,
+                agent,
+                schedulerRandom);
+            try
+            {
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+
+                var runtime = window.CaptureAutomaticDialogueRuntime();
+                var startup = Assert.Single(agent.Calls);
+                Assert.Equal(1, detector.ObserveCount);
+                Assert.Equal(1, schedulerRandom.NextCount);
+                Assert.NotEqual(nint.Zero, Assert.Single(detector.ExcludedWindows));
+                Assert.Equal(CompanionEvent.Startup, startup.Trigger);
+                Assert.Equal(new DateTime(2026, 7, 26, 10, 0, 0), startup.LocalTime);
+                Assert.Equal(new FullscreenSnapshot(true, true), startup.Fullscreen);
+                Assert.True(runtime.IsScheduled);
+                Assert.Equal(TimeSpan.FromMinutes(60), runtime.ScheduledDelay);
+                Assert.Equal(AutomaticCadenceMode.Fullscreen, runtime.ArmedMode);
+                Assert.Equal(0, runtime.ArmedAtTimestamp);
+                Assert.Equal(startup.Fullscreen, runtime.Fullscreen);
+            }
+            finally
+            {
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
+    public void MainWindow_EnteringAndExitingFullscreenSilentlyRearmsWithoutChangingReply()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var time = new ManualTimeProvider();
+            time.SetLocalNow(new DateTime(2026, 7, 26, 10, 0, 0));
+            var detector = new SequenceFullscreenDetector(false, true, false);
+            var agent = new RecordingDialogueAgent();
+            var window = CreateWindowWithCadence(settingsDirectory, time, detector, agent);
+            try
+            {
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                var startupReply = GetLastReply(window);
+
+                time.Advance(TimeSpan.FromMinutes(1));
+                time.SetLocalNow(new DateTime(2026, 7, 26, 10, 1, 0));
+                window.ProcessEventTimerTick();
+                var entered = window.CaptureAutomaticDialogueRuntime();
+
+                Assert.Same(startupReply, GetLastReply(window));
+                Assert.Single(agent.Calls);
+                Assert.Equal(AutomaticCadenceMode.Fullscreen, entered.ArmedMode);
+                Assert.Equal(TimeSpan.FromMinutes(60), entered.ScheduledDelay);
+                Assert.Equal(TimeSpan.FromMinutes(1).Ticks, entered.ArmedAtTimestamp);
+
+                time.Advance(TimeSpan.FromMinutes(1));
+                time.SetLocalNow(new DateTime(2026, 7, 26, 10, 2, 0));
+                window.ProcessEventTimerTick();
+                var exited = window.CaptureAutomaticDialogueRuntime();
+
+                Assert.Same(startupReply, GetLastReply(window));
+                Assert.Single(agent.Calls);
+                Assert.Equal(3, detector.ObserveCount);
+                Assert.Equal(AutomaticCadenceMode.Daytime, exited.ArmedMode);
+                Assert.Equal(TimeSpan.FromMinutes(5), exited.ScheduledDelay);
+                Assert.Equal(TimeSpan.FromMinutes(2).Ticks, exited.ArmedAtTimestamp);
+            }
+            finally
+            {
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
+    public void MainWindow_NonFullscreenBandChangeSilentlyRearmsBeforePollingEvents()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var time = new ManualTimeProvider();
+            time.SetLocalNow(new DateTime(2026, 7, 26, 17, 59, 0));
+            var detector = new SequenceFullscreenDetector(false, false);
+            var agent = new RecordingDialogueAgent();
+            var schedulerRandom = new EndpointRandom();
+            var window = CreateWindowWithCadence(
+                settingsDirectory,
+                time,
+                detector,
+                agent,
+                schedulerRandom);
+            try
+            {
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                var startupReply = GetLastReply(window);
+                time.Advance(TimeSpan.FromMinutes(1));
+                time.SetLocalNow(new DateTime(2026, 7, 26, 18, 0, 0));
+
+                window.ProcessEventTimerTick();
+
+                var runtime = window.CaptureAutomaticDialogueRuntime();
+                Assert.Same(startupReply, GetLastReply(window));
+                Assert.Single(agent.Calls);
+                Assert.Equal(2, detector.ObserveCount);
+                Assert.Equal(2, schedulerRandom.NextCount);
+                Assert.Equal(AutomaticCadenceMode.Evening, runtime.ArmedMode);
+                Assert.Equal(TimeSpan.FromMinutes(10), runtime.ScheduledDelay);
+                Assert.Equal(TimeSpan.FromMinutes(1).Ticks, runtime.ArmedAtTimestamp);
+            }
+            finally
+            {
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
+    public void MainWindow_FullscreenBandChangeKeepsTheExistingFullscreenArm()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var time = new ManualTimeProvider();
+            time.SetLocalNow(new DateTime(2026, 7, 26, 17, 59, 0));
+            var detector = new SequenceFullscreenDetector(true, true);
+            var agent = new RecordingDialogueAgent(CompanionEvent.ClockTick);
+            var window = CreateWindowWithCadence(settingsDirectory, time, detector, agent);
+            try
+            {
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                var before = window.CaptureAutomaticDialogueRuntime();
+                time.Advance(TimeSpan.FromMinutes(1));
+                time.SetLocalNow(new DateTime(2026, 7, 26, 18, 0, 0));
+
+                window.ProcessEventTimerTick();
+
+                var after = window.CaptureAutomaticDialogueRuntime();
+                Assert.Equal(2, detector.ObserveCount);
+                Assert.Equal(2, agent.Calls.Count);
+                Assert.Equal(CompanionEvent.ClockTick, agent.Calls[^1].Trigger);
+                Assert.Equal(AutomaticCadenceMode.Fullscreen, after.ArmedMode);
+                Assert.Equal(before.ScheduledDelay, after.ScheduledDelay);
+                Assert.Equal(before.ArmedAtTimestamp, after.ArmedAtTimestamp);
+            }
+            finally
+            {
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
+    public void MainWindow_NullFullscreenObservationPreservesEffectiveQuietAndReachesAgentRaw()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var time = new ManualTimeProvider();
+            time.SetLocalNow(new DateTime(2026, 7, 26, 10, 0, 0));
+            var detector = new SequenceFullscreenDetector(true, null);
+            var agent = new RecordingDialogueAgent();
+            var window = CreateWindowWithCadence(settingsDirectory, time, detector, agent);
+            try
+            {
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                time.Advance(TimeSpan.FromMinutes(1));
+                time.SetLocalNow(new DateTime(2026, 7, 26, 11, 0, 0));
+
+                window.ProcessEventTimerTick();
+
+                Assert.Equal(2, agent.Calls.Count);
+                var clockTick = agent.Calls[^1];
+                Assert.Equal(CompanionEvent.ClockTick, clockTick.Trigger);
+                Assert.Null(clockTick.Fullscreen.Observed);
+                Assert.True(clockTick.Fullscreen.EffectiveQuietMode);
+                Assert.Equal(clockTick.Fullscreen, window.CaptureAutomaticDialogueRuntime().Fullscreen);
+                Assert.Equal(2, detector.ObserveCount);
+            }
+            finally
+            {
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
+    public void MainWindow_NonfatalFullscreenProbeFailureBecomesUnknownObservation()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var time = new ManualTimeProvider();
+            time.SetLocalNow(new DateTime(2026, 7, 26, 10, 0, 0));
+            var detector = new SequenceFullscreenDetector(
+                true,
+                new InvalidOperationException("probe failed"));
+            var agent = new RecordingDialogueAgent();
+            var window = CreateWindowWithCadence(settingsDirectory, time, detector, agent);
+            try
+            {
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                time.SetLocalNow(new DateTime(2026, 7, 26, 11, 0, 0));
+
+                var exception = Record.Exception(window.ProcessEventTimerTick);
+
+                Assert.Null(exception);
+                Assert.Equal(2, detector.ObserveCount);
+                Assert.Equal(2, agent.Calls.Count);
+                Assert.Equal(new FullscreenSnapshot(null, true), agent.Calls[^1].Fullscreen);
+            }
+            finally
+            {
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
+    public void MainWindow_OnTimeAutomaticTickObservesDisplaysAndFullyRearms()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var time = new ManualTimeProvider();
+            time.SetLocalNow(new DateTime(2026, 7, 26, 10, 0, 0));
+            var detector = new SequenceFullscreenDetector(false, false);
+            var agent = new RecordingDialogueAgent();
+            var schedulerRandom = new EndpointRandom();
+            var window = CreateWindowWithCadence(
+                settingsDirectory,
+                time,
+                detector,
+                agent,
+                schedulerRandom);
+            try
+            {
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                time.Advance(TimeSpan.FromMinutes(5));
+                time.SetLocalNow(new DateTime(2026, 7, 26, 10, 5, 0));
+
+                window.ProcessAutomaticTimerTick();
+
+                var runtime = window.CaptureAutomaticDialogueRuntime();
+                Assert.Equal(2, detector.ObserveCount);
+                Assert.Equal(2, schedulerRandom.NextCount);
+                Assert.Equal(2, agent.Calls.Count);
+                Assert.Equal(CompanionEvent.Automatic, agent.Calls[^1].Trigger);
+                Assert.Equal(new DateTime(2026, 7, 26, 10, 5, 0), agent.Calls[^1].LocalTime);
+                Assert.Equal(new FullscreenSnapshot(false, false), agent.Calls[^1].Fullscreen);
+                Assert.Equal(CompanionEvent.Automatic, GetLastReply(window).Trigger);
+                Assert.True(runtime.IsScheduled);
+                Assert.Equal(TimeSpan.FromMinutes(5), runtime.ScheduledDelay);
+                Assert.Equal(TimeSpan.FromMinutes(5).Ticks, runtime.ArmedAtTimestamp);
+            }
+            finally
+            {
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
+    public void MainWindow_LateAutomaticTickSilentlyRearms()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var time = new ManualTimeProvider();
+            time.SetLocalNow(new DateTime(2026, 7, 26, 10, 0, 0));
+            var detector = new SequenceFullscreenDetector(false, false);
+            var agent = new RecordingDialogueAgent();
+            var window = CreateWindowWithCadence(settingsDirectory, time, detector, agent);
+            try
+            {
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                var startupReply = GetLastReply(window);
+                time.Advance(TimeSpan.FromMinutes(6) + TimeSpan.FromTicks(1));
+                time.SetLocalNow(new DateTime(2026, 7, 26, 10, 6, 0));
+
+                window.ProcessAutomaticTimerTick();
+
+                var runtime = window.CaptureAutomaticDialogueRuntime();
+                Assert.Same(startupReply, GetLastReply(window));
+                Assert.Single(agent.Calls);
+                Assert.Equal(2, detector.ObserveCount);
+                Assert.Equal(TimeSpan.FromMinutes(6).Ticks + 1, runtime.ArmedAtTimestamp);
+                Assert.Equal(TimeSpan.FromMinutes(5), runtime.ScheduledDelay);
+            }
+            finally
+            {
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
+    public void MainWindow_ModeChangedAutomaticTickSilentlyRearms()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var time = new ManualTimeProvider();
+            time.SetLocalNow(new DateTime(2026, 7, 26, 10, 0, 0));
+            var detector = new SequenceFullscreenDetector(false, true);
+            var agent = new RecordingDialogueAgent();
+            var window = CreateWindowWithCadence(settingsDirectory, time, detector, agent);
+            try
+            {
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                var startupReply = GetLastReply(window);
+                time.Advance(TimeSpan.FromMinutes(1));
+                time.SetLocalNow(new DateTime(2026, 7, 26, 10, 1, 0));
+
+                window.ProcessAutomaticTimerTick();
+
+                var runtime = window.CaptureAutomaticDialogueRuntime();
+                Assert.Same(startupReply, GetLastReply(window));
+                Assert.Single(agent.Calls);
+                Assert.Equal(2, detector.ObserveCount);
+                Assert.Equal(AutomaticCadenceMode.Fullscreen, runtime.ArmedMode);
+                Assert.Equal(TimeSpan.FromMinutes(60), runtime.ScheduledDelay);
+                Assert.Equal(TimeSpan.FromMinutes(1).Ticks, runtime.ArmedAtTimestamp);
+            }
+            finally
+            {
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
+    public void MainWindow_WallClockRollbackDoesNotDefeatMonotonicAutomaticDueTime()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var time = new ManualTimeProvider();
+            time.SetLocalNow(new DateTime(2026, 7, 26, 10, 0, 0));
+            var detector = new SequenceFullscreenDetector(false, false);
+            var agent = new RecordingDialogueAgent();
+            var window = CreateWindowWithCadence(settingsDirectory, time, detector, agent);
+            try
+            {
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                time.Advance(TimeSpan.FromMinutes(5));
+                time.SetLocalNow(new DateTime(2026, 7, 26, 9, 0, 0));
+
+                window.ProcessAutomaticTimerTick();
+
+                Assert.Equal(2, detector.ObserveCount);
+                Assert.Equal(2, agent.Calls.Count);
+                Assert.Equal(CompanionEvent.Automatic, agent.Calls[^1].Trigger);
+                Assert.Equal(new DateTime(2026, 7, 26, 9, 0, 0), agent.Calls[^1].LocalTime);
+            }
+            finally
+            {
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
+    public void MainWindow_VisibleEventReplyResetsTheAutomaticCountdown()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var time = new ManualTimeProvider();
+            time.SetLocalNow(new DateTime(2026, 7, 26, 10, 0, 0));
+            var detector = new SequenceFullscreenDetector(false, false);
+            var agent = new RecordingDialogueAgent();
+            var window = CreateWindowWithCadence(settingsDirectory, time, detector, agent);
+            try
+            {
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                time.Advance(TimeSpan.FromMinutes(1));
+                time.SetLocalNow(new DateTime(2026, 7, 26, 11, 0, 0));
+
+                window.ProcessEventTimerTick();
+
+                var runtime = window.CaptureAutomaticDialogueRuntime();
+                Assert.Equal(2, detector.ObserveCount);
+                Assert.Equal(CompanionEvent.ClockTick, agent.Calls[^1].Trigger);
+                Assert.Equal(TimeSpan.FromMinutes(1).Ticks, runtime.ArmedAtTimestamp);
+                Assert.Equal(TimeSpan.FromMinutes(5), runtime.ScheduledDelay);
+            }
+            finally
+            {
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
+    public void MainWindow_VisibleDirectReplyResetsTheAutomaticCountdown()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var time = new ManualTimeProvider();
+            time.SetLocalNow(new DateTime(2026, 7, 26, 10, 0, 0));
+            var detector = new SequenceFullscreenDetector(false, false);
+            var agent = new RecordingDialogueAgent();
+            var window = CreateWindowWithCadence(settingsDirectory, time, detector, agent);
+            try
+            {
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                time.Advance(TimeSpan.FromMinutes(1));
+                time.SetLocalNow(new DateTime(2026, 7, 26, 10, 1, 0));
+
+                window.SaySomething();
+
+                var runtime = window.CaptureAutomaticDialogueRuntime();
+                Assert.Equal(2, detector.ObserveCount);
+                Assert.Equal(CompanionEvent.Click, agent.Calls[^1].Trigger);
+                Assert.Equal(new DateTime(2026, 7, 26, 10, 1, 0), agent.Calls[^1].LocalTime);
+                Assert.Equal(agent.Calls[^1].Fullscreen, runtime.Fullscreen);
+                Assert.Equal(TimeSpan.FromMinutes(1).Ticks, runtime.ArmedAtTimestamp);
+            }
+            finally
+            {
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
+    public void MainWindow_SilentBudgetedEventPreservesTheAutomaticDeadline()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var time = new ManualTimeProvider();
+            time.SetLocalNow(new DateTime(2026, 7, 26, 10, 0, 0));
+            var detector = new SequenceFullscreenDetector(false, false);
+            var agent = new RecordingDialogueAgent(CompanionEvent.ClockTick);
+            var window = CreateWindowWithCadence(settingsDirectory, time, detector, agent);
+            try
+            {
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                var before = window.CaptureAutomaticDialogueRuntime();
+                time.Advance(TimeSpan.FromMinutes(1));
+                time.SetLocalNow(new DateTime(2026, 7, 26, 11, 0, 0));
+
+                window.ProcessEventTimerTick();
+
+                var after = window.CaptureAutomaticDialogueRuntime();
+                Assert.Equal(2, detector.ObserveCount);
+                Assert.Equal(CompanionEvent.ClockTick, GetLastReply(window).Trigger);
+                Assert.False(GetLastReply(window).ShouldDisplayText);
+                Assert.Equal(before.ArmedAtTimestamp, after.ArmedAtTimestamp);
+                Assert.Equal(before.ScheduledDelay, after.ScheduledDelay);
+                Assert.Equal(before.ArmedMode, after.ArmedMode);
+            }
+            finally
+            {
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
+    public void MainWindow_HiddenAndClosedQueuedTicksDoNotObserveOrRearm()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var time = new ManualTimeProvider();
+            time.SetLocalNow(new DateTime(2026, 7, 26, 10, 0, 0));
+            var detector = new SequenceFullscreenDetector(false, true);
+            var agent = new RecordingDialogueAgent();
+            var window = CreateWindowWithCadence(settingsDirectory, time, detector, agent);
+            try
+            {
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                window.SetTrayAvailability(true);
+                window.HideToTray();
+
+                window.ProcessAutomaticTimerTick();
+                window.ProcessEventTimerTick();
+
+                Assert.Equal(1, detector.ObserveCount);
+                Assert.False(window.CaptureAutomaticDialogueRuntime().IsScheduled);
+
+                window.Close();
+                window.ProcessAutomaticTimerTick();
+                window.ProcessEventTimerTick();
+
+                Assert.Equal(1, detector.ObserveCount);
+                Assert.False(window.CaptureAutomaticDialogueRuntime().IsScheduled);
+            }
+            finally
+            {
+                if (!GetPrivateField<bool>(window, "_isClosed"))
+                {
+                    window.Close();
+                }
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
+    public void MainWindow_TrayRestoreResamplesAfterPositionCorrectionAndBeforeArming()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var time = new ManualTimeProvider();
+            time.SetLocalNow(new DateTime(2026, 7, 26, 10, 0, 0));
+            MainWindow? window = null;
+            var observedVisible = false;
+            var observedClamped = false;
+            var observedDisarmed = false;
+            var detector = new SequenceFullscreenDetector(false, true)
+            {
+                OnObserve = callCount =>
+                {
+                    if (callCount != 2)
+                    {
+                        return;
+                    }
+
+                    observedVisible = window!.IsVisible;
+                    observedClamped = window.Left < 100_000 && window.Top > -100_000;
+                    observedDisarmed = !window.CaptureAutomaticDialogueRuntime().IsScheduled;
+                }
+            };
+            var agent = new RecordingDialogueAgent();
+            window = CreateWindowWithCadence(settingsDirectory, time, detector, agent);
+            try
+            {
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                window.SetTrayAvailability(true);
+                window.Left = 100_000;
+                window.Top = -100_000;
+                window.HideToTray();
+
+                window.ToggleVisibilityFromTray();
+
+                var runtime = window.CaptureAutomaticDialogueRuntime();
+                Assert.Equal(2, detector.ObserveCount);
+                Assert.True(observedVisible);
+                Assert.True(observedClamped);
+                Assert.True(observedDisarmed);
+                Assert.True(runtime.IsScheduled);
+                Assert.Equal(new FullscreenSnapshot(true, true), runtime.Fullscreen);
+                Assert.Equal(AutomaticCadenceMode.Fullscreen, runtime.ArmedMode);
+            }
+            finally
+            {
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    [Fact]
     public void MainWindow_StartupThenSaySomething_ReplacesTheStartupReplyWithNewV2Text()
     {
         RunOnStaThread(() =>
@@ -1867,14 +2466,21 @@ public sealed class WindowShellTests
     {
         RunOnStaThread(() =>
         {
-            var automaticTick = typeof(MainWindow).GetMethod(
-                "AutomaticTimer_Tick",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.NotNull(automaticTick);
             var settingsDirectory = CreateSettingsDirectory();
+            var time = new ManualTimeProvider();
+            time.SetLocalNow(new DateTime(2026, 7, 26, 10, 0, 0));
             using var factory = new ControlledDialogueFactory("unused full reply");
-            var dialogue = DialogueService.CreateDeferred(factory.Create);
-            var window = CreateWindowWithDialogue(settingsDirectory, dialogue, TimeProvider.System);
+            var dialogue = DialogueService.CreateDeferred(factory.Create, time);
+            var window = new MainWindow(new MainWindowDependencies(
+                PetSettings.Default,
+                new SettingsService(settingsDirectory))
+            {
+                SuppressApplicationShutdownOnClose = true,
+                DialogueService = dialogue,
+                TimeProvider = time,
+                ForegroundFullscreenDetector = new SequenceFullscreenDetector(false, false),
+                DialogueScheduler = new DialogueScheduler(new EndpointRandom())
+            });
             try
             {
                 window.Show();
@@ -1884,13 +2490,18 @@ public sealed class WindowShellTests
                 var speech = Assert.IsType<TextBlock>(window.FindName("SpeechText"));
                 Assert.Equal(Visibility.Visible, bubble.Visibility);
                 var startupText = speech.Text;
+                time.Advance(TimeSpan.FromMinutes(5));
+                time.SetLocalNow(new DateTime(2026, 7, 26, 10, 5, 0));
 
-                automaticTick!.Invoke(window, [null, EventArgs.Empty]);
+                window.ProcessAutomaticTimerTick();
 
                 var reply = GetLastReply(window);
+                var runtime = window.CaptureAutomaticDialogueRuntime();
                 Assert.False(reply.ShouldDisplayText);
                 Assert.Equal(Visibility.Visible, bubble.Visibility);
                 Assert.Equal(startupText, speech.Text);
+                Assert.True(runtime.IsScheduled);
+                Assert.Equal(TimeSpan.FromMinutes(5).Ticks, runtime.ArmedAtTimestamp);
             }
             finally
             {
@@ -1946,42 +2557,55 @@ public sealed class WindowShellTests
     {
         RunOnStaThread(() =>
         {
-            var lastReply = typeof(MainWindow).GetProperty(
-                "LastReply",
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            var automaticTick = typeof(MainWindow).GetMethod(
-                "AutomaticTimer_Tick",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.NotNull(lastReply);
-            Assert.NotNull(automaticTick);
-
-            foreach (var (trigger, enterThroughRealHandler) in new (CompanionEvent, Action<MainWindow>)[]
+            foreach (var (trigger, enterThroughRealHandler) in
+                     new (CompanionEvent, Action<MainWindow, ManualTimeProvider>)[]
                      {
-                         (CompanionEvent.Startup, window =>
+                         (CompanionEvent.Startup, (window, _) =>
                          {
                              window.Show();
                              window.Dispatcher.Invoke(
                                  () => { },
                                  System.Windows.Threading.DispatcherPriority.ApplicationIdle);
                          }),
-                         (CompanionEvent.Click, window =>
+                         (CompanionEvent.Click, (window, _) =>
                          {
+                             window.Show();
+                             window.Dispatcher.Invoke(
+                                 () => { },
+                                 DispatcherPriority.ApplicationIdle);
                              var say = Assert.IsType<MenuItem>(window.FindName("SayMenuItem"));
                              say.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
                          }),
-                         (CompanionEvent.Automatic, window =>
-                             automaticTick!.Invoke(window, [null, EventArgs.Empty]))
+                         (CompanionEvent.Automatic, (window, time) =>
+                         {
+                             window.Show();
+                             window.Dispatcher.Invoke(
+                                 () => { },
+                                 DispatcherPriority.ApplicationIdle);
+                             var delay = window.CaptureAutomaticDialogueRuntime().ScheduledDelay;
+                             time.Advance(delay);
+                             time.SetLocalNow(new DateTime(2026, 7, 26, 10, 0, 0) + delay);
+                             window.ProcessAutomaticTimerTick();
+                         })
                      })
             {
                 var settingsDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
-                var window = CreateWindowWithDialogue(
-                    settingsDirectory,
-                    new DialogueService(),
-                    TimeProvider.System);
+                var time = new ManualTimeProvider();
+                time.SetLocalNow(new DateTime(2026, 7, 26, 10, 0, 0));
+                var window = new MainWindow(new MainWindowDependencies(
+                    PetSettings.Default,
+                    new SettingsService(settingsDirectory))
+                {
+                    SuppressApplicationShutdownOnClose = true,
+                    DialogueService = new DialogueService(),
+                    TimeProvider = time,
+                    ForegroundFullscreenDetector = new SequenceFullscreenDetector(false, false),
+                    DialogueScheduler = new DialogueScheduler(new EndpointRandom())
+                });
 
-                enterThroughRealHandler(window);
+                enterThroughRealHandler(window, time);
 
-                var reply = Assert.IsType<AgentReply>(lastReply!.GetValue(window));
+                var reply = GetLastReply(window);
                 var source = Assert.IsType<DialogueLine>(reply.SourceLine);
                 var speech = Assert.IsType<TextBlock>(window.FindName("SpeechText"));
                 Assert.Equal(trigger, reply.Trigger);
@@ -2134,8 +2758,8 @@ public sealed class WindowShellTests
                 Assert.False(GetPrivateField<DispatcherTimer>(window, "_bubbleTimer").IsEnabled);
 
                 var hiddenReply = GetLastReply(window);
-                InvokePrivate(window, "AutomaticTimer_Tick", null, EventArgs.Empty);
-                InvokePrivate(window, "EventTimer_Tick", null, EventArgs.Empty);
+                window.ProcessAutomaticTimerTick();
+                window.ProcessEventTimerTick();
                 window.ProcessAmbientSchedule();
 
                 Assert.Same(hiddenReply, GetLastReply(window));
@@ -2929,6 +3553,29 @@ public sealed class WindowShellTests
             WarmupCoordinator = warmupCoordinator
         });
 
+    private static MainWindow CreateWindowWithCadence(
+        string settingsDirectory,
+        TimeProvider timeProvider,
+        IForegroundFullscreenDetector fullscreenDetector,
+        RecordingDialogueAgent agent,
+        EndpointRandom? schedulerRandom = null)
+    {
+        var dialogue = DialogueService.CreateDeferred(_ => agent, timeProvider);
+        Assert.True(dialogue.WarmupAsync().GetAwaiter().GetResult());
+        return new MainWindow(new MainWindowDependencies(
+            PetSettings.Default,
+            new SettingsService(settingsDirectory))
+        {
+            SuppressApplicationShutdownOnClose = true,
+            AmbientScheduler = new AmbientActionScheduler(() => 0.5),
+            AutoStartService = DisabledAutoStartService.Instance,
+            DialogueService = dialogue,
+            TimeProvider = timeProvider,
+            ForegroundFullscreenDetector = fullscreenDetector,
+            DialogueScheduler = new DialogueScheduler(schedulerRandom ?? new EndpointRandom())
+        });
+    }
+
     private static void SetPrivateField<T>(MainWindow window, string fieldName, T value)
     {
         var field = typeof(MainWindow).GetField(
@@ -3231,6 +3878,94 @@ public sealed class WindowShellTests
         public void Advance(TimeSpan elapsed) => _timestamp += elapsed.Ticks;
 
         public void SetUtcNow(DateTimeOffset value) => _utcNow = value;
+
+        public void SetLocalNow(DateTime value)
+        {
+            var unspecified = DateTime.SpecifyKind(value, DateTimeKind.Unspecified);
+            var offset = TimeZoneInfo.Local.GetUtcOffset(unspecified);
+            _utcNow = new DateTimeOffset(unspecified, offset).ToUniversalTime();
+        }
+    }
+
+    private sealed class EndpointRandom : Random
+    {
+        public int NextCount { get; private set; }
+
+        public override int Next(int minValue, int maxValue)
+        {
+            NextCount++;
+            return minValue;
+        }
+    }
+
+    private sealed class SequenceFullscreenDetector(params object?[] observations)
+        : IForegroundFullscreenDetector
+    {
+        private readonly Queue<object?> _observations = new(observations);
+
+        public int ObserveCount { get; private set; }
+        public List<nint> ExcludedWindows { get; } = [];
+        public Action<int>? OnObserve { get; init; }
+
+        public bool? Observe(nint excludedWindow)
+        {
+            ObserveCount++;
+            ExcludedWindows.Add(excludedWindow);
+            OnObserve?.Invoke(ObserveCount);
+            if (_observations.Count == 0)
+            {
+                throw new InvalidOperationException("No fullscreen observation remains.");
+            }
+
+            return _observations.Dequeue() switch
+            {
+                Exception exception => throw exception,
+                bool value => value,
+                null => null,
+                var value => throw new InvalidOperationException(
+                    $"Unsupported fullscreen observation {value.GetType().Name}.")
+            };
+        }
+    }
+
+    private readonly record struct RecordedDialogueCall(
+        CompanionEvent Trigger,
+        DateTime LocalTime,
+        FullscreenSnapshot Fullscreen);
+
+    private sealed class RecordingDialogueAgent(params CompanionEvent[] silentEvents)
+        : ICompanionDialogueAgent
+    {
+        private readonly HashSet<CompanionEvent> _silentEvents = [.. silentEvents];
+        private readonly AgentMemorySnapshot _snapshot = new(
+            CharacterState.Create(new DateTime(2026, 7, 26, 10, 0, 0)),
+            [],
+            0,
+            null,
+            []);
+
+        public List<RecordedDialogueCall> Calls { get; } = [];
+        public DateTime? NextStoryDueAt => null;
+
+        public AgentMemorySnapshot CreateSnapshot() => _snapshot;
+
+        public AgentReply Respond(
+            CompanionEvent trigger,
+            DateTime localTime,
+            Random random,
+            FullscreenSnapshot fullscreen)
+        {
+            Calls.Add(new RecordedDialogueCall(trigger, localTime, fullscreen));
+            var displaysText = !_silentEvents.Contains(trigger);
+            return new AgentReply(
+                displaysText ? $"{trigger} cadence reply" : string.Empty,
+                DialogueCategory.CharacterLife,
+                DialogueTreeKind.Companion,
+                trigger,
+                SceneId: $"cadence:{trigger}",
+                ShouldDisplayText: displaysText,
+                SemanticGroup: "cadence.test");
+        }
     }
 
     private sealed class FakeAutoStartService : IAutoStartService

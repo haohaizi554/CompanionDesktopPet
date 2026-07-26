@@ -6,6 +6,7 @@ using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Threading;
 using CompanionDesktopPet.Models;
 using CompanionDesktopPet.Services;
@@ -17,7 +18,9 @@ public partial class MainWindow : Window
 {
     private readonly DialogueService _dialogue;
     private readonly Random _random = new();
-    private readonly DialogueScheduler _scheduler;
+    private readonly AutomaticDialogueCadenceController _automaticCadence;
+    private readonly IForegroundFullscreenDetector _foregroundFullscreenDetector;
+    private readonly FullscreenStateTracker _fullscreenState = new();
     private readonly SettingsService _settingsService;
     private readonly Func<AgentMemorySnapshot, Task>? _saveAgentMemoryAsync;
     private readonly Func<PetSettings, Task> _saveSettingsAsync;
@@ -75,6 +78,7 @@ public partial class MainWindow : Window
     private IInputElement? _controlMenuFocusReturnTarget;
     private bool _controlMenuOpenedFromKeyboard;
     private bool _isHiddenToTray;
+    private FullscreenSnapshot _fullscreen;
 
     internal AgentReply? LastReply { get; private set; }
 
@@ -110,7 +114,11 @@ public partial class MainWindow : Window
             ?? new DialogueWarmupCoordinator(_dialogue, _timeProvider);
         _announceLiveRegionChanged = dependencies.AnnounceLiveRegionChanged
             ?? RaiseLiveRegionChanged;
-        _scheduler = new DialogueScheduler(_random);
+        _foregroundFullscreenDetector = dependencies.ForegroundFullscreenDetector
+            ?? new WindowsForegroundFullscreenDetector();
+        _automaticCadence = new AutomaticDialogueCadenceController(
+            dependencies.DialogueScheduler ?? new DialogueScheduler(_random),
+            _timeProvider);
         _animation = dependencies.AnimationController ?? new AnimationController(
             BreathingScale,
             SwayRotation,
@@ -215,12 +223,16 @@ public partial class MainWindow : Window
         }
 
         UpdatePauseLabel();
-        ShowEventBubble(CompanionEvent.Startup);
-        _startupFallbackReplyRevision = _dialogueReplyRevision;
         var now = LocalNow;
+        var fullscreen = ObserveFullscreen();
+        var startupDisplayed = ShowEventBubble(CompanionEvent.Startup, now, fullscreen);
+        _startupFallbackReplyRevision = _dialogueReplyRevision;
         _eventPump = new CompanionEventPump(now, _idleTimeProvider.GetIdleTime());
         _eventTimer.Start();
-        ScheduleNextPhrase();
+        if (!startupDisplayed)
+        {
+            ArmAutomaticTimer(now, fullscreen);
+        }
     }
 
     private void Window_ContentRendered(object? sender, EventArgs e) =>
@@ -629,7 +641,7 @@ public partial class MainWindow : Window
             } reply
             || reply.SceneId.StartsWith("fallback:", StringComparison.Ordinal))
         {
-            ShowEventBubble(CompanionEvent.Startup);
+            ShowEventBubble(CompanionEvent.Startup, LocalNow, ObserveFullscreen());
         }
 
         UpdateLayout();
@@ -763,8 +775,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        ShowEventBubble(CompanionEvent.DragReleased);
-        ScheduleNextPhrase();
+        ShowEventBubble(CompanionEvent.DragReleased, LocalNow, ObserveFullscreen());
         if (InteractionFrozen)
         {
             return;
@@ -851,13 +862,12 @@ public partial class MainWindow : Window
             _animation.PlayClickReaction();
         }
 
-        ShowEventBubble(CompanionEvent.Click);
+        ShowEventBubble(CompanionEvent.Click, LocalNow, ObserveFullscreen());
         if (retryFailedWarmup)
         {
             RetryDialogueWarmupAfterUserAction();
         }
 
-        ScheduleNextPhrase();
     }
 
     internal void BeginDragAction()
@@ -1063,31 +1073,98 @@ public partial class MainWindow : Window
         _bubbleTimer.Start();
     }
 
-    private void ScheduleNextPhrase()
+    private FullscreenSnapshot ObserveFullscreen()
+    {
+        bool? observed;
+        try
+        {
+            observed = _foregroundFullscreenDetector.Observe(
+                new WindowInteropHelper(this).Handle);
+        }
+        catch (Exception exception) when (!IsFatalException(exception))
+        {
+            Trace.TraceError("Fullscreen observation failed: {0}", exception);
+            observed = null;
+        }
+
+        _fullscreen = _fullscreenState.Update(observed);
+        return _fullscreen;
+    }
+
+    private void ArmAutomaticTimer(DateTime localTime, FullscreenSnapshot fullscreen)
     {
         _automaticTimer.Stop();
         if (PresentationSuspended)
         {
+            _automaticCadence.Reset();
             return;
         }
 
-        _automaticTimer.Interval = _scheduler.NextDelay(LocalNow);
+        _automaticTimer.Interval = _automaticCadence.Arm(
+            localTime,
+            fullscreen.EffectiveQuietMode);
         _automaticTimer.Start();
     }
 
-    private void AutomaticTimer_Tick(object? sender, EventArgs e)
+    private void DisarmAutomaticTimer()
+    {
+        _automaticTimer.Stop();
+        _automaticCadence.Reset();
+    }
+
+    internal AutomaticDialogueRuntimeSnapshot CaptureAutomaticDialogueRuntime()
+    {
+        var cadence = _automaticCadence.Capture();
+        return new AutomaticDialogueRuntimeSnapshot(
+            cadence.IsArmed && _automaticTimer.IsEnabled,
+            cadence.Delay,
+            cadence.Mode,
+            cadence.ArmedAtTimestamp,
+            _fullscreen);
+    }
+
+    private void AutomaticTimer_Tick(object? sender, EventArgs e) => ProcessAutomaticTimerTick();
+
+    internal void ProcessAutomaticTimerTick()
     {
         if (PresentationSuspended)
         {
-            _automaticTimer.Stop();
+            DisarmAutomaticTimer();
             return;
         }
 
-        ShowEventBubble(CompanionEvent.Automatic);
-        ScheduleNextPhrase();
+        var now = LocalNow;
+        var fullscreen = ObserveFullscreen();
+        var evaluation = _automaticCadence.Evaluate(
+            now,
+            fullscreen.EffectiveQuietMode);
+        switch (evaluation.Decision)
+        {
+            case AutomaticCadenceDecision.Wait:
+                _automaticTimer.Stop();
+                _automaticTimer.Interval = evaluation.Remaining;
+                _automaticTimer.Start();
+                return;
+
+            case AutomaticCadenceDecision.Speak:
+                ShowEventBubble(CompanionEvent.Automatic, now, fullscreen);
+                ArmAutomaticTimer(now, fullscreen);
+                return;
+
+            case AutomaticCadenceDecision.NotArmed:
+            case AutomaticCadenceDecision.RearmModeChanged:
+            case AutomaticCadenceDecision.RearmLate:
+                ArmAutomaticTimer(now, fullscreen);
+                return;
+
+            default:
+                throw new ArgumentOutOfRangeException();
+        }
     }
 
-    private void EventTimer_Tick(object? sender, EventArgs e)
+    private void EventTimer_Tick(object? sender, EventArgs e) => ProcessEventTimerTick();
+
+    internal void ProcessEventTimerTick()
     {
         if (PresentationSuspended)
         {
@@ -1096,6 +1173,15 @@ public partial class MainWindow : Window
         }
 
         var now = LocalNow;
+        var fullscreen = ObserveFullscreen();
+        if (_automaticCadence.RequiresModeRearm(
+                now,
+                fullscreen.EffectiveQuietMode))
+        {
+            ArmAutomaticTimer(now, fullscreen);
+            return;
+        }
+
         _eventPump ??= new CompanionEventPump(now, _idleTimeProvider.GetIdleTime());
         var companionEvent = _eventPump.Poll(
             now,
@@ -1103,15 +1189,18 @@ public partial class MainWindow : Window
             _dialogue.NextStoryDueAt);
         if (companionEvent is { } trigger)
         {
-            ShowEventBubble(trigger);
+            ShowEventBubble(trigger, now, fullscreen);
         }
     }
 
-    private void ShowEventBubble(CompanionEvent trigger)
+    private bool ShowEventBubble(
+        CompanionEvent trigger,
+        DateTime localTime,
+        FullscreenSnapshot fullscreen)
     {
         if (InteractionFrozen)
         {
-            return;
+            return false;
         }
 
         if (!_dialogue.IsReady && trigger != CompanionEvent.Startup)
@@ -1119,16 +1208,23 @@ public partial class MainWindow : Window
             ObserveDialogueWarmup(replayStartupWhenReady: false);
         }
 
-        var reply = _dialogue.GetReply(trigger, LocalNow, _random);
+        var reply = _dialogue.GetReply(trigger, localTime, _random, fullscreen);
         LastReply = reply;
         _dialogueReplyRevision++;
-        PresentReply(reply);
+        var displayed = PresentReply(reply);
+
+        if (trigger != CompanionEvent.Automatic && displayed)
+        {
+            ArmAutomaticTimer(localTime, fullscreen);
+        }
 
         if (_saveAgentMemoryAsync is not null && _dialogue.IsReady)
         {
             _memoryTimer.Stop();
             _memoryTimer.Start();
         }
+
+        return displayed;
     }
 
     private DateTime LocalNow => _timeProvider.GetLocalNow().LocalDateTime;
@@ -1259,11 +1355,11 @@ public partial class MainWindow : Window
             _replayStartupAfterWarmupRequested = false;
             if (replayUserClick)
             {
-                ShowEventBubble(CompanionEvent.Click);
+                ShowEventBubble(CompanionEvent.Click, LocalNow, ObserveFullscreen());
             }
             else if (replayStartup)
             {
-                ShowEventBubble(CompanionEvent.Startup);
+                ShowEventBubble(CompanionEvent.Startup, LocalNow, ObserveFullscreen());
             }
 
             return;
@@ -1277,7 +1373,7 @@ public partial class MainWindow : Window
         ShowBubble(DialogueWarmupFailureMessage);
     }
 
-    private void PresentReply(AgentReply reply)
+    private bool PresentReply(AgentReply reply)
     {
         if (reply.ShouldDisplayText)
         {
@@ -1287,6 +1383,8 @@ public partial class MainWindow : Window
         {
             HideBubble();
         }
+
+        return reply.ShouldDisplayText;
     }
 
     private async void MemoryTimer_Tick(object? sender, EventArgs e)
@@ -1357,7 +1455,10 @@ public partial class MainWindow : Window
         }
 
         UpdatePauseLabel();
-        ShowEventBubble(_paused ? CompanionEvent.AnimationPaused : CompanionEvent.AnimationResumed);
+        ShowEventBubble(
+            _paused ? CompanionEvent.AnimationPaused : CompanionEvent.AnimationResumed,
+            LocalNow,
+            ObserveFullscreen());
         await SaveSettingsAsync(skipWhenExiting: true);
     }
 
@@ -1390,7 +1491,7 @@ public partial class MainWindow : Window
         Left = clamped.X;
         Top = clamped.Y;
         PositionBubble();
-        ShowEventBubble(CompanionEvent.SizeChanged);
+        ShowEventBubble(CompanionEvent.SizeChanged, LocalNow, ObserveFullscreen());
         await SaveSettingsAsync(skipWhenExiting: true);
     }
 
@@ -1438,7 +1539,7 @@ public partial class MainWindow : Window
         var point = DefaultPosition(work, GetCharacterLocalBounds());
         Left = point.X;
         Top = point.Y;
-        ShowEventBubble(CompanionEvent.PositionRestored);
+        ShowEventBubble(CompanionEvent.PositionRestored, LocalNow, ObserveFullscreen());
         await SaveSettingsAsync(skipWhenExiting: true);
     }
 
@@ -1448,7 +1549,7 @@ public partial class MainWindow : Window
         {
             _isHiddenToTray = true;
             ControlMenu.IsOpen = false;
-            _automaticTimer.Stop();
+            DisarmAutomaticTimer();
             _eventTimer.Stop();
             PreserveScheduledStartupGreeting();
             InvalidateAmbientSchedule();
@@ -1538,6 +1639,13 @@ public partial class MainWindow : Window
         WindowState = WindowState.Normal;
         UpdateLayout();
         EnsureCurrentPositionIsVisible();
+        if (resumingFromTray)
+        {
+            var now = LocalNow;
+            var fullscreen = ObserveFullscreen();
+            ArmAutomaticTimer(now, fullscreen);
+        }
+
         if (_bubbleSuspendedForWindowHide
             && SpeechBubble.Visibility == Visibility.Visible)
         {
@@ -1553,7 +1661,6 @@ public partial class MainWindow : Window
         if (resumingFromTray)
         {
             _eventTimer.Start();
-            ScheduleNextPhrase();
             ScheduleNextAmbientAction();
         }
 
@@ -1807,7 +1914,7 @@ public partial class MainWindow : Window
 
     private void FreezeInteractionForExit()
     {
-        _automaticTimer.Stop();
+        DisarmAutomaticTimer();
         _eventTimer.Stop();
         _memoryTimer.Stop();
         _bubbleTimer.Stop();
@@ -1878,7 +1985,7 @@ public partial class MainWindow : Window
         InvalidateAmbientSchedule();
         CancelActiveAmbientAction();
         _animation.Dispose();
-        _automaticTimer.Stop();
+        DisarmAutomaticTimer();
         _bubbleCountdown.Close();
         _bubbleTimer.Stop();
         _memoryTimer.Stop();
