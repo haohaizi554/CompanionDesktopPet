@@ -422,8 +422,9 @@ def analyze_simulation(
             _add_hard(hard, anomalies, seed, "zero_outputs")
 
         for attempt in outputs:
-            assert attempt.row is not None
             row = attempt.row
+            if row is None:
+                raise RuntimeError("simulation report output trace contains an unselected attempt")
             now = attempt.attempted_at
             seed_group_counts[row.category_group] += 1
             seed_mode_counts[row.output_mode] += 1

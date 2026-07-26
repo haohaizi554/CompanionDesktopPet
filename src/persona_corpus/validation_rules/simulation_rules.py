@@ -555,13 +555,14 @@ def _simulation_issues(
                 f"simulation attempt {index} has invalid seed, timestamp, context or selected_id",
             )
             continue
-        assert (
-            timestamp is not None
-            and isinstance(attempted_at_text, str)
-            and _is_integer(seed)
-            and _is_integer(day_index)
-            and _is_integer(slot_index)
-        )
+        if (
+            timestamp is None
+            or not isinstance(attempted_at_text, str)
+            or not _is_integer(seed)
+            or not _is_integer(day_index)
+            or not _is_integer(slot_index)
+        ):
+            raise RuntimeError("validated simulation attempt lost required typed fields")
         key = (seed, timestamp)
         if key in seen_attempt_times:
             issues.error(
@@ -578,7 +579,8 @@ def _simulation_issues(
             )
         seen_attempt_coordinates.add(coordinate)
         context = attempt.get("context")
-        assert isinstance(context, Mapping)
+        if not isinstance(context, Mapping):
+            raise RuntimeError("validated simulation attempt lost its context mapping")
         parsed_attempts.append(
             _SimulationAttempt(
                 index,
@@ -606,7 +608,8 @@ def _simulation_issues(
         )
         replay_shape_valid = False
     if replay_shape_valid:
-        assert isinstance(days, int) and isinstance(seeds, list)
+        if not isinstance(days, int) or not isinstance(seeds, list):
+            raise RuntimeError("canonical replay requires validated days and seeds")
         _validate_simulation_replay(
             parsed_attempts,
             rows,
@@ -697,12 +700,15 @@ def _simulation_issues(
             "simulation constraints cannot be recomputed from malformed runtime limits",
         )
         return
-    assert isinstance(minimum_interval, int)
-    assert isinstance(max_per_hour, int)
-    assert isinstance(late_night_max, int)
-    assert isinstance(blocked_groups, list)
-    assert isinstance(interrupt_intervals, Mapping)
-    assert isinstance(long_silence, int)
+    if (
+        not _is_integer(minimum_interval)
+        or not _is_integer(max_per_hour)
+        or not _is_integer(late_night_max)
+        or not isinstance(blocked_groups, list)
+        or not isinstance(interrupt_intervals, Mapping)
+        or not _is_integer(long_silence)
+    ):
+        raise RuntimeError("validated runtime limits lost required typed values")
 
     group_counts: Counter[str] = Counter()
     mode_counts: Counter[str] = Counter()

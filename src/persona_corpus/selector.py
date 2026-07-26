@@ -88,14 +88,21 @@ class SchedulerConfig:
             context_tokens = value["context_tokens"]
             mvp_triggers = value["mvp_triggers"]
             future_triggers = value["future_triggers"]
-            assert isinstance(group_weights, Mapping)
-            assert isinstance(mode_targets, Mapping)
-            assert isinstance(limits, Mapping)
-            assert isinstance(context_tokens, list)
-            assert isinstance(mvp_triggers, list)
-            assert isinstance(future_triggers, list)
+            if not isinstance(group_weights, Mapping):
+                raise TypeError("category_group_weights must be an object")
+            if not isinstance(mode_targets, Mapping):
+                raise TypeError("output_mode_targets must be an object")
+            if not isinstance(limits, Mapping):
+                raise TypeError("runtime_limits must be an object")
+            if not isinstance(context_tokens, list):
+                raise TypeError("context_tokens must be an array")
+            if not isinstance(mvp_triggers, list):
+                raise TypeError("mvp_triggers must be an array")
+            if not isinstance(future_triggers, list):
+                raise TypeError("future_triggers must be an array")
             intervals = limits["interrupt_cost_minimum_intervals_minutes"]
-            assert isinstance(intervals, Mapping)
+            if not isinstance(intervals, Mapping):
+                raise TypeError("interrupt_cost_minimum_intervals_minutes must be an object")
             return cls(
                 schema_version=1,
                 schema_reference=schema_reference,
@@ -134,8 +141,8 @@ class SchedulerConfig:
                 mvp_triggers=frozenset(str(trigger) for trigger in mvp_triggers),
                 future_triggers=frozenset(str(trigger) for trigger in future_triggers),
             )
-        except (AssertionError, KeyError, TypeError, ValueError) as error:
-            raise SelectorConfigError("scheduler config cannot be converted") from error
+        except (KeyError, TypeError, ValueError) as error:
+            raise SelectorConfigError(f"scheduler config cannot be converted: {error}") from error
 
 
 def load_scheduler_config(path: Path = DEFAULT_CONFIG_PATH) -> SchedulerConfig:

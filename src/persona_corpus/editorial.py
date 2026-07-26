@@ -9,6 +9,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping
 
+from .contract import PERSONA_CONTRACT
 from .models import CorpusLine
 
 
@@ -156,6 +157,10 @@ def load_editorial_manifest(
     forbidden = _string_tuple(policy["forbidden_markers"], "forbidden identity markers")
     if set(allowed) & set(forbidden):
         raise EditorialManifestError("allowed and forbidden identity markers must be disjoint")
+    if not set(allowed) <= set(PERSONA_CONTRACT.pii_markers):
+        raise EditorialManifestError(
+            "allowed identity markers must be a subset of persona contract pii_markers"
+        )
     required_category = policy.get("required_category")
     required_group = policy.get("required_category_group")
     minimum_cooldown = policy.get("minimum_cooldown_hours")
@@ -231,8 +236,14 @@ def load_editorial_manifest(
             raise EditorialManifestError(f"identity adjudication {line_id!r} topic mismatch")
         if catalog is not None and (source_line is not None or not text or topic_id is None):
             raise EditorialManifestError(f"catalog identity {line_id!r} needs exact authored text")
-        bound_topic_id = legacy.group(2) if legacy is not None else topic_id
-        assert isinstance(bound_topic_id, str)
+        if legacy is not None:
+            bound_topic_id = legacy.group(2)
+        elif isinstance(topic_id, str):
+            bound_topic_id = topic_id
+        else:
+            raise EditorialManifestError(
+                f"catalog identity {line_id!r} needs a valid authored topic"
+            )
         if text:
             actual = hashlib.sha256(text.encode("utf-8")).hexdigest()
             if actual != digest:

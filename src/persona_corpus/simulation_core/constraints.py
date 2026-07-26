@@ -133,12 +133,14 @@ def analyze_constraints(
     violations: list[ConstraintViolation] = []
 
     def add(code: str, attempt: AttemptLike) -> None:
-        assert attempt.row is not None
+        row = attempt.row
+        if row is None:
+            raise RuntimeError("constraint violation requires a selected simulation row")
         violations.append(
             ConstraintViolation(
                 code=code,
                 seed=attempt.seed,
-                selected_id=attempt.row.id,
+                selected_id=row.id,
                 attempted_at=attempt.attempted_at,
             )
         )
@@ -154,8 +156,9 @@ def analyze_constraints(
         recent_rows: list[CorpusLine] = []
 
         for attempt in outputs:
-            assert attempt.row is not None
             row = attempt.row
+            if row is None:
+                raise RuntimeError("constraint output trace contains an unselected attempt")
             now = attempt.attempted_at
             elapsed_for_trigger = float(attempt.context.minutes_since_last_output)
             if previous is not None and previous.row is not None:
@@ -614,7 +617,8 @@ def run_adversarial_suite(config: SchedulerConfig) -> AdversarialSuiteResult:
         config=config,
         index=600,
     )
-    assert daily_first.row is not None and daily_second.row is not None
+    if daily_first.row is None or daily_second.row is None:
+        raise RuntimeError("adversarial daily fixture must contain selected rows")
     repeated_row = replace(daily_first.row, max_per_day=1)
     daily = (
         replace(daily_first, row=repeated_row),

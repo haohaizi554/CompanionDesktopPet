@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import random
+import subprocess
+import sys
 import tempfile
 import unittest
 from collections import Counter
@@ -421,6 +423,54 @@ class SchedulerConfigTests(unittest.TestCase):
                     )
                 )
                 self.assertEqual((), history.records)
+
+    def test_conversion_rejects_malformed_mapping_with_python_optimizations(self) -> None:
+        """The conversion boundary must not depend on assertions stripped by ``-O``.
+
+        The normal validator rejects this input first.  Bypassing that layer here
+        exercises the second, defensive conversion boundary against a malformed
+        mapping returned by an external loader or future validator regression.
+        """
+        raw = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        raw["category_group_weights"] = []
+        code = """
+import json
+import sys
+
+import src.persona_corpus.validation as validation
+from src.persona_corpus.selector import SchedulerConfig, SelectorConfigError
+
+
+class _ValidReport:
+    errors = ()
+
+
+validation.validate_config = lambda _value: _ValidReport()
+value = json.loads(sys.stdin.read())
+try:
+    SchedulerConfig.from_mapping(value)
+except SelectorConfigError as error:
+    if "category_group_weights must be an object" not in str(error):
+        raise SystemExit(f"unclear error: {error}")
+    raise SystemExit(0)
+except Exception as error:
+    raise SystemExit(f"wrong error: {type(error).__name__}: {error}")
+raise SystemExit("SchedulerConfig.from_mapping accepted malformed category_group_weights")
+"""
+        completed = subprocess.run(
+            [sys.executable, "-O", "-c", code],
+            input=json.dumps(raw),
+            text=True,
+            capture_output=True,
+            cwd=ROOT,
+            check=False,
+        )
+
+        self.assertEqual(
+            0,
+            completed.returncode,
+            msg=completed.stderr or completed.stdout,
+        )
 
     def test_default_config_has_no_current_working_directory_dependency(self) -> None:
         history = SelectionHistory()

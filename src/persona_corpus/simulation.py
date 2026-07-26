@@ -452,10 +452,12 @@ def _render_after_report(
     before = _legacy_metrics(source)
     after = _inventory_metrics(corpus)
     mode_ratio = after["mode_ratio"]
-    assert isinstance(mode_ratio, Mapping)
     before_lengths = before["length_ratio"]
     after_lengths = after["length_ratio"]
-    assert isinstance(before_lengths, Mapping) and isinstance(after_lengths, Mapping)
+    if not isinstance(mode_ratio, Mapping):
+        raise RuntimeError("simulation inventory metrics must contain an output-mode mapping")
+    if not isinstance(before_lengths, Mapping) or not isinstance(after_lengths, Mapping):
+        raise RuntimeError("simulation inventory metrics must contain length mappings")
     rows: list[tuple[object, object, object]] = [
         ("Total corpus rows", before["count"], len(corpus)),
         ("Enabled rows", "n/a", after["count"]),

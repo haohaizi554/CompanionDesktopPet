@@ -52,6 +52,33 @@ class EditorialManifestTests(unittest.TestCase):
 
         self.assertEqual({"玥玥": 27, "小玥": 1, "雷琳玥": 1}, marker_counts)
 
+    def test_identity_policy_markers_must_be_authorized_by_the_pii_contract(self) -> None:
+        from src.persona_corpus.contract import PERSONA_CONTRACT
+
+        self.assertTrue(
+            set(EDITORIAL_MANIFEST.allowed_identity_markers)
+            <= set(PERSONA_CONTRACT.pii_markers)
+        )
+
+        root = Path(__file__).resolve().parents[1]
+        payload = json.loads(
+            (root / "config/persona-editorial-manifest.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        payload["identity_policy"]["allowed_markers"].append(
+            "unrecognized-identity-marker"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "manifest.json"
+            path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+            with self.assertRaisesRegex(
+                EditorialManifestError,
+                "must be a subset of persona contract pii_markers",
+            ):
+                load_editorial_manifest(path)
+
     def test_curated_identity_entries_are_real_catalog_variants(self) -> None:
         entries = {entry.variant_id: entry for entry in CONTENT_CATALOG}
         curated = [
