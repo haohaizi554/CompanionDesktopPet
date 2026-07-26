@@ -146,4 +146,3 @@ all-pairs scan on 30,000 rows.
 5. CI parses actual Python and .NET test evidence, compares discovery with
    execution, and publishes the audited inventory/hash evidence.  No warnings
    may be allowlisted for this release.
-
