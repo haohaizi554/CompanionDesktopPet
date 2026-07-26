@@ -732,6 +732,214 @@ public sealed class SceneEngineTests
             secondSelection.ReusedLine!.Id);
     }
 
+    [Fact]
+    public void SafeFeedback_RejectsEveryUnsafePredicateAndTheImmediatelyPreviousText()
+    {
+        var now = new DateTime(2026, 7, 27, 10, 0, 0, DateTimeKind.Local);
+        var safe = SafeFeedbackLine("safe", "safe.group", "safe feedback");
+        var unsafeScenes = new[]
+        {
+            SceneCatalog.CreateScene("disabled", [SafeFeedbackLine("disabled", "disabled.group", "disabled") with { Enabled = false }]),
+            SceneCatalog.CreateScene("reply", [SafeFeedbackLine("reply", "reply.group", "reply") with { RequiresReply = true }]),
+            SceneCatalog.CreateScene("easter", [SafeFeedbackLine("easter", "easter.group", "easter", DialogueCategoryGroup.EasterEgg)]),
+            SceneCatalog.CreateScene("dry-sharp", [SafeFeedbackLine("dry-sharp", "dry-sharp.group", "dry sharp") with { Tone = "dry_sharp" }]),
+            SceneCatalog.CreateScene("direct", [SafeFeedbackLine("direct", "direct.group", "direct") with { OutputMode = DialogueOutputMode.UserDirect }]),
+            SceneCatalog.CreateScene("seasoning", [SafeFeedbackLine("seasoning", "seasoning.group", "666")]),
+            SceneCatalog.CreateScene("story", [SafeFeedbackLine("story", "story.group", "story")], "arc", 0)
+        };
+        var previous = SceneCatalog.CreateScene(
+            "previous",
+            [SafeFeedbackLine("previous", "previous.group", safe.Text)]);
+        var history = new SceneHistory();
+        history.Record(previous, now.AddMinutes(-1), previous.Lines[0]);
+        var scheduler = new SceneScheduler();
+        var context = new SceneContext(CompanionEvent.Automatic, now, CharacterState.Create(now));
+
+        Assert.All(unsafeScenes, scene =>
+            Assert.Null(scheduler.SelectSafeFeedback([scene], context, history, new Random(1))));
+        Assert.Null(scheduler.SelectSafeFeedback(
+            [SceneCatalog.CreateScene("duplicate", [safe])],
+            context,
+            history,
+            new Random(1)));
+
+        var selection = scheduler.SelectSafeFeedback(
+            [.. unsafeScenes, SceneCatalog.CreateScene("duplicate", [safe]),
+                SceneCatalog.CreateScene("valid", [safe with { Id = "valid", SemanticGroup = "valid.group", Text = "different safe feedback" }])],
+            context,
+            history,
+            new Random(1));
+
+        Assert.NotNull(selection);
+        Assert.Equal("valid", selection!.Scene.Id);
+        Assert.True(selection.Line.Enabled
+                    && !selection.Line.RequiresReply
+                    && !selection.Line.HasSeasoningMarker
+                    && selection.Scene.StoryArcId is null
+                    && selection.Scene.CategoryGroup != DialogueCategoryGroup.EasterEgg
+                    && selection.Scene.Tone != "dry_sharp"
+                    && selection.Scene.OutputMode != DialogueOutputMode.UserDirect);
+        Assert.NotEqual(history.Entries[^1].Variant, selection.Line.Text);
+    }
+
+    [Fact]
+    public void SafeFeedback_RetainsTriggerContextAndDailyCapsInBothLayers()
+    {
+        var now = new DateTime(2026, 7, 27, 10, 0, 0, DateTimeKind.Local);
+        var history = new SceneHistory();
+        var capped = SceneCatalog.CreateScene(
+            "capped",
+            [SafeFeedbackLine("capped", "capped.group", "capped", maxPerDay: 1)]);
+        history.Record(capped, now.AddHours(-1), capped.Lines[0]);
+        var wrongTrigger = SceneCatalog.CreateScene(
+            "wrong-trigger",
+            [SafeFeedbackLine("wrong-trigger", "wrong-trigger.group", "wrong trigger") with
+            {
+                Trigger = DialogueTrigger.AppStart
+            }]);
+        var wrongContext = SceneCatalog.CreateScene(
+            "wrong-context",
+            [SafeFeedbackLine("wrong-context", "wrong-context.group", "wrong context") with
+            {
+                RequiredContext = ["not_fullscreen"]
+            }]);
+        var context = new SceneContext(CompanionEvent.Automatic, now, CharacterState.Create(now));
+
+        var selection = new SceneScheduler().SelectSafeFeedback(
+            [capped, wrongTrigger, wrongContext],
+            context,
+            history,
+            new Random(2));
+
+        Assert.Null(selection);
+    }
+
+    [Fact]
+    public void SafeFeedback_FirstLayerRetainsSemanticAndLineCooldownWhenAnOrdinarySafeAlternativeExists()
+    {
+        var now = new DateTime(2026, 7, 27, 10, 0, 0, DateTimeKind.Local);
+        var semanticCooling = SceneCatalog.CreateScene(
+            "semantic-cooling",
+            [SafeFeedbackLine("semantic-cooling", "semantic-cooling.group", "semantic cooling", maxPerDay: 5) with
+            {
+                CooldownHours = 0
+            }]);
+        var lineCooling = SceneCatalog.CreateScene(
+            "line-cooling",
+            [SafeFeedbackLine("line-cooling", "line-cooling.group", "line cooling", maxPerDay: 5) with
+            {
+                SemanticCooldownHours = 0
+            }]);
+        var ordinary = SceneCatalog.CreateScene(
+            "ordinary",
+            [SafeFeedbackLine("ordinary", "ordinary.group", "ordinary", maxPerDay: 5) with
+            {
+                CooldownHours = 0,
+                SemanticCooldownHours = 0
+            }]);
+        var history = new SceneHistory();
+        history.Record(semanticCooling, now.AddDays(-1).AddMinutes(-1), semanticCooling.Lines[0]);
+        history.Record(lineCooling, now.AddDays(-1), lineCooling.Lines[0]);
+        var context = new SceneContext(CompanionEvent.Automatic, now, CharacterState.Create(now));
+
+        for (var seed = 0; seed < 32; seed++)
+        {
+            var selection = new SceneScheduler().SelectSafeFeedback(
+                [semanticCooling, lineCooling, ordinary],
+                context,
+                history,
+                new Random(seed));
+
+            Assert.NotNull(selection);
+            Assert.Equal(ordinary.Id, selection!.Scene.Id);
+        }
+    }
+
+    [Fact]
+    public void SafeFeedback_SecondLayerRelaxesOrdinaryAdjacencyButNotSafety()
+    {
+        var now = new DateTime(2026, 7, 27, 10, 0, 0, DateTimeKind.Local);
+        var previous = SceneCatalog.CreateScene(
+            "technical-previous",
+            [SafeFeedbackLine("technical-previous", "technical.previous", "technical previous", DialogueCategoryGroup.Technical)]);
+        var candidate = SceneCatalog.CreateScene(
+            "technical-candidate",
+            [SafeFeedbackLine("technical-candidate", "technical.candidate", "technical candidate", DialogueCategoryGroup.Technical)]);
+        var history = new SceneHistory();
+        history.Record(previous, now.AddDays(-1), previous.Lines[0]);
+        Assert.False(history.MeetsAdjacencyAndRecentQuotas(candidate));
+
+        var selection = new SceneScheduler().SelectSafeFeedback(
+            [candidate],
+            new SceneContext(CompanionEvent.Automatic, now, CharacterState.Create(now)),
+            history,
+            new Random(3));
+
+        Assert.NotNull(selection);
+        Assert.Equal(candidate.Id, selection!.Scene.Id);
+        Assert.Equal(candidate.Lines[0].Id, selection.Line.Id);
+    }
+
+    [Fact]
+    public void SafeFeedback_PrefersUnusedThenLeastRecentLineWithinTheSelectedScene()
+    {
+        var now = new DateTime(2026, 7, 27, 10, 0, 0, DateTimeKind.Local);
+        var lines = new[]
+        {
+            SafeFeedbackLine("oldest", "line-choice.group", "oldest", maxPerDay: 5),
+            SafeFeedbackLine("middle", "line-choice.group", "middle", maxPerDay: 5),
+            SafeFeedbackLine("unused", "line-choice.group", "unused", maxPerDay: 5)
+        };
+        var scene = SceneCatalog.CreateScene("line-choice", lines);
+        var context = new SceneContext(CompanionEvent.Automatic, now, CharacterState.Create(now));
+        var historyWithUnused = new SceneHistory();
+        historyWithUnused.Record(scene, now.AddDays(-1).AddHours(-2), lines[0]);
+        historyWithUnused.Record(scene, now.AddDays(-1).AddHours(-1), lines[1]);
+
+        var unused = new SceneScheduler().SelectSafeFeedback(
+            [scene], context, historyWithUnused, new Random(4));
+
+        Assert.NotNull(unused);
+        Assert.Equal(lines[2].Id, unused!.Line.Id);
+
+        var allUsed = new SceneHistory();
+        allUsed.Record(scene, now.AddDays(-1).AddHours(-3), lines[0]);
+        allUsed.Record(scene, now.AddDays(-1).AddHours(-2), lines[1]);
+        allUsed.Record(scene, now.AddDays(-1).AddHours(-1), lines[2]);
+
+        var leastRecent = new SceneScheduler().SelectSafeFeedback(
+            [scene], context, allUsed, new Random(4));
+
+        Assert.NotNull(leastRecent);
+        Assert.Equal(lines[0].Id, leastRecent!.Line.Id);
+    }
+
+    [Fact]
+    public void SafeFeedback_SelectsTheSceneBeforeApplyingLineRecencyWithinThatScene()
+    {
+        var now = new DateTime(2026, 7, 27, 10, 0, 0, DateTimeKind.Local);
+        var first = SceneCatalog.CreateScene("a-first", [
+            SafeFeedbackLine("a-first-1", "first.group", "first one", maxPerDay: 5),
+            SafeFeedbackLine("a-first-2", "first.group", "first two", maxPerDay: 5)]);
+        var second = SceneCatalog.CreateScene("z-second", [
+            SafeFeedbackLine("z-second-1", "second.group", "second one", maxPerDay: 5),
+            SafeFeedbackLine("z-second-2", "second.group", "second two", maxPerDay: 5)]);
+        var firstOld = SafeFeedbackHistory(now, first, second);
+        var secondOld = SafeFeedbackHistory(now, second, first);
+        var context = new SceneContext(CompanionEvent.Automatic, now, CharacterState.Create(now));
+
+        var selectionA = new SceneScheduler().SelectSafeFeedback(
+            [first, second], context, firstOld, new Random(14));
+        var selectionB = new SceneScheduler().SelectSafeFeedback(
+            [first, second], context, secondOld, new Random(14));
+
+        Assert.NotNull(selectionA);
+        Assert.NotNull(selectionB);
+        Assert.Equal(selectionA!.Scene.Id, selectionB!.Scene.Id);
+        Assert.Contains(selectionA.Line, selectionA.Scene.Lines);
+        Assert.Contains(selectionB.Line, selectionB.Scene.Lines);
+    }
+
     private static IReadOnlySet<string> ContextTokens(SceneContext context)
         => SceneScheduler.ContextTokens(context);
 
@@ -747,6 +955,54 @@ public sealed class SceneEngineTests
             history.Record(scenes[index], now.AddMinutes(-2 - index), scenes[index].Lines[0]);
         }
 
+        return history;
+    }
+
+    private static DialogueLine SafeFeedbackLine(
+        string id,
+        string semanticGroup,
+        string text,
+        DialogueCategoryGroup categoryGroup = DialogueCategoryGroup.CharacterLife,
+        int maxPerDay = 1)
+    {
+        var basis = PersonaCorpus.All.First(line =>
+            line.Enabled
+            && !line.RequiresReply
+            && !line.HasSeasoningMarker
+            && line.CategoryGroup == DialogueCategoryGroup.CharacterLife
+            && line.Tone != "dry_sharp"
+            && line.OutputMode != DialogueOutputMode.UserDirect
+            && line.Trigger == DialogueTrigger.Any
+            && line.RequiredContext.SequenceEqual(["none"]));
+        return basis with
+        {
+            Id = id,
+            TopicId = id + ".topic",
+            SemanticGroup = semanticGroup,
+            CategoryGroup = categoryGroup,
+            Text = text,
+            MaxPerDay = maxPerDay,
+            CooldownHours = 120,
+            SemanticCooldownHours = 120,
+            RequiresReply = false,
+            Enabled = true
+        };
+    }
+
+    private static SceneHistory SafeFeedbackHistory(
+        DateTime now,
+        SceneDefinition olderScene,
+        SceneDefinition newerScene)
+    {
+        var history = new SceneHistory();
+        for (var index = 0; index < olderScene.Lines.Count; index++)
+        {
+            history.Record(olderScene, now.AddDays(-1).AddHours(-3).AddSeconds(index), olderScene.Lines[index]);
+        }
+        for (var index = 0; index < newerScene.Lines.Count; index++)
+        {
+            history.Record(newerScene, now.AddDays(-1).AddHours(-1).AddSeconds(index), newerScene.Lines[index]);
+        }
         return history;
     }
 

@@ -69,6 +69,53 @@ public sealed class OfflineCompanionAgentTests
     }
 
     [Fact]
+    public void Respond_AutomaticRemainsVisibleOneSecondAfterStartupUnderRecentHistoryPressure()
+    {
+        var pressure = CreateSafeFeedbackPressure();
+
+        var reply = pressure.Agent.Respond(
+            CompanionEvent.Automatic,
+            pressure.Target,
+            new Random(260705));
+
+        AssertValidatedSafeReply(reply, pressure.PreviousText);
+    }
+
+    [Theory]
+    [InlineData(CompanionEvent.Click)]
+    [InlineData(CompanionEvent.DragReleased)]
+    [InlineData(CompanionEvent.AnimationPaused)]
+    [InlineData(CompanionEvent.AnimationResumed)]
+    [InlineData(CompanionEvent.SizeChanged)]
+    [InlineData(CompanionEvent.PositionRestored)]
+    public void Respond_DirectFeedbackRemainsVisibleUnderRecentHistoryPressure(CompanionEvent trigger)
+    {
+        var pressure = CreateSafeFeedbackPressure();
+
+        var reply = pressure.Agent.Respond(
+            trigger,
+            pressure.Target,
+            new Random(260706 + (int)trigger));
+
+        AssertValidatedSafeReply(reply, pressure.PreviousText);
+    }
+
+    [Fact]
+    public void Respond_ClockTickRemainsSilentWhenRecentHistoryBlocksTheBudget()
+    {
+        var pressure = CreateSafeFeedbackPressure();
+
+        var reply = pressure.Agent.Respond(
+            CompanionEvent.ClockTick,
+            pressure.Target,
+            new Random(260707));
+
+        Assert.False(reply.ShouldDisplayText);
+        Assert.Equal("intentional_silence", reply.SceneId);
+        Assert.Null(reply.SourceLine);
+    }
+
+    [Fact]
     public void Respond_EmitsOnlyEnabledV2LinesWithProvenanceAcrossEveryRoute()
     {
         var enabledById = PersonaCorpus.All.ToDictionary(line => line.Id);
@@ -421,6 +468,52 @@ public sealed class OfflineCompanionAgentTests
             }
         }
         return entries.Count == 0 ? 0 : repeats / (double)entries.Count;
+    }
+
+    private static (OfflineCompanionAgent Agent, DateTime Target, string PreviousText)
+        CreateSafeFeedbackPressure()
+    {
+        var start = new DateTime(2026, 7, 27, 10, 0, 0, DateTimeKind.Local);
+        var fresh = new OfflineCompanionAgent();
+        var startup = fresh.Respond(CompanionEvent.Startup, start, new Random(260700));
+        Assert.True(startup.ShouldDisplayText);
+        Assert.NotNull(startup.SourceLine);
+
+        var snapshot = fresh.CreateSnapshot();
+        var history = new SceneHistory();
+        history.Restore(snapshot.History);
+        var scenes = SceneCatalog.PersonaScenes;
+        for (var index = 0; index < scenes.Count; index++)
+        {
+            var playedAt = start.AddTicks(
+                TimeSpan.TicksPerMillisecond * (1 + 800L * (index + 1) / (scenes.Count + 1)));
+            history.Record(scenes[index], playedAt, scenes[index].Lines[0]);
+        }
+
+        var pressured = snapshot with { History = history.Entries.ToArray() };
+        return (
+            new OfflineCompanionAgent(pressured),
+            start.AddSeconds(1),
+            history.Entries[^1].Variant);
+    }
+
+    private static void AssertValidatedSafeReply(AgentReply reply, string previousText)
+    {
+        Assert.True(reply.ShouldDisplayText);
+        Assert.NotEqual("intentional_silence", reply.SceneId);
+        Assert.NotNull(reply.SourceLine);
+        var source = PersonaCorpus.All.Single(line => line.Id == reply.SourceLine!.Id);
+        Assert.Same(source, reply.SourceLine);
+        var scene = SceneCatalog.PersonaScenes.Single(item => item.Id == reply.SceneId);
+        Assert.True(reply.SourceLine.Enabled
+                    && !reply.SourceLine.RequiresReply
+                    && !reply.SourceLine.HasSeasoningMarker
+                    && scene.StoryArcId is null
+                    && scene.CategoryGroup != DialogueCategoryGroup.EasterEgg
+                    && scene.Tone != "dry_sharp"
+                    && scene.OutputMode != DialogueOutputMode.UserDirect);
+        Assert.Equal(reply.SourceLine.Text, reply.Text);
+        Assert.NotEqual(previousText, reply.Text);
     }
 
     private static void AssertEasterEggRecentQuota(

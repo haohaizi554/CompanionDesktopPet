@@ -473,7 +473,7 @@ internal sealed record ClickFallbackSelection(
     SceneDefinition Scene,
     DialogueLine? ReusedLine = null);
 
-public sealed class SceneScheduler
+public sealed partial class SceneScheduler
 {
     public SceneDefinition? Select(
         SceneContext context,

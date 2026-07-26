@@ -70,6 +70,8 @@ public static class SceneCatalog
             throw new InvalidDataException(
                 $"Enabled v2 persona corpus must contain exactly {PersonaContractGenerated.SemanticSceneCount} semantic scenes, found {scenes.Count}.");
         }
+
+        SceneScheduler.ValidateSafeFeedbackCoverage(scenes);
     }
 
     private static bool IsFatalException(Exception exception) =>

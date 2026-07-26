@@ -1,3 +1,6 @@
+using System.Diagnostics;
+using System.IO;
+
 namespace CompanionDesktopPet.Services;
 
 public sealed record AgentReply(
@@ -74,7 +77,16 @@ public sealed class OfflineCompanionAgent : ICompanionDialogueAgent
             RecentLines);
     }
 
-    internal void WarmUp() => _ = SceneCatalog.All.Count;
+    internal void WarmUp()
+    {
+        _ = SceneCatalog.All.Count;
+        if (SceneCatalog.PersonaLoadFailure is { } failure)
+        {
+            throw new InvalidDataException(
+                "The validated v2 persona corpus is unavailable; degraded dialogue cannot report ready.",
+                failure);
+        }
+    }
 
     public AgentReply Respond(CompanionEvent trigger, DateTime localTime, Random random) =>
         RespondCore(trigger, localTime, random, default);
@@ -112,17 +124,17 @@ public sealed class OfflineCompanionAgent : ICompanionDialogueAgent
             PreferredTree: preferredTree.Kind,
             PreviousCategory: _lastCategory,
             EffectiveFullscreen: fullscreen.EffectiveQuietMode);
+        var bypassBudget = DialogueEventPolicy.BypassesInterruptionBudget(trigger);
         var scene = _scheduler.Select(
             context,
             _history,
             random,
-            bypassInterruptionBudget: DialogueEventPolicy.BypassesInterruptionBudget(trigger));
-        DialogueLine? fallbackLine = null;
-        if (scene is null && trigger == CompanionEvent.Click)
+            bypassInterruptionBudget: bypassBudget);
+        SafeFeedbackSelection? safe = null;
+        if (scene is null && bypassBudget)
         {
-            var fallback = _scheduler.SelectClickFallback(context, _history, random);
-            scene = fallback?.Scene;
-            fallbackLine = fallback?.ReusedLine;
+            safe = _scheduler.SelectSafeFeedback(SceneCatalog.PersonaScenes, context, _history, random);
+            scene = safe?.Scene;
         }
         TurnCount++;
         if (scene is null)
@@ -130,6 +142,11 @@ public sealed class OfflineCompanionAgent : ICompanionDialogueAgent
             if (trigger == CompanionEvent.StoryTimerDue)
             {
                 DeferDueStory(localTime);
+            }
+
+            if (trigger == CompanionEvent.Automatic)
+            {
+                TraceAutomaticSafeFeedbackContractFailure(localTime, fullscreen);
             }
 
             return new AgentReply(
@@ -143,7 +160,7 @@ public sealed class OfflineCompanionAgent : ICompanionDialogueAgent
                 ShouldDisplayText: false);
         }
 
-        var line = fallbackLine ?? SelectEligibleLine(scene, localTime, random);
+        var line = safe?.Line ?? SelectEligibleLine(scene, localTime, random);
         _history.Record(scene, localTime, line);
         _state.ApplyScene(scene);
         UpdateActivity(line.CategoryGroup, line.Category);
@@ -169,6 +186,26 @@ public sealed class OfflineCompanionAgent : ICompanionDialogueAgent
         var diverse = _history.PreferSurfaceExposure(eligible);
         var unused = diverse.Where(line => !_usedThisSession.Contains(line.Text)).ToArray();
         return WeightedChoice(unused.Length > 0 ? unused : diverse, random);
+    }
+
+    private static void TraceAutomaticSafeFeedbackContractFailure(
+        DateTime localTime,
+        FullscreenSnapshot fullscreen)
+    {
+        try
+        {
+            Trace.TraceError(
+                "Validated safe-feedback contract returned no Automatic line at {0:o}; observed fullscreen={1}, effective quiet={2}.",
+                localTime,
+                fullscreen.Observed?.ToString() ?? "unknown",
+                fullscreen.EffectiveQuietMode);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException
+                                          and not StackOverflowException
+                                          and not AccessViolationException)
+        {
+            // A nonfatal diagnostic must not turn intentional silence into a retry loop or crash.
+        }
     }
 
     private static DialogueLine WeightedChoice(IReadOnlyList<DialogueLine> source, Random random)
