@@ -49,7 +49,7 @@ def _row(batch_id: str, ordinal: int) -> tuple[str, ...]:
         "fixture_entry",
         f"technical.fixture.{batch_id}",
         output_mode,
-        "idle",
+        "any",
         "none",
         "dry",
         "1",
@@ -157,6 +157,32 @@ class AuthoredCatalogTests(unittest.TestCase):
             path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
             with self.assertRaisesRegex(ValueError, "tone must be one of"):
+                parse_authored_batches(authored_dir)
+
+    def test_parse_authored_batches_rejects_an_unknown_trigger(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            authored_dir, _ = write_valid_authored_fixture(Path(temporary_directory))
+            path = authored_dir / "b001.tsv"
+            lines = path.read_text(encoding="utf-8").splitlines()
+            fields = lines[1].split("\t")
+            fields[AUTHORED_HEADER.index("trigger")] = "surprise"
+            lines[1] = "\t".join(fields)
+            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "trigger must be one of"):
+                parse_authored_batches(authored_dir)
+
+    def test_parse_authored_batches_rejects_an_unknown_required_context(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            authored_dir, _ = write_valid_authored_fixture(Path(temporary_directory))
+            path = authored_dir / "b001.tsv"
+            lines = path.read_text(encoding="utf-8").splitlines()
+            fields = lines[1].split("\t")
+            fields[AUTHORED_HEADER.index("required_context")] = "unknown_context"
+            lines[1] = "\t".join(fields)
+            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "required_context must"):
                 parse_authored_batches(authored_dir)
 
     def test_parse_authored_batches_rejects_category_group_inventory_drift(self) -> None:

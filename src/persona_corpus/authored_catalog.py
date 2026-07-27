@@ -278,6 +278,30 @@ def _parse_entry(path: Path, line_number: int, values: tuple[str, ...]) -> Autho
             "tone must be one of " + ", ".join(sorted(PERSONA_CONTRACT.tones)),
         )
 
+    allowed_triggers = (
+        PERSONA_CONTRACT.mvp_triggers | PERSONA_CONTRACT.future_triggers
+    )
+    if row["trigger"] not in allowed_triggers:
+        raise _error(
+            path,
+            line_number,
+            "trigger must be one of " + ", ".join(sorted(allowed_triggers)),
+        )
+
+    context_tokens = tuple(row["required_context"].split(","))
+    if (
+        any(not token or token != token.strip() for token in context_tokens)
+        or len(context_tokens) != len(set(context_tokens))
+        or any(token not in PERSONA_CONTRACT.context_tokens for token in context_tokens)
+        or ("none" in context_tokens and context_tokens != ("none",))
+    ):
+        raise _error(
+            path,
+            line_number,
+            "required_context must list unique controlled context tokens, "
+            "and 'none' must stand alone",
+        )
+
     if row["relationship_profile"] not in RELATIONSHIP_PROFILES:
         raise _error(
             path,
