@@ -3,6 +3,9 @@ namespace CompanionDesktopPet.Services;
 public sealed class DialogueService
 {
     private readonly object _sync = new();
+    // The agent owns mutable conversational state.  Keep its operations ordered without
+    // making callers that only inspect service state wait behind a slow response.
+    private readonly object _agentOperationGate = new();
     private readonly AgentMemorySnapshot? _initialSnapshot;
     private readonly Func<AgentMemorySnapshot?, ICompanionDialogueAgent>? _agentFactory;
     private readonly TimeProvider _timeProvider;
@@ -66,14 +69,19 @@ public sealed class DialogueService
 
     public AgentMemorySnapshot CreateSnapshot()
     {
+        ICompanionDialogueAgent? agent;
         lock (_sync)
         {
-            if (_agent is { } agent)
+            agent = _agent;
+            if (agent is null)
             {
-                return agent.CreateSnapshot().DetachedCopy();
+                return (_initialSnapshot ?? CreateFallbackSnapshot()).DetachedCopy();
             }
+        }
 
-            return (_initialSnapshot ?? CreateFallbackSnapshot()).DetachedCopy();
+        lock (_agentOperationGate)
+        {
+            return agent.CreateSnapshot().DetachedCopy();
         }
     }
 
@@ -81,17 +89,22 @@ public sealed class DialogueService
     {
         get
         {
+            ICompanionDialogueAgent? agent;
             lock (_sync)
             {
-                if (_agent is { } agent)
+                agent = _agent;
+                if (agent is null)
                 {
-                    return agent.NextStoryDueAt;
+                    var stories = (_initialSnapshot ?? _fallbackSnapshot)?.State.ActiveStories;
+                    return stories is { Count: > 0 }
+                        ? stories.Min(story => story.DueAt)
+                        : null;
                 }
+            }
 
-                var stories = (_initialSnapshot ?? _fallbackSnapshot)?.State.ActiveStories;
-                return stories is { Count: > 0 }
-                    ? stories.Min(story => story.DueAt)
-                    : null;
+            lock (_agentOperationGate)
+            {
+                return agent.NextStoryDueAt;
             }
         }
     }
@@ -125,11 +138,20 @@ public sealed class DialogueService
         FullscreenSnapshot fullscreen)
     {
         ArgumentNullException.ThrowIfNull(random);
+        ICompanionDialogueAgent? agent;
         lock (_sync)
         {
-            return _agent is { } agent
-                ? agent.Respond(trigger, localTime, random, fullscreen)
-                : GetFallbackReply(trigger);
+            agent = _agent;
+        }
+
+        if (agent is null)
+        {
+            return GetFallbackReply(trigger);
+        }
+
+        lock (_agentOperationGate)
+        {
+            return agent.Respond(trigger, localTime, random, fullscreen);
         }
     }
 

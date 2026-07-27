@@ -280,6 +280,39 @@ public sealed class DialogueWarmupTests
         Assert.Equal(1, agent.MaximumConcurrentCalls);
     }
 
+    [Fact]
+    public async Task BlockedAgentResponse_DoesNotBlockServiceStateAndSerializesAllAgentOperations()
+    {
+        using var agent = new BlockingOperationAgent();
+        var service = DialogueService.CreateDeferred(_ => agent);
+        Assert.True(await service.WarmupAsync());
+
+        var response = Task.Run(() => service.GetReply(
+            CompanionEvent.Click,
+            LocalNow,
+            new Random(20260727)));
+        Assert.True(agent.ResponseEntered.Wait(TimeSpan.FromSeconds(2)));
+
+        var serviceState = await Task.Run(() =>
+            (service.IsReady, service.LastWarmupException)).WaitAsync(TimeSpan.FromSeconds(1));
+        Assert.True(serviceState.IsReady);
+        Assert.Null(serviceState.LastWarmupException);
+
+        var snapshot = Task.Run(service.CreateSnapshot);
+        var dueAt = Task.Run(() => service.NextStoryDueAt);
+        Assert.NotSame(snapshot, await Task.WhenAny(snapshot, Task.Delay(100)));
+        Assert.NotSame(dueAt, await Task.WhenAny(dueAt, Task.Delay(100)));
+
+        agent.ReleaseResponse.Set();
+        var reply = await response.WaitAsync(BlockingCallTimeout);
+        _ = await snapshot.WaitAsync(BlockingCallTimeout);
+        _ = await dueAt.WaitAsync(BlockingCallTimeout);
+
+        Assert.True(reply.ShouldDisplayText);
+        Assert.Equal(1, agent.MaximumConcurrentOperations);
+        Assert.Equal(3, agent.OperationCount);
+    }
+
     private sealed class FixedAgent : ICompanionDialogueAgent
     {
         private readonly AgentMemorySnapshot _snapshot;
@@ -364,6 +397,97 @@ public sealed class DialogueWarmupTests
                 var observed = Volatile.Read(ref _maximumConcurrentCalls);
                 if (active <= observed
                     || Interlocked.CompareExchange(ref _maximumConcurrentCalls, active, observed) == observed)
+                {
+                    return;
+                }
+            }
+        }
+    }
+
+    private sealed class BlockingOperationAgent : ICompanionDialogueAgent, IDisposable
+    {
+        private int _activeOperations;
+        private int _maximumConcurrentOperations;
+        private int _operationCount;
+
+        public ManualResetEventSlim ResponseEntered { get; } = new();
+
+        public ManualResetEventSlim ReleaseResponse { get; } = new();
+
+        public int MaximumConcurrentOperations => Volatile.Read(ref _maximumConcurrentOperations);
+
+        public int OperationCount => Volatile.Read(ref _operationCount);
+
+        public DateTime? NextStoryDueAt
+        {
+            get
+            {
+                ExecuteOperation();
+                return LocalNow.AddMinutes(30);
+            }
+        }
+
+        public AgentMemorySnapshot CreateSnapshot()
+        {
+            ExecuteOperation();
+            return new AgentMemorySnapshot(
+                CharacterState.Create(LocalNow),
+                [],
+                0,
+                null,
+                []);
+        }
+
+        public AgentReply Respond(
+            CompanionEvent trigger,
+            DateTime localTime,
+            Random random,
+            FullscreenSnapshot fullscreen)
+        {
+            ExecuteOperation(
+                () =>
+                {
+                    ResponseEntered.Set();
+                    ReleaseResponse.Wait(BlockingCallTimeout);
+                });
+            return new AgentReply(
+                "blocked response released",
+                DialogueCategory.CharacterLife,
+                DialogueTreeKind.Companion,
+                trigger,
+                SceneId: "full:blocked",
+                SemanticGroup: "full.blocked");
+        }
+
+        public void Dispose()
+        {
+            ResponseEntered.Dispose();
+            ReleaseResponse.Dispose();
+        }
+
+        private void ExecuteOperation(Action? operation = null)
+        {
+            var active = Interlocked.Increment(ref _activeOperations);
+            UpdateMaximum(active);
+            Interlocked.Increment(ref _operationCount);
+            try
+            {
+                operation?.Invoke();
+                Thread.Sleep(20);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _activeOperations);
+            }
+        }
+
+        private void UpdateMaximum(int active)
+        {
+            while (true)
+            {
+                var observed = Volatile.Read(ref _maximumConcurrentOperations);
+                if (active <= observed
+                    || Interlocked.CompareExchange(ref _maximumConcurrentOperations, active, observed) == observed)
                 {
                     return;
                 }
