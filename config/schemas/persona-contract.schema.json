@@ -313,12 +313,7 @@
       "type": "object",
       "required": ["pii_markers"],
       "properties": {
-        "pii_markers": {
-          "type": "array",
-          "items": { "type": "string", "minLength": 1 },
-          "minItems": 1,
-          "uniqueItems": true
-        }
+        "pii_markers": { "const": ["\u96f7\u7433\u73a5", "\u5c0f\u73a5", "\u73a5\u4ed4", "\u73a5\u73a5"] }
       },
       "additionalProperties": false
     },
@@ -364,9 +359,9 @@
             "persist_across_restarts"
           ],
           "properties": {
-            "minimum_intervening_bubbles_same_semantic_group": { "type": "integer", "minimum": 1 },
-            "recent_bubbles_per_semantic_group": { "type": "integer", "minimum": 1 },
-            "direct_marker_max_per_identity_class": { "type": "integer", "minimum": 1 },
+            "minimum_intervening_bubbles_same_semantic_group": { "type": "integer", "const": 3 },
+            "recent_bubbles_per_semantic_group": { "type": "integer", "const": 8 },
+            "direct_marker_max_per_identity_class": { "type": "integer", "const": 3 },
             "persist_across_restarts": { "const": false }
           },
           "additionalProperties": false

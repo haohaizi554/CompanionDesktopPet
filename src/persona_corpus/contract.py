@@ -332,18 +332,20 @@ def load_persona_contract(path: Path = DEFAULT_CONTRACT_PATH) -> PersonaContract
         raise PersonaContractError(
             "authored_identity.session_exposure uses an unexpected key set"
         )
-    exposure_limits = (
-        "minimum_intervening_bubbles_same_semantic_group",
-        "recent_bubbles_per_semantic_group",
-        "direct_marker_max_per_identity_class",
-    )
+    expected_session_exposure_limits = {
+        "minimum_intervening_bubbles_same_semantic_group": 3,
+        "recent_bubbles_per_semantic_group": 8,
+        "direct_marker_max_per_identity_class": 3,
+    }
     if (
-        any(type(session_exposure[limit]) is not int or session_exposure[limit] <= 0 for limit in exposure_limits)
-        or session_exposure["recent_bubbles_per_semantic_group"]
-        <= session_exposure["minimum_intervening_bubbles_same_semantic_group"]
+        any(
+            type(session_exposure[limit]) is not int
+            or session_exposure[limit] != expected
+            for limit, expected in expected_session_exposure_limits.items()
+        )
     ):
         raise PersonaContractError(
-            "authored_identity.session_exposure must contain positive compatible bounds"
+            "authored_identity.session_exposure must contain the exact 3/8/3 bounds"
         )
     if session_exposure["persist_across_restarts"] is not False:
         raise PersonaContractError(
