@@ -104,40 +104,91 @@ public sealed class ServiceConcurrencyTests
     }
 
     [Fact]
-    public async Task CompanionEventPump_ConcurrentDirectPollsEmitEachLogicalTickEventOnce()
+    public async Task CompanionEventPump_ConcurrentDirectPollsEmitEachLogicalTickEventOnceAcrossRepeatedRaces()
     {
         const int callerCount = 32;
-        var beforeMidnight = new DateTime(2026, 7, 27, 23, 59, 45, DateTimeKind.Local);
-        var now = beforeMidnight.AddSeconds(30);
-        var dueAt = beforeMidnight.AddSeconds(20);
-        var pump = new CompanionEventPump(beforeMidnight, TimeSpan.FromMinutes(12));
-        using var start = new Barrier(callerCount);
+        const int repetitionCount = 24;
 
+        for (var repetition = 0; repetition < repetitionCount; repetition++)
+        {
+            var beforeMidnight = new DateTime(2026, 7, 27, 23, 59, 45, DateTimeKind.Local)
+                .AddDays(repetition);
+            var now = beforeMidnight.AddSeconds(30);
+            var firstDueAt = beforeMidnight.AddSeconds(20);
+            var secondDueAt = now.AddMinutes(5);
+            var pump = new CompanionEventPump(beforeMidnight, TimeSpan.FromMinutes(12));
+
+            var firstRace = await RacePolls(
+                pump,
+                callerCount,
+                now,
+                TimeSpan.FromSeconds(5),
+                firstDueAt);
+
+            Assert.Equal(
+                new[]
+                {
+                    CompanionEvent.DayChanged,
+                    CompanionEvent.IdleReturned,
+                    CompanionEvent.StoryTimerDue,
+                    CompanionEvent.ClockTick
+                }.Order(),
+                firstRace.Where(companionEvent => companionEvent is not null)
+                    .Select(companionEvent => companionEvent!.Value)
+                    .Order());
+            Assert.All(
+                new[]
+                {
+                    CompanionEvent.DayChanged,
+                    CompanionEvent.IdleReturned,
+                    CompanionEvent.StoryTimerDue,
+                    CompanionEvent.ClockTick
+                },
+                companionEvent => Assert.Equal(
+                    1,
+                    firstRace.Count(emitted => emitted == companionEvent)));
+
+            Assert.Null(pump.Poll(now, TimeSpan.FromSeconds(5), firstDueAt));
+
+            var secondRace = await RacePolls(
+                pump,
+                callerCount,
+                secondDueAt,
+                TimeSpan.FromSeconds(5),
+                secondDueAt);
+
+            Assert.Equal(
+                1,
+                secondRace.Count(companionEvent => companionEvent == CompanionEvent.StoryTimerDue));
+            Assert.All(
+                secondRace,
+                companionEvent => Assert.True(
+                    companionEvent is null or CompanionEvent.StoryTimerDue));
+            Assert.Null(pump.Poll(secondDueAt, TimeSpan.FromSeconds(5), secondDueAt));
+        }
+    }
+
+    private static async Task<CompanionEvent?[]> RacePolls(
+        CompanionEventPump pump,
+        int callerCount,
+        DateTime now,
+        TimeSpan idle,
+        DateTime? dueAt)
+    {
+        using var start = new Barrier(callerCount);
         var callers = Enumerable.Range(0, callerCount)
             .Select(_ => Task.Factory.StartNew(
                 () =>
                 {
                     start.SignalAndWait(ConcurrencyTimeout);
-                    return pump.Poll(now, TimeSpan.FromSeconds(5), dueAt);
+                    return pump.Poll(now, idle, dueAt);
                 },
                 CancellationToken.None,
                 TaskCreationOptions.LongRunning,
                 TaskScheduler.Default))
             .ToArray();
 
-        var emitted = await Task.WhenAll(callers).WaitAsync(ConcurrencyTimeout);
-
-        Assert.Equal(
-            new[]
-            {
-                CompanionEvent.DayChanged,
-                CompanionEvent.IdleReturned,
-                CompanionEvent.StoryTimerDue,
-                CompanionEvent.ClockTick
-            }.Order(),
-            emitted.Where(companionEvent => companionEvent is not null)
-                .Select(companionEvent => companionEvent!.Value)
-                .Order());
+        return await Task.WhenAll(callers).WaitAsync(ConcurrencyTimeout);
     }
 
     private static async Task AssertCompletesAfterRelease(Task task)
