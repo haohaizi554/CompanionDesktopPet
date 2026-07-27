@@ -7,6 +7,7 @@ identity marker into an authored source batch.
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from collections.abc import Iterable
 from typing import Protocol
@@ -21,6 +22,41 @@ from .surface_safety import (
 from .validation_rules.content_rules import (
     DIRECT_STATE_PATTERNS,
     TECHNICAL_CURRENT_PATTERNS,
+)
+
+
+# These rules intentionally apply only to a line carrying a contract-approved
+# marker.  They are source-admission guardrails, not general-purpose Chinese
+# prose moderation, and therefore do not turn ordinary technical narration into
+# a false positive merely because it contains a generic word such as "小".
+_IDENTITY_DEPENDENCY_OR_COERCION_MARKERS = (
+    "只有你",
+    "只有我",
+    "只能陪着你",
+    "别走",
+    "不许离开",
+    "必须陪着你",
+    "永远陪",
+)
+_IDENTITY_SEXUAL_CONTENT_MARKERS = (
+    "上床",
+    "做爱",
+    "性爱",
+    "性行为",
+    "色情",
+)
+_IDENTITY_BIOGRAPHY_PATTERNS = (
+    re.compile(r"(?:今年|我今年|她今年)?\s*\d{1,2}\s*岁"),
+    re.compile(r"职高(?:肄|肆)业"),
+    re.compile(r"(?:辍学|打零工|月薪|老家|漂泊)"),
+)
+# A short 小X subject is a commonly used nickname shape, but it is only
+# treated as an identity claim when followed by a personal action/predicate.
+# This admits generic technical nouns such as 小程序 while rejecting the
+# unregistered ordinary-category identity form "小月把…".
+_UNREGISTERED_NICKNAME_PATTERN = re.compile(
+    r"(?<![\u3400-\u9fff])小[\u3400-\u9fff]"
+    r"(?=(?:把|在|会|想|只|能|必须|今年|来自|住在|说|告诉|陪|来了|走了))"
 )
 
 
@@ -63,6 +99,37 @@ def _unsupported_observation_marker(text: str) -> str | None:
         if marker in text:
             return marker
     return None
+
+
+def _identity_safety_violation(text: str) -> tuple[str, str] | None:
+    dependency = next(
+        (marker for marker in _IDENTITY_DEPENDENCY_OR_COERCION_MARKERS if marker in text),
+        None,
+    )
+    if dependency is not None:
+        return ("dependency, exclusivity, or coercion", dependency)
+    sexual = next(
+        (marker for marker in _IDENTITY_SEXUAL_CONTENT_MARKERS if marker in text),
+        None,
+    )
+    if sexual is not None:
+        return ("sexual content", sexual)
+    biography = next(
+        (
+            match
+            for pattern in _IDENTITY_BIOGRAPHY_PATTERNS
+            if (match := pattern.search(text)) is not None
+        ),
+        None,
+    )
+    if biography is not None:
+        return ("false real-person biography", biography.group(0))
+    return None
+
+
+def _unregistered_nickname(text: str) -> str | None:
+    match = _UNREGISTERED_NICKNAME_PATTERN.search(text)
+    return None if match is None else match.group(0)
 
 
 def validate_authored_identity_entries(entries: Iterable[_AuthoredIdentityEntry]) -> None:
@@ -108,6 +175,7 @@ def validate_authored_identity_entries(entries: Iterable[_AuthoredIdentityEntry]
     direct_marker_counts: Counter[tuple[str, str]] = Counter()
     for entry in all_entries:
         hits = marker_hits(entry.text)
+        nickname = _unregistered_nickname(entry.text)
         enabled_pii = pii_findings(entry.text, ENABLED_CONTENT_POLICY)
         for finding in classify_pii(entry.text):
             if finding.kind == "known_identity" and finding.evidence in known_markers:
@@ -143,6 +211,16 @@ def validate_authored_identity_entries(entries: Iterable[_AuthoredIdentityEntry]
                         hits[0],
                     )
                 )
+            identity_safety = _identity_safety_violation(entry.text)
+            if identity_safety is not None:
+                invariant, evidence = identity_safety
+                errors.append(
+                    _diagnostic(
+                        entry,
+                        f"identity text contains {invariant} via {evidence!r}",
+                        hits[0],
+                    )
+                )
             if entry.batch_id not in identity_batch_set and not policy[
                 "allow_markers_in_any_category"
             ]:
@@ -153,6 +231,19 @@ def validate_authored_identity_entries(entries: Iterable[_AuthoredIdentityEntry]
                         hits[0],
                     )
                 )
+
+        if (
+            nickname is not None
+            and nickname not in known_markers
+            and entry.category_group != "easter_egg"
+        ):
+            errors.append(
+                _diagnostic(
+                    entry,
+                    "ordinary-category text contains an unregistered identity/nickname",
+                    nickname,
+                )
+            )
 
         if entry.batch_id in identity_batch_set and (
             entry.category,

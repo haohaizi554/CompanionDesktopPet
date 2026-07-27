@@ -222,6 +222,44 @@ class AuthoredCatalogTests(unittest.TestCase):
             ):
                 parse_authored_batches(authored_dir)
 
+    def test_parse_authored_batches_rejects_identity_dependency_sexual_and_biography_claims(self) -> None:
+        cases = (
+            ("小玥只能陪着你，别走。", "dependency, exclusivity, or coercion"),
+            ("小玥想和你上床。", "sexual content"),
+            ("小玥今年20岁。", "false real-person biography"),
+            ("小玥职高肆业了。", "false real-person biography"),
+            ("小玥只有你了。", "dependency, exclusivity, or coercion"),
+            ("小玥必须陪着你。", "dependency, exclusivity, or coercion"),
+        )
+        for text, invariant in cases:
+            with self.subTest(text=text), tempfile.TemporaryDirectory() as temporary_directory:
+                authored_dir, _ = write_valid_authored_fixture(Path(temporary_directory))
+                set_field(authored_dir / "b084.tsv", "text", text)
+
+                with self.assertRaisesRegex(
+                    ValueError,
+                    rf"b084\.tsv.*authored\.b084.*小玥.*{invariant}",
+                ):
+                    parse_authored_batches(authored_dir)
+
+    def test_parse_authored_batches_rejects_unregistered_nickname_in_ordinary_category(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            authored_dir, _ = write_valid_authored_fixture(Path(temporary_directory))
+            set_field(authored_dir / "b001.tsv", "text", "小月把报错栈折成线索。")
+
+            with self.assertRaisesRegex(
+                ValueError,
+                r"b001\.tsv.*authored\.b001.*小月.*unregistered identity/nickname",
+            ):
+                parse_authored_batches(authored_dir)
+
+    def test_parse_authored_batches_keeps_generic_technical_small_prefix_prose(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            authored_dir, _ = write_valid_authored_fixture(Path(temporary_directory))
+            set_field(authored_dir / "b001.tsv", "text", "小程序把日志写进队列。")
+
+            self.assertEqual(30_000, len(parse_authored_batches(authored_dir)))
+
     def test_parse_authored_batches_rejects_nonidentity_direct_pii(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             authored_dir, _ = write_valid_authored_fixture(Path(temporary_directory))
