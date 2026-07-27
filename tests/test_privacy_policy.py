@@ -19,6 +19,7 @@ class PrivacyPolicyContractTests(unittest.TestCase):
         expected_markers = (
             "\u96f7\u7433\u73a5",
             "\u5c0f\u73a5",
+            "\u73a5\u4ed4",
             "\u73a5\u73a5",
         )
         self.assertEqual(expected_markers, PERSONA_CONTRACT.pii_markers)

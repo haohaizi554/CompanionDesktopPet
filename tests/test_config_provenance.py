@@ -102,6 +102,29 @@ class ConfigSchemaContractTests(unittest.TestCase):
                 with self.assertRaises(ValidationError):
                     validator.validate(invalid)
 
+    def test_contract_schema_rejects_invalid_authored_identity_policy(self) -> None:
+        config = json.loads(
+            (CONFIG_DIR / "persona-contract.json").read_text(encoding="utf-8")
+        )
+        schema = json.loads(
+            (CONFIG_DIR / "schemas/persona-contract.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        validator = Draft202012Validator(schema)
+
+        missing_marker = deepcopy(config)
+        missing_marker["authored_identity"]["markers"] = ["雷琳玥", "小玥", "玥玥"]
+        persistent_exposure = deepcopy(config)
+        persistent_exposure["authored_identity"]["session_exposure"][
+            "persist_across_restarts"
+        ] = True
+
+        for invalid in (missing_marker, persistent_exposure):
+            with self.subTest(invalid=invalid["authored_identity"]):
+                with self.assertRaises(ValidationError):
+                    validator.validate(invalid)
+
     def test_scheduler_provenance_binds_exact_contract_bytes(self) -> None:
         contract_path = CONFIG_DIR / "persona-contract.json"
         scheduler = json.loads(

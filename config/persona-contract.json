@@ -136,8 +136,52 @@
     "pii_markers": [
       "雷琳玥",
       "小玥",
+      "玥仔",
       "玥玥"
     ]
+  },
+  "authored_identity": {
+    "policy_version": "authored-identity-v1",
+    "markers": [
+      "雷琳玥",
+      "小玥",
+      "玥仔",
+      "玥玥"
+    ],
+    "direct_marker_batches": {
+      "b083": "雷琳玥",
+      "b084": "小玥",
+      "b085": "玥仔",
+      "b086": "玥玥"
+    },
+    "easter_egg_batches": [
+      "b083",
+      "b084",
+      "b085",
+      "b086",
+      "b087",
+      "b088",
+      "b089",
+      "b090",
+      "b091",
+      "b092"
+    ],
+    "category": "EasterEgg",
+    "category_group": "easter_egg",
+    "output_mode": "self_talk",
+    "allowed_relationship_profiles": [
+      "neutral",
+      "warm_friend",
+      "playful_friend",
+      "nickname_easter_egg"
+    ],
+    "allow_markers_in_any_category": true,
+    "session_exposure": {
+      "minimum_intervening_bubbles_same_semantic_group": 3,
+      "recent_bubbles_per_semantic_group": 8,
+      "direct_marker_max_per_identity_class": 3,
+      "persist_across_restarts": false
+    }
   },
   "scheduler": {
     "category_group_weights": {

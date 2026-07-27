@@ -209,6 +209,7 @@ internal static class PersonaContractGenerated
         new HashSet<string>(StringComparer.Ordinal)
         {
         "玥玥",
+        "玥仔",
         "小玥",
         "雷琳玥"
         };

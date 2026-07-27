@@ -4,6 +4,7 @@ import json
 import importlib.util
 import subprocess
 import sys
+import tempfile
 import unittest
 import xml.etree.ElementTree as ET
 from dataclasses import replace
@@ -348,7 +349,7 @@ class PersonaContractFileTests(unittest.TestCase):
             {"policy": "observation_only"},
             seasoning["inventory_profiles"]["expanded_runtime"],
         )
-        self.assertEqual(["雷琳玥", "小玥", "玥玥"], privacy["pii_markers"])
+        self.assertEqual(["雷琳玥", "小玥", "玥仔", "玥玥"], privacy["pii_markers"])
         self.assertNotIn("identity_markers_excluded", seasoning)
         markers = set(seasoning["substring_markers"]) | set(
             seasoning["token_patterns"]
@@ -368,6 +369,49 @@ class PersonaContractFileTests(unittest.TestCase):
         )
 
         self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+
+
+class AuthoredIdentityContractTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._temporary_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self._temporary_directory.cleanup)
+        self.temp = Path(self._temporary_directory.name)
+
+    @staticmethod
+    def load_contract_json() -> dict[str, object]:
+        return json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
+
+    def write_json(self, raw: dict[str, object]) -> Path:
+        path = self.temp / "persona-contract.json"
+        path.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
+        return path
+
+    def test_contract_rejects_missing_or_misordered_authored_identity_marker(self) -> None:
+        from src.persona_corpus.contract import PersonaContractError, load_persona_contract
+
+        raw = self.load_contract_json()
+        raw["authored_identity"]["markers"] = ["雷琳玥", "小玥", "玥玥"]
+        with self.assertRaisesRegex(PersonaContractError, "authored_identity.*markers"):
+            load_persona_contract(self.write_json(raw))
+
+    def test_contract_rejects_non_session_identity_exposure_policy(self) -> None:
+        from src.persona_corpus.contract import PersonaContractError, load_persona_contract
+
+        raw = self.load_contract_json()
+        raw["authored_identity"]["session_exposure"]["persist_across_restarts"] = True
+        with self.assertRaisesRegex(PersonaContractError, "persist_across_restarts"):
+            load_persona_contract(self.write_json(raw))
+
+    def test_loader_exposes_the_frozen_authored_identity_policy(self) -> None:
+        from src.persona_corpus.contract import load_persona_contract
+
+        contract = load_persona_contract(CONTRACT_PATH)
+
+        self.assertEqual(("雷琳玥", "小玥", "玥仔", "玥玥"), contract.pii_markers)
+        self.assertEqual("玥仔", contract.authored_identity["direct_marker_batches"]["b085"])
+        self.assertFalse(contract.authored_identity["session_exposure"]["persist_across_restarts"])
+        with self.assertRaises(TypeError):
+            contract.authored_identity["session_exposure"]["persist_across_restarts"] = True
 
 
 if __name__ == "__main__":
