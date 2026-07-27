@@ -37,15 +37,35 @@ public sealed class OfflineCompanionAgent : ICompanionDialogueAgent
     private readonly HashSet<string> _usedThisSession = new(StringComparer.Ordinal);
     private readonly SceneHistory _history = new();
     private readonly SceneScheduler _scheduler = new();
+    private readonly Func<SceneCatalogLoadResult> _catalogSnapshotLoader;
     private CharacterState? _state;
     private DialogueCategory? _lastCategory;
     private int _turnCount;
 
-    public OfflineCompanionAgent(DialogueCategory? initialCategory = null) => _lastCategory = initialCategory;
+    public OfflineCompanionAgent(DialogueCategory? initialCategory = null)
+        : this(SceneCatalog.LoadPublishedPersonaScenes, initialCategory)
+    {
+    }
+
+    internal OfflineCompanionAgent(
+        Func<SceneCatalogLoadResult> catalogSnapshotLoader,
+        DialogueCategory? initialCategory = null)
+    {
+        _catalogSnapshotLoader = catalogSnapshotLoader ?? throw new ArgumentNullException(nameof(catalogSnapshotLoader));
+        _lastCategory = initialCategory;
+    }
 
     public OfflineCompanionAgent(AgentMemorySnapshot snapshot)
+        : this(snapshot, SceneCatalog.LoadPublishedPersonaScenes)
+    {
+    }
+
+    internal OfflineCompanionAgent(
+        AgentMemorySnapshot snapshot,
+        Func<SceneCatalogLoadResult> catalogSnapshotLoader)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
+        _catalogSnapshotLoader = catalogSnapshotLoader ?? throw new ArgumentNullException(nameof(catalogSnapshotLoader));
         _state = snapshot.State.Clone();
         _lastCategory = snapshot.LastCategory;
         _turnCount = snapshot.TurnCount;
@@ -108,8 +128,9 @@ public sealed class OfflineCompanionAgent : ICompanionDialogueAgent
 
     internal void WarmUp()
     {
-        _ = SceneCatalog.All.Count;
-        if (SceneCatalog.PersonaLoadFailure is { } failure)
+        var catalog = _catalogSnapshotLoader();
+        _ = catalog.Scenes.Count;
+        if (catalog.Failure is { } failure)
         {
             throw new InvalidDataException(
                 "The validated v2 persona corpus is unavailable; degraded dialogue cannot report ready.",

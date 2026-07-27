@@ -281,6 +281,32 @@ public sealed class DialogueWarmupTests
     }
 
     [Fact]
+    public async Task WarmupAsync_CorruptCatalogDoesNotReportReadyAndFallbackReplyRemainsAvailable()
+    {
+        var originalFailure = new InvalidDataException("corrupt persona corpus");
+        var fallback = SceneCatalog.BuildPersonaScenes(FallbackDialogueCatalog.All);
+        var service = DialogueService.CreateDeferred(_ =>
+        {
+            var agent = new OfflineCompanionAgent(() => new SceneCatalogLoadResult(fallback, originalFailure));
+            agent.WarmUp();
+            return agent;
+        });
+
+        Assert.False(await service.WarmupAsync());
+        Assert.False(service.IsReady);
+        var warmupFailure = Assert.IsType<InvalidDataException>(service.LastWarmupException);
+        Assert.Equal(
+            "The validated v2 persona corpus is unavailable; degraded dialogue cannot report ready.",
+            warmupFailure.Message);
+        Assert.Same(originalFailure, warmupFailure.InnerException);
+
+        var reply = service.GetReply(CompanionEvent.Click, LocalNow, new Random(20260727));
+        Assert.StartsWith("fallback:", reply.SceneId, StringComparison.Ordinal);
+        Assert.True(reply.ShouldDisplayText);
+        Assert.NotNull(reply.SourceLine);
+    }
+
+    [Fact]
     public async Task BlockedAgentResponse_DoesNotBlockServiceStateAndSerializesAllAgentOperations()
     {
         using var agent = new BlockingOperationAgent();

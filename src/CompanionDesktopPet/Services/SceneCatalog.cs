@@ -24,11 +24,15 @@ public static class SceneCatalog
             .ToHashSet(StringComparer.Ordinal),
         LazyThreadSafetyMode.ExecutionAndPublication);
 
-    public static IReadOnlyList<SceneDefinition> PersonaScenes => PersonaSceneSnapshot.Value.Scenes;
+    public static IReadOnlyList<SceneDefinition> PersonaScenes => LoadPublishedPersonaScenes().Scenes;
 
     public static IReadOnlySet<string> DrySharpSemanticGroups => DrySharpGroups.Value;
 
-    internal static Exception? PersonaLoadFailure => PersonaSceneSnapshot.Value.Failure;
+    internal static Exception? PersonaLoadFailure => LoadPublishedPersonaScenes().Failure;
+
+    // Keep the fallback snapshot as one atomic value: callers that need startup
+    // readiness must observe the same materialized catalog and failure record.
+    internal static SceneCatalogLoadResult LoadPublishedPersonaScenes() => PersonaSceneSnapshot.Value;
 
     private static readonly Lazy<IReadOnlyList<SceneDefinition>> AllScenes = new(() =>
         [.. PersonaScenes, .. StoryArcCatalog.All.SelectMany(arc => arc.Nodes)]);
@@ -51,7 +55,15 @@ public static class SceneCatalog
         }
         catch (Exception exception) when (!IsFatalException(exception))
         {
-            reportFailure?.Invoke(exception);
+            try
+            {
+                reportFailure?.Invoke(exception);
+            }
+            catch (Exception reportingFailure) when (!IsFatalException(reportingFailure))
+            {
+                // Diagnostics are never allowed to interrupt the safe fallback path.
+            }
+
             return new SceneCatalogLoadResult(BuildPersonaScenes(fallbackLoader()), exception);
         }
     }
