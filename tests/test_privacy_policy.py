@@ -38,6 +38,15 @@ class PrivacyPolicyContractTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             PERSONA_CONTRACT.pii_markers[0] = "changed"  # type: ignore[index]
 
+    def test_classifier_preserves_each_known_identity_evidence(self) -> None:
+        from src.persona_corpus.privacy import classify_pii
+
+        findings = classify_pii("小玥和玥仔都只是契约里的角色昵称。")
+        self.assertEqual(
+            [("known_identity", "小玥"), ("known_identity", "玥仔")],
+            [(finding.kind, finding.evidence) for finding in findings],
+        )
+
     def test_contract_loader_rejects_an_empty_identity_marker_set(self) -> None:
         from src.persona_corpus.contract import (
             DEFAULT_CONTRACT_PATH,

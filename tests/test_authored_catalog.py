@@ -17,6 +17,12 @@ from src.persona_corpus.authored_catalog import (
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_TOOL = ROOT / "tools" / "build_authorship_manifest.py"
+_DIRECT_MARKER_BY_BATCH = {
+    "b083": "雷琳玥",
+    "b084": "小玥",
+    "b085": "玥仔",
+    "b086": "玥玥",
+}
 
 
 def _fixture_category(batch_id: str) -> tuple[str, str, str]:
@@ -40,6 +46,8 @@ def _fixture_category(batch_id: str) -> tuple[str, str, str]:
 
 def _row(batch_id: str, ordinal: int) -> tuple[str, ...]:
     category, category_group, output_mode = _fixture_category(batch_id)
+    marker = _DIRECT_MARKER_BY_BATCH.get(batch_id, "")
+    identity_suffix = f" identity marker {marker}" if marker else ""
     return (
         f"authored.{batch_id}.technical.fixture.entry.{ordinal:04d}",
         batch_id,
@@ -58,7 +66,7 @@ def _row(batch_id: str, ordinal: int) -> tuple[str, ...]:
         "1",
         "1",
         "neutral",
-        f"这是 {batch_id} 的第 {ordinal} 条独立测试语料。",
+        f"fixture {batch_id} entry {ordinal:04d}{identity_suffix}",
         "approved",
     )
 
@@ -109,6 +117,21 @@ def mutate_first_text(path: Path) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def replace_text(path: Path, old: str, new: str) -> None:
+    payload = path.read_text(encoding="utf-8")
+    if old not in payload:
+        raise AssertionError(f"{old!r} was not present in {path}")
+    path.write_text(payload.replace(old, new), encoding="utf-8")
+
+
+def set_field(path: Path, field_name: str, value: str, *, row_index: int = 1) -> None:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    fields = lines[row_index].split("\t")
+    fields[AUTHORED_HEADER.index(field_name)] = value
+    lines[row_index] = "\t".join(fields)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 class AuthoredCatalogTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -131,6 +154,84 @@ class AuthoredCatalogTests(unittest.TestCase):
         from src.persona_corpus.contract import PERSONA_CONTRACT
 
         self.assertIs(RELATIONSHIP_PROFILES, PERSONA_CONTRACT.relationship_profiles)
+
+    def test_parse_authored_batches_rejects_wrong_direct_marker_count(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            authored_dir, _ = write_valid_authored_fixture(Path(temporary_directory))
+            replace_text(authored_dir / "b085.tsv", "玥仔", "小玥")
+
+            with self.assertRaisesRegex(ValueError, r"b085.*玥仔.*300"):
+                parse_authored_batches(authored_dir)
+
+    def test_parse_authored_batches_rejects_marker_profile_or_batch_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            authored_dir, _ = write_valid_authored_fixture(Path(temporary_directory))
+            set_field(
+                authored_dir / "b083.tsv",
+                "relationship_profile",
+                "forbidden_profile",
+            )
+
+            with self.assertRaisesRegex(ValueError, r"b083.*relationship_profile"):
+                parse_authored_batches(authored_dir)
+
+    def test_parse_authored_batches_rejects_unregistered_identity_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            authored_dir, _ = write_valid_authored_fixture(Path(temporary_directory))
+            replace_text(authored_dir / "b084.tsv", "小玥", "小月")
+
+            with self.assertRaisesRegex(ValueError, r"b084.*direct marker"):
+                parse_authored_batches(authored_dir)
+
+    def test_parse_authored_batches_allows_marker_outside_identity_batches_when_configured(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            authored_dir, _ = write_valid_authored_fixture(Path(temporary_directory))
+            set_field(
+                authored_dir / "b001.tsv",
+                "text",
+                "雷琳玥会把这段技术笔记留在备忘里。",
+            )
+
+            entries = parse_authored_batches(authored_dir)
+            self.assertEqual(30_000, len(entries))
+
+    def test_parse_authored_batches_rejects_identity_marker_question_or_observation_claim(self) -> None:
+        cases = (
+            ("雷琳玥，你今天是不是又熬夜了？", "question mark"),
+            ("雷琳玥，你今天的窗口看起来卡住了。", "unsupported observation"),
+        )
+        for text, invariant in cases:
+            with self.subTest(invariant=invariant), tempfile.TemporaryDirectory() as temporary_directory:
+                authored_dir, _ = write_valid_authored_fixture(Path(temporary_directory))
+                set_field(authored_dir / "b083.tsv", "text", text)
+
+                with self.assertRaisesRegex(
+                    ValueError,
+                    r"b083\.tsv.*authored\.b083.*雷琳玥",
+                ):
+                    parse_authored_batches(authored_dir)
+
+    def test_parse_authored_batches_rejects_identity_marker_with_personal_location(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            authored_dir, _ = write_valid_authored_fixture(Path(temporary_directory))
+            set_field(authored_dir / "b083.tsv", "text", "雷琳玥来自湖南。")
+
+            with self.assertRaisesRegex(
+                ValueError,
+                r"b083\.tsv.*authored\.b083.*雷琳玥.*personal_location",
+            ):
+                parse_authored_batches(authored_dir)
+
+    def test_parse_authored_batches_rejects_nonidentity_direct_pii(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            authored_dir, _ = write_valid_authored_fixture(Path(temporary_directory))
+            set_field(authored_dir / "b001.tsv", "text", "联系电话是 13800138000。")
+
+            with self.assertRaisesRegex(
+                ValueError,
+                r"b001\.tsv.*authored\.b001.*phone_number",
+            ):
+                parse_authored_batches(authored_dir)
 
     def test_parse_authored_batches_rejects_a_group_output_mode_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

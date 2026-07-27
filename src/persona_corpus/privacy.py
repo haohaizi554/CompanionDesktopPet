@@ -210,12 +210,13 @@ ENABLED_CONTENT_POLICY = PiiPolicy(
 def classify_pii(text: str) -> tuple[PiiFinding, ...]:
     """Return deduplicated privacy findings without applying a stage policy."""
     findings: list[PiiFinding] = []
-    seen: set[str] = set()
+    seen: set[tuple[str, str]] = set()
 
     def add(kind: str, evidence: str) -> None:
-        if kind not in seen:
+        key = (kind, evidence)
+        if key not in seen:
             findings.append(PiiFinding(kind=kind, evidence=evidence))
-            seen.add(kind)
+            seen.add(key)
 
     direct_kinds = ("phone_number", "national_id", "email_address")
     for kind, pattern in zip(direct_kinds, PII_PATTERNS, strict=True):
@@ -226,7 +227,6 @@ def classify_pii(text: str) -> tuple[PiiFinding, ...]:
     for marker in PII_MARKERS:
         if marker in text:
             add("known_identity", marker)
-            break
 
     name_match = CONTEXTUAL_CHINESE_NAME_PATTERN.search(text)
     if name_match is None:
@@ -248,17 +248,19 @@ def classify_pii(text: str) -> tuple[PiiFinding, ...]:
     if work_match is not None:
         add("personal_employment", work_match.group(0))
 
-    if "person_name" not in seen:
+    if not any(kind == "person_name" for kind, _ in seen):
         for marker in _LEGACY_NAME_KEYWORDS:
             if marker in text:
                 add("name_keyword", marker)
                 break
-    if "personal_location" not in seen:
+    if not any(kind == "personal_location" for kind, _ in seen):
         for marker in _LEGACY_LOCATION_KEYWORDS:
             if marker in text:
                 add("location_keyword", marker)
                 break
-    if not {"personal_income", "personal_employment"} & seen:
+    if not any(
+        kind in {"personal_income", "personal_employment"} for kind, _ in seen
+    ):
         for marker in _LEGACY_INCOME_WORK_KEYWORDS:
             if marker in text:
                 add("income_or_employment_keyword", marker)
