@@ -271,6 +271,13 @@ def _parse_entry(path: Path, line_number: int, values: tuple[str, ...]) -> Autho
             f"category_group {expected_group!r} output mode {expected_output_mode!r}",
         )
 
+    if row["tone"] not in PERSONA_CONTRACT.tones:
+        raise _error(
+            path,
+            line_number,
+            "tone must be one of " + ", ".join(sorted(PERSONA_CONTRACT.tones)),
+        )
+
     if row["relationship_profile"] not in RELATIONSHIP_PROFILES:
         raise _error(
             path,

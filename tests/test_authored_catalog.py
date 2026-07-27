@@ -146,6 +146,19 @@ class AuthoredCatalogTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, r"output_mode.*technical"):
                 parse_authored_batches(authored_dir)
 
+    def test_parse_authored_batches_rejects_an_unknown_tone(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            authored_dir, _ = write_valid_authored_fixture(Path(temporary_directory))
+            path = authored_dir / "b001.tsv"
+            lines = path.read_text(encoding="utf-8").splitlines()
+            fields = lines[1].split("\t")
+            fields[AUTHORED_HEADER.index("tone")] = "bright"
+            lines[1] = "\t".join(fields)
+            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "tone must be one of"):
+                parse_authored_batches(authored_dir)
+
     def test_parse_authored_batches_rejects_category_group_inventory_drift(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             authored_dir, _ = write_valid_authored_fixture(Path(temporary_directory))
