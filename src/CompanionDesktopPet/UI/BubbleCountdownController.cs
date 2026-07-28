@@ -1,3 +1,6 @@
+using System.Diagnostics;
+using System.Windows;
+
 namespace CompanionDesktopPet.UI;
 
 [Flags]
@@ -16,6 +19,11 @@ public enum BubbleCountdownState
     Suspended
 }
 
+/// <summary>Tracks the visible speech bubble's five-second countdown.</summary>
+/// <remarks>
+/// This controller is intentionally not thread-safe. Construct and call it only from the
+/// owning WPF UI dispatcher; debug builds assert that contract at every public state entry.
+/// </remarks>
 public sealed class BubbleCountdownController
 {
     public static readonly TimeSpan DisplayDuration = TimeSpan.FromSeconds(5);
@@ -49,6 +57,7 @@ public sealed class BubbleCountdownController
 
     public void Show()
     {
+        AssertUiThread();
         if (_closed) return;
         _remaining = DisplayDuration;
         if (_suspended)
@@ -68,6 +77,7 @@ public sealed class BubbleCountdownController
 
     public void Enter(BubbleHoverTarget target)
     {
+        AssertUiThread();
         if (_closed || target == BubbleHoverTarget.None) return;
         var wasClear = HoverTargets == BubbleHoverTarget.None;
         HoverTargets |= target;
@@ -80,6 +90,7 @@ public sealed class BubbleCountdownController
 
     public void Leave(BubbleHoverTarget target)
     {
+        AssertUiThread();
         if (_closed || target == BubbleHoverTarget.None) return;
         HoverTargets &= ~target;
         if (HoverTargets == BubbleHoverTarget.None
@@ -98,6 +109,7 @@ public sealed class BubbleCountdownController
 
     public bool TryExpire()
     {
+        AssertUiThread();
         if (_closed
             || State != BubbleCountdownState.CountingDown
             || Remaining > TimeSpan.Zero)
@@ -111,6 +123,7 @@ public sealed class BubbleCountdownController
 
     public void Suspend()
     {
+        AssertUiThread();
         if (_closed || _suspended)
         {
             return;
@@ -127,6 +140,7 @@ public sealed class BubbleCountdownController
 
     public void Resume()
     {
+        AssertUiThread();
         if (_closed || !_suspended)
         {
             return;
@@ -154,12 +168,14 @@ public sealed class BubbleCountdownController
 
     public void Hide()
     {
+        AssertUiThread();
         State = BubbleCountdownState.Hidden;
         _remaining = TimeSpan.Zero;
     }
 
     public void Close()
     {
+        AssertUiThread();
         _closed = true;
         _suspended = false;
         HoverTargets = BubbleHoverTarget.None;
@@ -171,4 +187,10 @@ public sealed class BubbleCountdownController
         _startedAt = _timeProvider.GetTimestamp();
         State = BubbleCountdownState.CountingDown;
     }
+
+    [Conditional("DEBUG")]
+    private static void AssertUiThread() =>
+        Debug.Assert(
+            Application.Current is null || Application.Current.Dispatcher.CheckAccess(),
+            "BubbleCountdownController must only be used by the owning UI dispatcher.");
 }
