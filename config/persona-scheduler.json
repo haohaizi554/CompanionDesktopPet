@@ -4,7 +4,7 @@
   "derived_from": {
     "path": "config/persona-contract.json",
     "schema_version": 1,
-    "sha256": "f4b1c01efe2e262af2a12095b4a000af79b14fad8896864bd52519c0489ff4ca"
+    "sha256": "69713a14c57ef27a5a78977929fa9b6c09c590379f54248ca543a8ecf4fffcfb"
   },
   "category_group_weights": {
     "technical": 0.18,

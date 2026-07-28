@@ -19,6 +19,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Iterator, Mapping
 
+from .authored_identity import validate_authored_identity_entries
 from .contract import PERSONA_CONTRACT, PersonaContractError, category_group_for
 from .schema import AUTHORED_HEADER, AUTHORED_LEDGER_HEADER
 
@@ -461,8 +462,9 @@ def parse_authored_batches(authored_dir: Path) -> tuple[AuthoredEntry, ...]:
     variant_ids = [entry.variant_id for entry in sorted_entries]
     if len(variant_ids) != len(set(variant_ids)):
         raise AuthoredCatalogError("authored batches contain duplicate variant_id")
-    _validate_category_group_inventory(sorted_entries)
     _validate_semantic_group_metadata(sorted_entries)
+    validate_authored_identity_entries(sorted_entries)
+    _validate_category_group_inventory(sorted_entries)
     texts = [entry.text for entry in sorted_entries]
     if len(texts) != len(set(texts)):
         raise AuthoredCatalogError("authored batches contain duplicate text")

@@ -102,6 +102,112 @@ class ConfigSchemaContractTests(unittest.TestCase):
                 with self.assertRaises(ValidationError):
                     validator.validate(invalid)
 
+    def test_contract_schema_rejects_invalid_authored_identity_policy(self) -> None:
+        config = json.loads(
+            (CONFIG_DIR / "persona-contract.json").read_text(encoding="utf-8")
+        )
+        schema = json.loads(
+            (CONFIG_DIR / "schemas/persona-contract.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        validator = Draft202012Validator(schema)
+
+        cases = (
+            (
+                "missing marker",
+                ("authored_identity", "markers"),
+                ["雷琳玥", "小玥", "玥玥"],
+            ),
+            (
+                "misordered marker",
+                ("authored_identity", "markers"),
+                ["小玥", "雷琳玥", "玥仔", "玥玥"],
+            ),
+            (
+                "direct marker batch",
+                ("authored_identity", "direct_marker_batches", "b085"),
+                "小玥",
+            ),
+            (
+                "easter egg batch range",
+                ("authored_identity", "easter_egg_batches", -1),
+                "b093",
+            ),
+            (
+                "category",
+                ("authored_identity", "category"),
+                "Python",
+            ),
+            (
+                "category group",
+                ("authored_identity", "category_group"),
+                "technical",
+            ),
+            (
+                "output mode",
+                ("authored_identity", "output_mode"),
+                "ambient",
+            ),
+            (
+                "relationship profiles",
+                ("authored_identity", "allowed_relationship_profiles", -1),
+                "neutral",
+            ),
+            (
+                "marker placement",
+                ("authored_identity", "allow_markers_in_any_category"),
+                False,
+            ),
+            (
+                "minimum intervening bubbles",
+                (
+                    "authored_identity",
+                    "session_exposure",
+                    "minimum_intervening_bubbles_same_semantic_group",
+                ),
+                4,
+            ),
+            (
+                "recent bubbles",
+                ("authored_identity", "session_exposure", "recent_bubbles_per_semantic_group"),
+                9,
+            ),
+            (
+                "direct marker cap",
+                (
+                    "authored_identity",
+                    "session_exposure",
+                    "direct_marker_max_per_identity_class",
+                ),
+                4,
+            ),
+            (
+                "restart persistence",
+                ("authored_identity", "session_exposure", "persist_across_restarts"),
+                True,
+            ),
+            (
+                "privacy alignment",
+                ("privacy", "pii_markers"),
+                ["玥玥", "玥仔", "小玥", "雷琳玥"],
+            ),
+            (
+                "unknown identity key",
+                ("authored_identity", "unexpected"),
+                True,
+            ),
+        )
+        for name, path, value in cases:
+            with self.subTest(invariant=name):
+                invalid = deepcopy(config)
+                target = invalid
+                for key in path[:-1]:
+                    target = target[key]
+                target[path[-1]] = value
+                with self.assertRaises(ValidationError):
+                    validator.validate(invalid)
+
     def test_scheduler_provenance_binds_exact_contract_bytes(self) -> None:
         contract_path = CONFIG_DIR / "persona-contract.json"
         scheduler = json.loads(

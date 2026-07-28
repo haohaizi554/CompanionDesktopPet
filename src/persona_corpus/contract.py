@@ -22,6 +22,7 @@ _TOP_LEVEL_KEYS = frozenset(
         "categories",
         "controlled_values",
         "privacy",
+        "authored_identity",
         "scheduler",
         "dry_sharp",
         "lexical_exposure",
@@ -132,6 +133,7 @@ class PersonaContract:
     mvp_triggers: frozenset[str]
     future_triggers: frozenset[str]
     pii_markers: tuple[str, ...]
+    authored_identity: Mapping[str, object]
     scheduler: Mapping[str, object]
     dry_sharp: Mapping[str, object]
     lexical_exposure: Mapping[str, object]
@@ -241,6 +243,114 @@ def load_persona_contract(path: Path = DEFAULT_CONTRACT_PATH) -> PersonaContract
     if set(privacy) != {"pii_markers"}:
         raise PersonaContractError("privacy must contain exactly pii_markers")
     pii_markers = _string_tuple(privacy.get("pii_markers"), "privacy.pii_markers")
+    expected_authored_identity_markers = ("雷琳玥", "小玥", "玥仔", "玥玥")
+    if pii_markers != expected_authored_identity_markers:
+        raise PersonaContractError(
+            "privacy.pii_markers must contain the ordered authored identity markers"
+        )
+
+    authored_identity_raw = _mapping(
+        raw.get("authored_identity"), "authored_identity"
+    )
+    expected_authored_identity_keys = {
+        "policy_version",
+        "markers",
+        "direct_marker_batches",
+        "easter_egg_batches",
+        "category",
+        "category_group",
+        "output_mode",
+        "allowed_relationship_profiles",
+        "allow_markers_in_any_category",
+        "session_exposure",
+    }
+    if set(authored_identity_raw) != expected_authored_identity_keys:
+        raise PersonaContractError("authored_identity uses an unexpected key set")
+    if authored_identity_raw.get("policy_version") != "authored-identity-v1":
+        raise PersonaContractError(
+            "authored_identity.policy_version must be authored-identity-v1"
+        )
+    authored_identity_markers = _string_tuple(
+        authored_identity_raw.get("markers"), "authored_identity.markers"
+    )
+    if authored_identity_markers != pii_markers:
+        raise PersonaContractError(
+            "authored_identity.markers must exactly match privacy.pii_markers"
+        )
+    direct_marker_batches = _mapping(
+        authored_identity_raw.get("direct_marker_batches"),
+        "authored_identity.direct_marker_batches",
+    )
+    expected_direct_marker_batches = dict(
+        zip(("b083", "b084", "b085", "b086"), expected_authored_identity_markers)
+    )
+    if (
+        direct_marker_batches != expected_direct_marker_batches
+        or len(set(direct_marker_batches.values())) != len(pii_markers)
+    ):
+        raise PersonaContractError(
+            "authored_identity.direct_marker_batches must be the exact one-to-one direct marker mapping"
+        )
+    expected_easter_egg_batches = [f"b{number:03d}" for number in range(83, 93)]
+    if authored_identity_raw.get("easter_egg_batches") != expected_easter_egg_batches:
+        raise PersonaContractError(
+            "authored_identity.easter_egg_batches must be the exact b083-b092 range"
+        )
+    if (
+        authored_identity_raw.get("category") != "EasterEgg"
+        or authored_identity_raw.get("category_group") != "easter_egg"
+        or authored_identity_raw.get("output_mode") != "self_talk"
+    ):
+        raise PersonaContractError(
+            "authored_identity category, category_group, and output_mode must be EasterEgg/easter_egg/self_talk"
+        )
+    allowed_relationship_profiles = frozenset(
+        _string_tuple(
+            authored_identity_raw.get("allowed_relationship_profiles"),
+            "authored_identity.allowed_relationship_profiles",
+        )
+    )
+    if allowed_relationship_profiles != relationship_profiles:
+        raise PersonaContractError(
+            "authored_identity.allowed_relationship_profiles must contain the exact controlled profile set"
+        )
+    if authored_identity_raw.get("allow_markers_in_any_category") is not True:
+        raise PersonaContractError(
+            "authored_identity.allow_markers_in_any_category must be true"
+        )
+    session_exposure = _mapping(
+        authored_identity_raw.get("session_exposure"),
+        "authored_identity.session_exposure",
+    )
+    expected_session_exposure_keys = {
+        "minimum_intervening_bubbles_same_semantic_group",
+        "recent_bubbles_per_semantic_group",
+        "direct_marker_max_per_identity_class",
+        "persist_across_restarts",
+    }
+    if set(session_exposure) != expected_session_exposure_keys:
+        raise PersonaContractError(
+            "authored_identity.session_exposure uses an unexpected key set"
+        )
+    expected_session_exposure_limits = {
+        "minimum_intervening_bubbles_same_semantic_group": 3,
+        "recent_bubbles_per_semantic_group": 8,
+        "direct_marker_max_per_identity_class": 3,
+    }
+    if (
+        any(
+            type(session_exposure[limit]) is not int
+            or session_exposure[limit] != expected
+            for limit, expected in expected_session_exposure_limits.items()
+        )
+    ):
+        raise PersonaContractError(
+            "authored_identity.session_exposure must contain the exact 3/8/3 bounds"
+        )
+    if session_exposure["persist_across_restarts"] is not False:
+        raise PersonaContractError(
+            "authored_identity.session_exposure.persist_across_restarts must be false"
+        )
 
     scheduler = _mapping(raw.get("scheduler"), "scheduler")
     if set(scheduler) != {
@@ -575,6 +685,7 @@ def load_persona_contract(path: Path = DEFAULT_CONTRACT_PATH) -> PersonaContract
         mvp_triggers=mvp_triggers,
         future_triggers=future_triggers,
         pii_markers=pii_markers,
+        authored_identity=frozen_raw["authored_identity"],
         scheduler=frozen_raw["scheduler"],
         dry_sharp=frozen_raw["dry_sharp"],
         lexical_exposure=frozen_raw["lexical_exposure"],

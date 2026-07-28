@@ -5,7 +5,7 @@
   "type": "object",
   "required": [
     "$schema", "schema_version", "inventory", "release_inventory",
-    "category_groups", "categories", "controlled_values", "privacy", "scheduler",
+    "category_groups", "categories", "controlled_values", "privacy", "authored_identity", "scheduler",
     "dry_sharp", "lexical_exposure", "temporal", "lineage"
   ],
   "properties": {
@@ -40,6 +40,7 @@
     "categories": { "$ref": "#/$defs/categories" },
     "controlled_values": { "$ref": "#/$defs/controlledValues" },
     "privacy": { "$ref": "#/$defs/privacy" },
+    "authored_identity": { "$ref": "#/$defs/authoredIdentity" },
     "scheduler": { "$ref": "#/$defs/scheduler" },
     "dry_sharp": { "$ref": "#/$defs/drySharp" },
     "lexical_exposure": { "$ref": "#/$defs/lexicalExposure" },
@@ -312,11 +313,58 @@
       "type": "object",
       "required": ["pii_markers"],
       "properties": {
-        "pii_markers": {
+        "pii_markers": { "const": ["\u96f7\u7433\u73a5", "\u5c0f\u73a5", "\u73a5\u4ed4", "\u73a5\u73a5"] }
+      },
+      "additionalProperties": false
+    },
+    "authoredIdentity": {
+      "type": "object",
+      "required": [
+        "policy_version", "markers", "direct_marker_batches", "easter_egg_batches",
+        "category", "category_group", "output_mode", "allowed_relationship_profiles",
+        "allow_markers_in_any_category", "session_exposure"
+      ],
+      "properties": {
+        "policy_version": { "const": "authored-identity-v1" },
+        "markers": { "const": ["\u96f7\u7433\u73a5", "\u5c0f\u73a5", "\u73a5\u4ed4", "\u73a5\u73a5"] },
+        "direct_marker_batches": {
+          "type": "object",
+          "required": ["b083", "b084", "b085", "b086"],
+          "properties": {
+            "b083": { "const": "\u96f7\u7433\u73a5" },
+            "b084": { "const": "\u5c0f\u73a5" },
+            "b085": { "const": "\u73a5\u4ed4" },
+            "b086": { "const": "\u73a5\u73a5" }
+          },
+          "additionalProperties": false
+        },
+        "easter_egg_batches": { "const": ["b083", "b084", "b085", "b086", "b087", "b088", "b089", "b090", "b091", "b092"] },
+        "category": { "const": "EasterEgg" },
+        "category_group": { "const": "easter_egg" },
+        "output_mode": { "const": "self_talk" },
+        "allowed_relationship_profiles": {
           "type": "array",
-          "items": { "type": "string", "minLength": 1 },
-          "minItems": 1,
+          "items": { "$ref": "#/$defs/relationshipProfile" },
+          "minItems": 4,
+          "maxItems": 4,
           "uniqueItems": true
+        },
+        "allow_markers_in_any_category": { "const": true },
+        "session_exposure": {
+          "type": "object",
+          "required": [
+            "minimum_intervening_bubbles_same_semantic_group",
+            "recent_bubbles_per_semantic_group",
+            "direct_marker_max_per_identity_class",
+            "persist_across_restarts"
+          ],
+          "properties": {
+            "minimum_intervening_bubbles_same_semantic_group": { "type": "integer", "const": 3 },
+            "recent_bubbles_per_semantic_group": { "type": "integer", "const": 8 },
+            "direct_marker_max_per_identity_class": { "type": "integer", "const": 3 },
+            "persist_across_restarts": { "const": false }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
