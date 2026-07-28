@@ -148,7 +148,13 @@ public sealed class ServiceConcurrencyTests
                     1,
                     firstRace.Count(emitted => emitted == companionEvent)));
 
-            Assert.Null(pump.Poll(now, TimeSpan.FromSeconds(5), firstDueAt));
+            var settledFirstRace = await RacePolls(
+                pump,
+                callerCount,
+                now,
+                TimeSpan.FromSeconds(5),
+                firstDueAt);
+            Assert.All(settledFirstRace, Assert.Null);
 
             var secondRace = await RacePolls(
                 pump,
@@ -164,7 +170,14 @@ public sealed class ServiceConcurrencyTests
                 secondRace,
                 companionEvent => Assert.True(
                     companionEvent is null or CompanionEvent.StoryTimerDue));
-            Assert.Null(pump.Poll(secondDueAt, TimeSpan.FromSeconds(5), secondDueAt));
+
+            var settledSecondRace = await RacePolls(
+                pump,
+                callerCount,
+                secondDueAt,
+                TimeSpan.FromSeconds(5),
+                secondDueAt);
+            Assert.All(settledSecondRace, Assert.Null);
         }
     }
 
