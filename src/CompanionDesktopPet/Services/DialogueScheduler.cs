@@ -20,6 +20,7 @@ public sealed class DialogueScheduler
     internal DialogueScheduler(Func<int, int, int> next) =>
         _next = next ?? throw new ArgumentNullException(nameof(next));
 
+    [Obsolete("使用 NextDelay(DateTime, bool) 重载以显式传入 effectiveQuietMode")]
     public TimeSpan NextDelay() => NextDelay(DateTime.Now);
 
     internal static AutomaticCadenceMode GetMode(DateTime localTime, bool effectiveQuietMode)

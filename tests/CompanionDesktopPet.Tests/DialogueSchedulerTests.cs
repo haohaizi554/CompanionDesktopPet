@@ -1,4 +1,5 @@
 using CompanionDesktopPet.Services;
+using System.Reflection;
 
 namespace CompanionDesktopPet.Tests;
 
@@ -9,6 +10,23 @@ public sealed class DialogueSchedulerTests
     {
         Assert.NotNull(typeof(DialogueScheduler).GetConstructor(Type.EmptyTypes));
         Assert.Null(typeof(DialogueScheduler).GetConstructor([typeof(Random)]));
+    }
+
+    [Fact]
+    public void ParameterlessNextDelay_IsObsoleteBecauseItCannotExpressQuietMode()
+    {
+        var method = typeof(DialogueScheduler).GetMethod(
+            nameof(DialogueScheduler.NextDelay),
+            BindingFlags.Instance | BindingFlags.Public,
+            binder: null,
+            types: Type.EmptyTypes,
+            modifiers: null);
+
+        var obsolete = Assert.IsType<ObsoleteAttribute>(
+            method!.GetCustomAttribute(typeof(ObsoleteAttribute)));
+        Assert.Equal(
+            "使用 NextDelay(DateTime, bool) 重载以显式传入 effectiveQuietMode",
+            obsolete.Message);
     }
 
     [Theory]
