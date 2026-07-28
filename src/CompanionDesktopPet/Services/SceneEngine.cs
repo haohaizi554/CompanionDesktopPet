@@ -319,12 +319,16 @@ public sealed class SceneHistory
         }
     }
 
-    public IReadOnlyList<DialogueLine> EligibleLines(SceneDefinition scene, DateTime now)
+    public IReadOnlyList<DialogueLine> EligibleLines(
+        SceneDefinition scene,
+        DateTime now,
+        Func<DialogueLine, bool>? lineEligibility = null)
     {
         lock (_sync)
         {
             return scene.Lines
-                .Where(line => MeetsLineExposureQuota(line)
+                .Where(line => SceneScheduler.IsLineEligible(line, lineEligibility)
+                               && MeetsLineExposureQuota(line)
                                && !IsLineCoolingDown(line, now)
                                && IsBelowDailyMaximum(line, now))
                 .ToArray();
@@ -412,7 +416,10 @@ public sealed class SceneHistory
         }
     }
 
-    public bool HasEligibleLine(SceneDefinition scene, DateTime now)
+    public bool HasEligibleLine(
+        SceneDefinition scene,
+        DateTime now,
+        Func<DialogueLine, bool>? lineEligibility = null)
     {
         lock (_sync)
         {
@@ -424,6 +431,10 @@ public sealed class SceneHistory
             _seenLineIdsBySemanticGroup.TryGetValue(scene.SemanticGroup, out var seen);
             foreach (var line in scene.Lines)
             {
+                if (!SceneScheduler.IsLineEligible(line, lineEligibility))
+                {
+                    continue;
+                }
                 if (!MeetsLineExposureQuota(line))
                 {
                     continue;
@@ -606,7 +617,8 @@ public sealed partial class SceneScheduler
         SceneContext context,
         SceneHistory history,
         Random random,
-        bool bypassInterruptionBudget = false)
+        bool bypassInterruptionBudget = false,
+        Func<DialogueLine, bool>? lineEligibility = null)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(history);
@@ -623,7 +635,7 @@ public sealed partial class SceneScheduler
             {
                 var storyScene = StoryArcCatalog.All.Single(arc => arc.Id == due.ArcId).Nodes[due.NodeIndex];
                 return CanSelect(storyScene, context, contextTokens, history, ignoreTrigger: true)
-                       && history.HasEligibleLine(storyScene, context.Now)
+                       && history.HasEligibleLine(storyScene, context.Now, lineEligibility)
                     ? storyScene
                     : null;
             }
@@ -640,13 +652,14 @@ public sealed partial class SceneScheduler
                 bypassInterruptionBudget))
             .Select(scene => Score(scene, recent))
             .ToArray();
-        return ChooseBestWithEligibleLine(candidates, context.Now, history, random);
+        return ChooseBestWithEligibleLine(candidates, context.Now, history, random, lineEligibility);
     }
 
     internal ClickFallbackSelection? SelectClickFallback(
         SceneContext context,
         SceneHistory history,
-        Random random)
+        Random random,
+        Func<DialogueLine, bool>? lineEligibility = null)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(history);
@@ -665,7 +678,7 @@ public sealed partial class SceneScheduler
             .Where(history.MeetsRareRecentQuotas)
             .Select(scene => Score(scene, recent))
             .ToArray();
-        if (ChooseBestWithEligibleLine(quotaRelaxed, context.Now, history, random) is { } quotaRelaxedScene)
+        if (ChooseBestWithEligibleLine(quotaRelaxed, context.Now, history, random, lineEligibility) is { } quotaRelaxedScene)
         {
             return new ClickFallbackSelection(quotaRelaxedScene);
         }
@@ -674,14 +687,16 @@ public sealed partial class SceneScheduler
             .Where(scene => TriggerAndContextMatch(scene, context, contextTokens, history))
             .Where(history.MeetsRareRecentQuotas)
             .Where(scene => scene.Lines.Any(line =>
-                line.Enabled && history.MeetsLineExposureQuota(line)))
+                IsLineEligible(line, lineEligibility)
+                && line.Enabled
+                && history.MeetsLineExposureQuota(line)))
             .ToArray();
         if (reusableScenes.Length == 0)
         {
             return null;
         }
 
-        return SelectReusableClickFallback(reusableScenes, history, random);
+        return SelectReusableClickFallback(reusableScenes, history, random, lineEligibility);
     }
 
     private static SceneDefinition? ChooseBest(IReadOnlyList<ScoredScene> candidates, Random random)
@@ -710,7 +725,8 @@ public sealed partial class SceneScheduler
         IReadOnlyList<ScoredScene> candidates,
         DateTime now,
         SceneHistory history,
-        Random random)
+        Random random,
+        Func<DialogueLine, bool>? lineEligibility)
     {
         var remaining = candidates.ToList();
         while (remaining.Count > 0)
@@ -720,7 +736,7 @@ public sealed partial class SceneScheduler
             {
                 return null;
             }
-            if (history.HasEligibleLine(selected, now))
+            if (history.HasEligibleLine(selected, now, lineEligibility))
             {
                 return selected;
             }
@@ -733,7 +749,8 @@ public sealed partial class SceneScheduler
     internal ClickFallbackSelection? SelectReusableClickFallback(
         IReadOnlyList<SceneDefinition> scenes,
         SceneHistory history,
-        Random random)
+        Random random,
+        Func<DialogueLine, bool>? lineEligibility = null)
     {
         ArgumentNullException.ThrowIfNull(scenes);
         ArgumentNullException.ThrowIfNull(history);
@@ -750,7 +767,8 @@ public sealed partial class SceneScheduler
         var recent = RecentHistoryProfile.Create(history);
         var hasNonRepeatingLine = quotaEligibleScenes.Any(scene =>
             scene.Lines.Any(line =>
-                line.Enabled
+                IsLineEligible(line, lineEligibility)
+                && line.Enabled
                 && history.MeetsLineExposureQuota(line)
                 && line.Id != lastLineId));
         var lastPlayedAt = new Dictionary<string, DateTime>(StringComparer.Ordinal);
@@ -761,7 +779,8 @@ public sealed partial class SceneScheduler
 
         var scenesWithUnusedLines = quotaEligibleScenes
             .Where(scene => scene.Lines.Any(line =>
-                line.Enabled
+                IsLineEligible(line, lineEligibility)
+                && line.Enabled
                 && history.MeetsLineExposureQuota(line)
                 && (!hasNonRepeatingLine || line.Id != lastLineId)
                 && !lastPlayedAt.ContainsKey(line.Id)))
@@ -771,7 +790,8 @@ public sealed partial class SceneScheduler
         {
             var unusedLines = unusedScene.Lines
                 .Where(line =>
-                    line.Enabled
+                    IsLineEligible(line, lineEligibility)
+                    && line.Enabled
                     && history.MeetsLineExposureQuota(line)
                     && (!hasNonRepeatingLine || line.Id != lastLineId)
                     && !lastPlayedAt.ContainsKey(line.Id))
@@ -783,7 +803,8 @@ public sealed partial class SceneScheduler
 
         var reusableScenes = quotaEligibleScenes
             .Where(scene => scene.Lines.Any(line =>
-                line.Enabled
+                IsLineEligible(line, lineEligibility)
+                && line.Enabled
                 && history.MeetsLineExposureQuota(line)
                 && (!hasNonRepeatingLine || line.Id != lastLineId)))
             .Select(scene => Score(scene, recent))
@@ -796,7 +817,8 @@ public sealed partial class SceneScheduler
 
         var oldest = selectedScene.Lines
             .Where(line =>
-                line.Enabled
+                IsLineEligible(line, lineEligibility)
+                && line.Enabled
                 && history.MeetsLineExposureQuota(line)
                 && (!hasNonRepeatingLine || line.Id != lastLineId))
             .Min(line => lastPlayedAt.GetValueOrDefault(line.Id, DateTime.MinValue));
@@ -829,6 +851,11 @@ public sealed partial class SceneScheduler
 
         return lines[^1];
     }
+
+    internal static bool IsLineEligible(
+        DialogueLine line,
+        Func<DialogueLine, bool>? lineEligibility) =>
+        lineEligibility?.Invoke(line) ?? true;
 
     internal static IEnumerable<SceneDefinition> AvailableScenes(SceneContext context) =>
         SceneCatalog.All.Where(scene => scene.StoryArcId is not null

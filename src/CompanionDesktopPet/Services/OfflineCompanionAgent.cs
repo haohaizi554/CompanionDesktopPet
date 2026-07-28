@@ -37,6 +37,7 @@ public sealed class OfflineCompanionAgent : ICompanionDialogueAgent
     private readonly HashSet<string> _usedThisSession = new(StringComparer.Ordinal);
     private readonly SceneHistory _history = new();
     private readonly SceneScheduler _scheduler = new();
+    private readonly IdentitySessionExposure _identitySessionExposure = new();
     private readonly Func<SceneCatalogLoadResult> _catalogSnapshotLoader;
     private CharacterState? _state;
     private DialogueCategory? _lastCategory;
@@ -191,11 +192,17 @@ public sealed class OfflineCompanionAgent : ICompanionDialogueAgent
             context,
             _history,
             random,
-            bypassInterruptionBudget: bypassBudget);
+            bypassInterruptionBudget: bypassBudget,
+            lineEligibility: _identitySessionExposure.IsEligible);
         SafeFeedbackSelection? safe = null;
         if (scene is null && bypassBudget)
         {
-            safe = _scheduler.SelectSafeFeedback(SceneCatalog.PersonaScenes, context, _history, random);
+            safe = _scheduler.SelectSafeFeedback(
+                SceneCatalog.PersonaScenes,
+                context,
+                _history,
+                random,
+                _identitySessionExposure.IsEligible);
             scene = safe?.Scene;
         }
         _turnCount++;
@@ -224,6 +231,7 @@ public sealed class OfflineCompanionAgent : ICompanionDialogueAgent
 
         var line = safe?.Line ?? SelectEligibleLine(scene, localTime, random);
         _history.Record(scene, localTime, line);
+        _identitySessionExposure.Record(line);
         _state.ApplyScene(scene);
         UpdateActivity(line.CategoryGroup, line.Category);
         UpdateStoryProgress(scene, localTime, random);
@@ -244,7 +252,7 @@ public sealed class OfflineCompanionAgent : ICompanionDialogueAgent
 
     private DialogueLine SelectEligibleLine(SceneDefinition scene, DateTime localTime, Random random)
     {
-        var eligible = _history.EligibleLines(scene, localTime);
+        var eligible = _history.EligibleLines(scene, localTime, _identitySessionExposure.IsEligible);
         var diverse = _history.PreferSurfaceExposure(eligible);
         var unused = diverse.Where(line => !_usedThisSession.Contains(line.Text)).ToArray();
         return WeightedChoice(unused.Length > 0 ? unused : diverse, random);

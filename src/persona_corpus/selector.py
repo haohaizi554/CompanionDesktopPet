@@ -13,6 +13,7 @@ from typing import Mapping, Sequence
 
 from .context import ContextError, PersonaContext, daypart_for
 from .history import HistoryFormatError, HistoryRecord, SelectionHistory
+from .identity_session import IdentitySessionExposure
 from .models import CorpusLine
 from .surface_exposure import SURFACE_RECENT_WINDOW, surface_exposure
 from .trigger_matching import trigger_matches as _trigger_matches
@@ -593,6 +594,7 @@ def select_line(
     seed: int | None = None,
     *,
     scheduler_config: SchedulerConfig | Mapping[str, object] | None = None,
+    identity_session: IdentitySessionExposure | None = None,
 ) -> SelectedLine | None:
     """Select one semantic scene, then one surface variant within that scene."""
 
@@ -600,6 +602,7 @@ def select_line(
         not _aware(now)
         or not isinstance(context, PersonaContext)
         or not isinstance(history, SelectionHistory)
+        or (identity_session is not None and not isinstance(identity_session, IdentitySessionExposure))
         or (seed is not None and (isinstance(seed, bool) or not isinstance(seed, int)))
     ):
         return None
@@ -640,11 +643,15 @@ def select_line(
     )
 
     def variant_available(row: CorpusLine) -> bool:
-        return _outside_cooldown(
-            now,
-            records_by_id.get(row.id),
-            float(row.cooldown_hours),
-        ) and today_counts[row.id] < row.max_per_day
+        return (
+            (identity_session is None or identity_session.is_eligible(row))
+            and _outside_cooldown(
+                now,
+                records_by_id.get(row.id),
+                float(row.cooldown_hours),
+            )
+            and today_counts[row.id] < row.max_per_day
+        )
 
     def scene_available_variants(scene: PreparedScene) -> tuple[CorpusLine, ...]:
         exposure_candidates = (
@@ -857,6 +864,8 @@ def select_line(
         )
     except HistoryFormatError:
         return None
+    if identity_session is not None:
+        identity_session.record(chosen_row)
     return SelectedLine(
         row=chosen_row,
         score=float(chosen_scene.scored.score),

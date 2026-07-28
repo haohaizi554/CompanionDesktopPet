@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 from src.persona_corpus.context import ContextError, PersonaContext
 from src.persona_corpus.contract import EXPANDED_RUNTIME_ROWS
 from src.persona_corpus.history import HistoryFormatError, HistoryRecord, SelectionHistory
+from src.persona_corpus.identity_session import IdentitySessionExposure
 from src.persona_corpus.loader import load_v2
 from src.persona_corpus.models import CorpusLine
 from src.persona_corpus.selector import (
@@ -61,6 +62,22 @@ def corpus_line(**overrides: object) -> CorpusLine:
     }
     values.update(overrides)
     return CorpusLine(**values)  # type: ignore[arg-type]
+
+
+def authored_direct_line(
+    *,
+    row_id: str = "authored-direct",
+    semantic_group: str = "identity.direct",
+    marker: str = "\u5c0f\u73a5",
+    batch_id: str = "b084",
+) -> CorpusLine:
+    return corpus_line(
+        id=row_id,
+        semantic_group=semantic_group,
+        text=f"{marker}\u7684\u4e00\u53e5\u5b89\u9759\u5f69\u86cb\u3002",
+        source_kind="curated_standalone",
+        source_reference=f"authored:{batch_id};variant:{row_id}",
+    )
 
 
 def history_record(
@@ -1054,6 +1071,118 @@ class SelectorScoringAndMutationTests(unittest.TestCase):
         self.assertEqual(forward_ids, reverse_ids)
         self.assertEqual(forward_ids, shuffled_ids)
         self.assertGreater(groups["character_life"], groups["technical"])
+
+
+class IdentitySessionExposureTests(unittest.TestCase):
+    def test_direct_marker_cap_is_session_only_and_marker_free_lore_is_unaffected(self) -> None:
+        exposure = IdentitySessionExposure()
+        direct = authored_direct_line(marker="\u73a5\u4ed4", batch_id="b085")
+        for index in range(3):
+            exposure.record(
+                replace(
+                    direct,
+                    id=f"direct-{index}",
+                    semantic_group=f"identity.direct.{index}",
+                )
+            )
+
+        self.assertFalse(exposure.is_eligible(direct))
+        self.assertTrue(
+            exposure.is_eligible(
+                authored_direct_line(
+                    row_id="other-marker-class",
+                    semantic_group="identity.direct.other-class",
+                    marker="\u73a5\u73a5",
+                    batch_id="b086",
+                )
+            )
+        )
+        self.assertTrue(
+            exposure.is_eligible(
+                corpus_line(
+                    id="marker-free-lore",
+                    semantic_group="identity.direct.2",
+                    text="\u8fd9\u6bb5\u5c0f\u5267\u60c5\u8fd8\u6709\u540e\u7eed\u3002",
+                )
+            )
+        )
+        self.assertTrue(IdentitySessionExposure().is_eligible(direct))
+
+    def test_group_requires_three_intervening_bubbles_and_leaves_recent_eight(self) -> None:
+        exposure = IdentitySessionExposure()
+        direct = authored_direct_line(semantic_group="identity.same")
+        exposure.record(direct)
+        for index in range(1, 3):
+            exposure.record(corpus_line(id=f"filler-{index}", semantic_group=f"filler.{index}"))
+
+        self.assertFalse(exposure.meets_minimum_intervening_bubbles("identity.same"))
+        self.assertFalse(exposure.is_eligible(direct))
+
+        exposure.record(corpus_line(id="filler-3", semantic_group="filler.3"))
+        self.assertTrue(exposure.meets_minimum_intervening_bubbles("identity.same"))
+        self.assertFalse(exposure.is_eligible(direct))
+
+        for index in range(4, 9):
+            exposure.record(corpus_line(id=f"filler-{index}", semantic_group=f"filler.{index}"))
+
+        self.assertTrue(exposure.is_eligible(direct))
+
+    def test_recent_eight_window_blocks_each_retained_position_then_releases(self) -> None:
+        for filler_count in range(9):
+            with self.subTest(filler_count=filler_count):
+                exposure = IdentitySessionExposure()
+                direct = authored_direct_line(semantic_group="identity.window")
+                exposure.record(direct)
+                for index in range(filler_count):
+                    exposure.record(
+                        corpus_line(
+                            id=f"window-filler-{index}",
+                            semantic_group=f"window.filler.{index}",
+                        )
+                    )
+
+                self.assertEqual(filler_count == 8, exposure.is_eligible(direct))
+
+    def test_legacy_editorial_marker_keeps_its_legacy_playback_contract(self) -> None:
+        exposure = IdentitySessionExposure()
+        legacy = corpus_line(
+            id="legacy-marker",
+            semantic_group="legacy.identity",
+            text="\u73a5\u4ed4\u662f\u4e00\u53e5\u65e7\u5f0f\u7f16\u8f91\u5f69\u86cb\u3002",
+            source_kind="legacy_surface_variant",
+            source_reference="legacy:1;topic:legacy;variant:marker",
+        )
+        for index in range(4):
+            exposure.record(replace(legacy, id=f"legacy-marker-{index}"))
+
+        self.assertTrue(exposure.is_eligible(legacy))
+
+    def test_selector_filters_a_blocked_direct_row_before_history_mutates(self) -> None:
+        exposure = IdentitySessionExposure()
+        direct = authored_direct_line()
+        for index in range(3):
+            exposure.record(
+                replace(
+                    direct,
+                    id=f"used-{index}",
+                    semantic_group=f"used.group.{index}",
+                )
+            )
+        history = SelectionHistory()
+        regular = corpus_line(id="regular", semantic_group="regular.group")
+
+        selected = select_line(
+            [direct, regular],
+            context_at(),
+            history,
+            NOW,
+            seed=81,
+            identity_session=exposure,
+        )
+
+        self.assertIsNotNone(selected)
+        self.assertEqual("regular", selected.row.id if selected else None)
+        self.assertEqual(("regular",), tuple(record.selected_id for record in history.records))
 
 
 if __name__ == "__main__":

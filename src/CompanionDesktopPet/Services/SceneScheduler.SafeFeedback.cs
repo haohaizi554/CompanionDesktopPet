@@ -43,7 +43,8 @@ public sealed partial class SceneScheduler
         IReadOnlyList<SceneDefinition> scenes,
         SceneContext context,
         SceneHistory history,
-        Random random)
+        Random random,
+        Func<DialogueLine, bool>? lineEligibility = null)
     {
         ArgumentNullException.ThrowIfNull(scenes);
         ArgumentNullException.ThrowIfNull(context);
@@ -59,7 +60,8 @@ public sealed partial class SceneScheduler
             history,
             random,
             previousText,
-            retainCooldownsAndAdjacency: true);
+            retainCooldownsAndAdjacency: true,
+            lineEligibility: lineEligibility);
         return strict ?? SelectSafeFeedbackLayer(
             scenes,
             context,
@@ -67,7 +69,8 @@ public sealed partial class SceneScheduler
             history,
             random,
             previousText,
-            retainCooldownsAndAdjacency: false);
+            retainCooldownsAndAdjacency: false,
+            lineEligibility: lineEligibility);
     }
 
     internal static void ValidateSafeFeedbackCoverage(IReadOnlyList<SceneDefinition> scenes)
@@ -124,7 +127,8 @@ public sealed partial class SceneScheduler
         SceneHistory history,
         Random random,
         string? previousText,
-        bool retainCooldownsAndAdjacency)
+        bool retainCooldownsAndAdjacency,
+        Func<DialogueLine, bool>? lineEligibility)
     {
         var recent = RecentHistoryProfile.Create(history);
         var candidates = scenes
@@ -138,7 +142,8 @@ public sealed partial class SceneScheduler
                 context.Now,
                 history,
                 previousText,
-                retainCooldownsAndAdjacency))
+                retainCooldownsAndAdjacency,
+                lineEligibility))
             .Select(scene => Score(scene, recent))
             .ToList();
 
@@ -155,7 +160,8 @@ public sealed partial class SceneScheduler
                 context.Now,
                 history,
                 previousText,
-                retainCooldownsAndAdjacency);
+                retainCooldownsAndAdjacency,
+                lineEligibility);
             if (lines.Count > 0)
             {
                 return new SafeFeedbackSelection(scene, ChooseUnusedOrLeastRecent(lines, history, random));
@@ -171,9 +177,11 @@ public sealed partial class SceneScheduler
         DateTime now,
         SceneHistory history,
         string? previousText,
-        bool retainLineCooldown) =>
+        bool retainLineCooldown,
+        Func<DialogueLine, bool>? lineEligibility) =>
         scene.Lines
-            .Where(line => IsSafeFeedbackLine(scene, line)
+            .Where(line => IsLineEligible(line, lineEligibility)
+                           && IsSafeFeedbackLine(scene, line)
                            && line.Text != previousText
                            && history.IsBelowDailyMaximum(line, now)
                            && (!retainLineCooldown || !history.IsLineCoolingDown(line, now)))
@@ -184,9 +192,11 @@ public sealed partial class SceneScheduler
         DateTime now,
         SceneHistory history,
         string? previousText,
-        bool retainLineCooldown) =>
+        bool retainLineCooldown,
+        Func<DialogueLine, bool>? lineEligibility) =>
         scene.Lines.Any(line =>
-            IsSafeFeedbackLine(scene, line)
+            IsLineEligible(line, lineEligibility)
+            && IsSafeFeedbackLine(scene, line)
             && line.Text != previousText
             && history.IsBelowDailyMaximum(line, now)
             && (!retainLineCooldown || !history.IsLineCoolingDown(line, now)));

@@ -10,6 +10,7 @@ from typing import Iterable, Mapping, Sequence
 
 from .builder import serialize_v2
 from .history import SelectionHistory
+from .identity_session import IdentitySessionExposure
 from .lexical import contains_seasoning_marker
 from .loader import CorpusFormatError, load_legacy
 from .models import CorpusLine, LegacyLine
@@ -206,6 +207,7 @@ def simulate(
     attempts: list[SimulationAttempt] = []
     for seed in canonical_seeds:
         history = SelectionHistory()
+        identity_session = IdentitySessionExposure()
         last_output_at: datetime | None = None
         for day_index in range(days):
             for slot_index in range(len(ATTEMPT_SLOTS)):
@@ -230,6 +232,7 @@ def simulate(
                         scenario=natural_attempt.scenario,
                     ),
                     scheduler_config=scheduler,
+                    identity_session=identity_session,
                 )
                 row = selected.row if selected is not None else None
                 if row is not None:
