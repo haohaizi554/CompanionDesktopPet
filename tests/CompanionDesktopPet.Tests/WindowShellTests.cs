@@ -3649,6 +3649,29 @@ public sealed class WindowShellTests
     }
 
     [Fact]
+    public void PetTheme_CustomMenuItemAndSeparatorStylesOverridePlatformTemplates()
+    {
+        RunOnStaThread(() =>
+        {
+            var theme = new ResourceDictionary
+            {
+                Source = new Uri(
+                    "/CompanionDesktopPet;component/Themes/PetTheme.xaml",
+                    UriKind.Relative)
+            };
+
+            foreach (var key in new[] { "KawaiiMenuItemStyle", "KawaiiSeparatorStyle" })
+            {
+                var style = Assert.IsType<Style>(theme[key]);
+                Assert.Contains(
+                    style.Setters.OfType<Setter>(),
+                    setter => setter.Property == Control.OverridesDefaultStyleProperty
+                              && Equals(true, setter.Value));
+            }
+        });
+    }
+
+    [Fact]
     public void MainWindow_KawaiiContextMenu_PreservesShellAndSubmenuBehavior()
     {
         var settingsDirectory = CreateSettingsDirectory();
