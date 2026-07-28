@@ -359,11 +359,42 @@ public sealed class OfflineCompanionAgentTests
     }
 
     [Fact]
-    [Trait("Category", "Performance")]
-    public void Respond_RepeatedClicksRemainResponsiveAndDoNotSuppressAutomatic()
+    public void Respond_RepeatedClicksPreservePlaybackRulesAndAutomaticAvailability()
     {
-        // Startup owns corpus/catalog materialization; this gate measures the
-        // steady interactive path after that one-time prewarm.
+        var run = RunRepeatedClickPlayback(clickCount: 900, measurePerformance: false);
+
+        AssertPlaybackRules(run);
+    }
+
+    [Fact]
+    [Trait("Category", "Performance")]
+    public void Respond_RepeatedClicksStayWithinSteadyStateBudget()
+    {
+        var run = RunRepeatedClickPlayback(clickCount: 900, measurePerformance: true);
+        var orderedLatencies = run.ClickLatencies.Order().ToArray();
+        var meanLatency = run.ClickLatencies.Average();
+        var p95Latency = orderedLatencies[(int)Math.Ceiling(orderedLatencies.Length * 0.95) - 1];
+        var p99Latency = orderedLatencies[(int)Math.Ceiling(orderedLatencies.Length * 0.99) - 1];
+        var coldLatency = run.ClickLatencies[0];
+        var warmMaximumLatency = run.ClickLatencies.Skip(1).Max();
+
+        Console.WriteLine(
+            $"900 clicks: mean={meanLatency:F3}ms p95={p95Latency:F3}ms "
+            + $"p99={p99Latency:F3}ms cold={coldLatency:F3}ms warm_max={warmMaximumLatency:F3}ms "
+            + $"agent_allocated={run.AllocatedBytes:N0} elapsed={run.Elapsed}");
+
+        Assert.True(run.Elapsed < TimeSpan.FromSeconds(20), run.Elapsed.ToString());
+        Assert.True(run.AllocatedBytes < 256L * 1024 * 1024, $"allocated bytes: {run.AllocatedBytes:N0}");
+        Assert.True(p95Latency < 50, $"p95 click latency: {p95Latency:F3}ms");
+        Assert.True(p99Latency < 100, $"p99 click latency: {p99Latency:F3}ms");
+        Assert.True(coldLatency < 3_000, $"cold click latency: {coldLatency:F3}ms");
+        Assert.True(warmMaximumLatency < 500, $"warm maximum click latency: {warmMaximumLatency:F3}ms");
+    }
+
+    private static RepeatedClickRun RunRepeatedClickPlayback(int clickCount, bool measurePerformance)
+    {
+        // Startup owns corpus/catalog materialization; the performance gate measures
+        // the steady interactive path after that one-time prewarm.
         _ = SceneCatalog.All.Count;
         var agent = new OfflineCompanionAgent();
         var random = new Random(20260724);
@@ -375,21 +406,24 @@ public sealed class OfflineCompanionAgentTests
         // pollute the measured Respond hot path.
         var observedHistory = new SceneHistory();
         long allocatedBytes = 0;
-        var stopwatch = Stopwatch.StartNew();
-        var clickLatencies = new double[900];
+        var stopwatch = measurePerformance ? Stopwatch.StartNew() : null;
+        var clickLatencies = measurePerformance ? new double[clickCount] : Array.Empty<double>();
 
-        for (var clickIndex = 0; clickIndex < 900; clickIndex++)
+        for (var clickIndex = 0; clickIndex < clickCount; clickIndex++)
         {
             var now = start.AddSeconds(clickIndex * 10);
             var historyBefore = observedHistory.Entries;
-            var allocatedBeforeClick = GC.GetAllocatedBytesForCurrentThread();
-            var clickStarted = Stopwatch.GetTimestamp();
+            var allocatedBeforeClick = measurePerformance ? GC.GetAllocatedBytesForCurrentThread() : 0;
+            var clickStarted = measurePerformance ? Stopwatch.GetTimestamp() : 0;
             var click = agent.Respond(
                 CompanionEvent.Click,
                 now,
                 random);
-            clickLatencies[clickIndex] = Stopwatch.GetElapsedTime(clickStarted).TotalMilliseconds;
-            allocatedBytes += GC.GetAllocatedBytesForCurrentThread() - allocatedBeforeClick;
+            if (measurePerformance)
+            {
+                clickLatencies[clickIndex] = Stopwatch.GetElapsedTime(clickStarted).TotalMilliseconds;
+                allocatedBytes += GC.GetAllocatedBytesForCurrentThread() - allocatedBeforeClick;
+            }
             Assert.True(
                 click.ShouldDisplayText,
                 $"Click became silent at index {clickIndex}; history={historyBefore.Count}, scene={click.SceneId}.");
@@ -423,34 +457,33 @@ public sealed class OfflineCompanionAgentTests
             observedHistory.Record(scene, now, click.SourceLine);
         }
 
-        stopwatch.Stop();
-        var orderedLatencies = clickLatencies.Order().ToArray();
-        var meanLatency = clickLatencies.Average();
-        var p95Latency = orderedLatencies[(int)Math.Ceiling(orderedLatencies.Length * 0.95) - 1];
-        var p99Latency = orderedLatencies[(int)Math.Ceiling(orderedLatencies.Length * 0.99) - 1];
-        var coldLatency = clickLatencies[0];
-        var warmMaximumLatency = clickLatencies.Skip(1).Max();
+        stopwatch?.Stop();
         var playback = observedHistory.Entries.ToArray();
+        var automatic = agent.Respond(
+            CompanionEvent.Automatic,
+            start.AddSeconds(clickCount * 10),
+            random);
+
+        return new RepeatedClickRun(
+            playback,
+            usedDeepFallback,
+            automatic.ShouldDisplayText,
+            automatic.SceneId,
+            stopwatch?.Elapsed ?? TimeSpan.Zero,
+            allocatedBytes,
+            clickLatencies);
+    }
+
+    private static void AssertPlaybackRules(RepeatedClickRun run)
+    {
+        var playback = run.Playback;
         var seasoningRatio = playback.Count(entry => entry.WasSeasoning is true) / (double)playback.Length;
         var drySharpRatio = playback.Count(entry => entry.WasDrySharp) / (double)playback.Length;
         var openingRepeatRatio = RecentSurfaceRepeatRatio(playback, entry => entry.SurfaceOpening);
         var endingRepeatRatio = RecentSurfaceRepeatRatio(playback, entry => entry.SurfaceEnding);
         var templateRepeatRatio = RecentSurfaceRepeatRatio(playback, entry => entry.SurfaceTemplate);
-        Console.WriteLine(
-            $"900 clicks: mean={meanLatency:F3}ms p95={p95Latency:F3}ms "
-            + $"p99={p99Latency:F3}ms cold={coldLatency:F3}ms warm_max={warmMaximumLatency:F3}ms "
-            + $"agent_allocated={allocatedBytes:N0} elapsed={stopwatch.Elapsed} "
-            + $"seasoning={seasoningRatio:P2} dry_sharp={drySharpRatio:P2} "
-            + $"recent20_opening_repeat={openingRepeatRatio:P2} "
-            + $"ending_repeat={endingRepeatRatio:P2} template_repeat={templateRepeatRatio:P2}");
 
-        Assert.True(usedDeepFallback);
-        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(20), stopwatch.Elapsed.ToString());
-        Assert.True(allocatedBytes < 256L * 1024 * 1024, $"allocated bytes: {allocatedBytes:N0}");
-        Assert.True(p95Latency < 50, $"p95 click latency: {p95Latency:F3}ms");
-        Assert.True(p99Latency < 100, $"p99 click latency: {p99Latency:F3}ms");
-        Assert.True(coldLatency < 3_000, $"cold click latency: {coldLatency:F3}ms");
-        Assert.True(warmMaximumLatency < 500, $"warm maximum click latency: {warmMaximumLatency:F3}ms");
+        Assert.True(run.UsedDeepFallback);
         Assert.InRange(
             seasoningRatio,
             PersonaContractGenerated.SeasoningPlaybackMinimum,
@@ -477,14 +510,18 @@ public sealed class OfflineCompanionAgentTests
             index => Assert.True(
                 playback.Skip(Math.Max(0, index - 49)).Take(Math.Min(50, index + 1))
                     .Count(entry => entry.WasDrySharp) <= SceneHistory.DrySharpPlaybackMaximum));
-
-        var automatic = agent.Respond(
-            CompanionEvent.Automatic,
-            start.AddSeconds(900 * 10),
-            random);
-        Assert.True(automatic.ShouldDisplayText);
-        Assert.NotEqual("intentional_silence", automatic.SceneId);
+        Assert.True(run.AutomaticShouldDisplay);
+        Assert.NotEqual("intentional_silence", run.AutomaticSceneId);
     }
+
+    private sealed record RepeatedClickRun(
+        SceneHistoryEntry[] Playback,
+        bool UsedDeepFallback,
+        bool AutomaticShouldDisplay,
+        string AutomaticSceneId,
+        TimeSpan Elapsed,
+        long AllocatedBytes,
+        double[] ClickLatencies);
 
     private static double RecentSurfaceRepeatRatio(
         IReadOnlyList<SceneHistoryEntry> entries,
