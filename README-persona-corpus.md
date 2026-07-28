@@ -250,8 +250,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
 | `data/optimized/persona-corpus-review.tsv` | `a251b1e01003a078d7912f71099e57c5c6830a75195558ea61428105990b866a` |
 | `reports/pii-review.tsv` | `702037759f730759be83fb1c643a8f61382fa1c3f8f2a25e2c0351a177eec6e7` |
 | `data/optimized/persona-surface-manifest.tsv` | `bcf9c97be0e4b1d7b7db11fcb46f44de17ef0ade6cb2e79d69f8af69bdbc637d` |
-| `reports/simulation-report.md` | `09d67f3b69fb97f871337fc6e2a6b5a4a4c9897c680af3551796091764e090e2` |
-| `reports/simulation-events.json` | `5fddf3a0c05705da9ff97f7a1b339b664ee8dbcf1e81318e09267e815bc1d9da` |
+| `reports/simulation-report.md` | `b66e5c9ba704ff3d050fb7d41f4cb6fa553acfbb1790010a3129c3f6cbcafcb9` |
+| `reports/simulation-events.json` | `017e1bf3c20559bd046a1d86c0f0a3788220d0262f82792e9288651c81f42d80` |
 | 历史 `v1.0.0` 的 `outputs/CompanionDesktopPet/佳怡桌宠.exe` | `b79bf57a94d63387b6d8db288e53f64b06af32a3aa4881e7c069634839442a82` |
 
 上表 EXE 是历史 `v1.0.0` 实证：它从标签指向的提交 `ad5aa867a06d84d64fc4399cb4d258becce1b8ab` 使用 .NET SDK `10.0.301` 构建，`ProductVersion=1.0.0+ad5aa867a06d84d64fc4399cb4d258becce1b8ab`，大小为 `80,299,750` 字节。云端 publish、delivery、isolated 以及经代理回传后重新下载的本地交付副本 SHA-256 全部等于上表值；加强后的验证器会以 `-Force` 枚举并拒绝隐藏/系统 sidecar，云端 smoke PID `2280` 与最终本地复核 smoke PID `13700` 均自行以退出码 0 结束，随后 `publish/` 与 `outputs/verify/` 已清理。该记录不能替代 v1.1.0 最终提交上的重新构建、测试、哈希和 Release 回读。
