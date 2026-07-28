@@ -33,7 +33,9 @@
 - `source_line` 是冻结 source SHA 下从 1 开始的物理数据行号。source 的任何字节变化、插入、删除或重排都开启新的 lineage epoch，必须重新生成、复核和审批全部派生产物；冻结 SHA 不变时不得重编号当前 51,326 个 surface ID。
 - 问句/回复钩子、未批准身份、非身份 PII、不可用上下文、面向用户的当前状态断言、控制字符、过度命令式文本和规范化重复不得进入运行时。
 - archive/source/review 只提供审计证据，不自动构成运行时许可。不得用宽泛 marker 扫描或 EXE 原始字节搜索代替 manifest 审批。
-- 桌宠继续完全离线，不读取输入内容、剪贴板或窗口标题，也不枚举或读取用户文件名、用户目录内容。正常运行时，角色偏好、冷却历史和剧情状态保存在 `%LOCALAPPDATA%\CompanionDesktopPet`；只有用户主动启用开机自启动时，才会另在当前用户 Run 注册表项保存桌宠自身 EXE 路径；`--smoke-test` 使用并清理系统临时目录中的隔离状态。自动规则不能替代人物授权、虚构身份、关系边界和再分发权利的人工批准。
+- 自动台词四个精确随机间隔窗口为：本地时间 `06:00–17:59:59` 使用 `5–15` 分钟，`18:00–22:59:59` 使用 `10–20` 分钟，`23:00–05:59:59` 使用 `30–60` 分钟；明确全屏时覆盖时段并使用 `60–120` 分钟。上下界均可取到。
+- 全屏探测只读取台前 HWND 的有效性、可见/最小化状态与样式，DWM cloaked 状态和扩展边框几何，以及相交显示器的完整边界；失败或采样期间 HWND 变化时，原始观测保持 `unknown`，不伪造为非全屏。它不读取窗口标题、进程名称/内容、输入、剪贴板、用户文件、屏幕像素或网络数据。
+- 桌宠继续完全离线。正常运行时，角色偏好、冷却历史和剧情状态保存在 `%LOCALAPPDATA%\CompanionDesktopPet`；只有用户主动启用开机自启动时，才会另在当前用户 Run 注册表项保存桌宠自身 EXE 路径；`--smoke-test` 使用并清理系统临时目录中的隔离状态。自动规则不能替代人物授权、虚构身份、关系边界和再分发权利的人工批准。
 
 ## 4. 异步预热与 fallback
 
@@ -168,7 +170,19 @@ dotnet test CompanionDesktopPet.sln -c Release --no-restore
 - C# 运行时通过真实 `OfflineCompanionAgent → SceneScheduler → PersonaCorpus` 路径验证：10 seeds × 30 days × 4 slots = 1,200 outputs，Easter egg 为 120/1,200（10.00%），每 seed 均为 10.00%。接受区间由共享 contract 生成，不在测试中另行硬编码。
 - `v1.0.0` 发布前主代理复验：Python `311/311`（140.4 秒）；.NET Release `392/392`、0 跳过；validator 为 `0 hard errors / 1 warning`，唯一 warning 为 `surface_inventory_observation`。这些数值是历史证据，不预判 v1.1.0 的最终结果。
 
-### 6.3 后续版本的自动发布入口
+### 6.3 `v1.1.0` pre-tag source gate（2026-07-29）
+
+以下是在当前 `main` 基线 `301823e2f38c33e7c1c917af110ca70e5c2ef703` 加本次四份文档改动上重新执行的 source/test 证据，不是目标 tag 的 EXE/Release 证据：
+
+- simulation：命令退出 `0`，实际用时 `53.8s`；`30 days × 10 seeds`，`1,500/1,500 outputs`，`0 hard violations`。报告 SHA-256 为 `b66e5c9ba704ff3d050fb7d41f4cb6fa553acfbb1790010a3129c3f6cbcafcb9`，events SHA-256 为 `017e1bf3c20559bd046a1d86c0f0a3788220d0262f82792e9288651c81f42d80`；editorial evidence 为 `rewrites=50, disabled=20, tone=20, fake_context=20, manual=4513`。
+- validator：命令退出 `0`，实际用时 `61.4s`；`0 hard errors / 1 warning`，唯一 warning 精确为 `surface_inventory_observation`（51,326 surface rows 的 inventory observation）。
+- Python unittest：实际发现并通过 `368/368`，`0 failures / 0 errors`；unittest 报告用时 `544.823s`，命令总用时 `548s`。
+- .NET：`dotnet --version` 为 `9.0.301`；restore、`IsTestProject=true` 查询与完整 Release suite 的组合命令退出 `0`、总用时 `58s`；完整 Release suite 实际发现并通过 `600/600`，`0 failed / 0 skipped`，测试报告用时 `38s`。输出没有编译 warning；结束后仅打印一条非门禁的 SDK workload update 可用通知。
+- simulation 两份 tracked report 经新鲜重跑后与当前 canonical 字节一致，因此 `git status` 没有 report diff；上面的 hash 来自本轮工具输出与 `Get-FileHash` 复核，不是从历史数字复制。
+
+这些 source gates 不填写 `v1.1.0` 的 EXE 字节数、ProductVersion、Authenticode、SmokePID、Release URL 或资产哈希；它们仍必须等待目标 annotated tag 流水线。
+
+### 6.4 后续版本的自动发布入口
 
 - PR 与 `main` push 只运行质量门禁；`workflow_dispatch` 额外生成 30 天保留的 Windows artifact，但不公开发版。
 - GitHub Release 只由形如 `v1.1.0` / `v1.1.0-rc.1`、在本次事件中新建且非强推的 annotated tag 触发。tag 必须精确指向 `origin/main` 中的提交；轻量 tag、非严格语义版本 tag、旁支提交和强制移动均在打包前拒绝。已有 Release 的八项资产不可变：同一原始运行的失败重试仅在八项候选资产逐字节完全一致时无操作成功，任何清单或哈希差异都会失败，不删除、覆盖或编辑旧资产。GitHub push payload 无法证明被删除 tag 的全部历史，因此还应通过仓库 tag ruleset 阻止删除后重建。

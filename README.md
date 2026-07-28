@@ -2,6 +2,10 @@
 
 一个完全离线的 Windows x64 WPF 桌宠，以及配套的可审计中文角色语料系统。她不读取输入内容、剪贴板、窗口标题，也不枚举或读取用户文件名、用户目录内容，不依赖网络、数据库或在线模型，也没有热更新、自动更新或联网下载代码的机制；升级版本时由用户手动下载并替换 EXE。正常运行时，角色偏好、冷却历史和剧情状态保存在 `%LOCALAPPDATA%\CompanionDesktopPet`；只有用户主动启用开机自启动时，才会另在当前用户的 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 项保存桌宠自身的 EXE 路径。`--smoke-test` 发布验证使用系统临时目录中的独立状态，并在退出时清理。
 
+自动台词使用四个精确的随机间隔窗口：本地时间 `06:00–17:59:59` 为 `5–15` 分钟，`18:00–22:59:59` 为 `10–20` 分钟，`23:00–05:59:59` 为 `30–60` 分钟；当前台前窗口明确检测为全屏时，不分时段改用 `60–120` 分钟。上下界均可被取到。全屏探测失败或台前 HWND 在读取期间变化时，原始观测保持 `unknown`，不会伪造为“非全屏”；有效安静模式会保留最近一次明确观测，直到后续明确结果更新它。
+
+全屏探测只读取台前 HWND 及其有效性、可见/最小化状态和窗口样式，DWM 的 cloaked 状态与扩展边框几何，以及相交显示器的完整边界。它不读取窗口标题、进程名称或进程内容，不读取键鼠输入、剪贴板、用户文件、屏幕像素或网络数据。该探测只改变自动台词频率，不理解屏幕内容或用户正在做什么。
+
 > 当前集成基线包含 52,132 条运行时文案：806 条 curated core 加 51,326 条由 manifest 精确批准的安全 legacy surfaces；按唯一 `semantic_group` 聚合后为 533 个语义场景。WPF 离线运行时、异步语料预热、本地 fallback、自包含单文件发布与隔离烟测也已接入。75,375 条无表头源物理数据行仍作为不可变审计证据，不会整体进入运行时。
 
 左键点击会显示爱心、按点击位置向相反方向轻轻倾斜，并给出一句回复。点击回复有长期运行兜底：即使冷却历史逐渐累积，或从旧版容易陷入静默的本地记忆恢复，后续点击也不会永久失声。桌宠保留自然单次/偶发双次眨眼，启动后会显示一次本地“嗨♡”，也可从右键面板选择 `打个招呼♡`；这些都是纯本地 UI 动作，不由语料驱动。
@@ -58,7 +62,7 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run
 - 点击专用恢复路径通过 8 小时连续会话、900 次连续点击和旧版静默记忆恢复测试；主动播报仍遵守原有静默预算。
 - 启动不在 UI 线程同步构建大型目录；预热期间使用固定本地 fallback，且真实 WPF 烟测只接受完整语料产生的启动回复。
 - WPF 只嵌入已集成的 v2 运行时资源；75,375 条源物理数据行及其 archive 证据不会整体进入运行时。
-- Release 测试、干净 self-contained single-file publish、源/副本 SHA-256、固定种子重建和隔离单 EXE 烟测均已通过最终门禁。
+- 历史 `v1.0.0` 的 Release 测试、干净 self-contained single-file publish、源/副本 SHA-256、固定种子重建和隔离单 EXE 烟测均已通过其最终门禁；`v1.1.0` 必须在目标 tag 上重新生成独立证据，不能沿用历史数字或二进制哈希。
 
 完整语料维护契约、20 字段说明和精确命令见 [README-persona-corpus.md](README-persona-corpus.md)。
 
@@ -167,7 +171,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
 - `src/CompanionDesktopPet/Assets/persona-corpus.tsv` 与 `data/source/persona-corpus.original.tsv` 是不可变审计证据，不原地覆盖。
 - 禁用内容进入 archive；不确定内容与 PII 进入 review；只有通过安全规则并由 surface manifest 精确绑定原始行、topic、原文与摘要的 legacy surface 才能进入运行时。
 - 身份彩蛋只有精确列入 editorial manifest、且 ID、来源、允许的身份 marker、文本 SHA-256、分类、冷却和每日上限全部匹配时才可进入 `PersonaCorpus`；宽泛 marker 命中或 EXE 字节扫描不是批准。应用启动自校验该 exact manifest，Python validator 和程序集测试共同阻止未审批身份或隐私内容进入运行时。
-- IDE 前台、连续活跃、空闲返回和全屏等未来信号默认未知，不猜测用户状态。
+- IDE 前台、连续活跃和空闲返回仍是未采集的未来信号，默认未知。全屏是当前唯一已采集的窗口上下文，只按本文开头公开的 HWND/可见性/样式、DWM 几何与显示器边界判断；失败保持原始 `unknown`，不读取标题、进程、输入、剪贴板、用户文件、像素或网络数据。
 - 自动检查不能替代人物授权、虚构身份、关系边界和再分发权利的人工审批。
 
 ## 许可

@@ -1,100 +1,87 @@
 # 2026-07-25 全面审查与修复记录
 
-本文逐项复核外部审查清单。结论按当前 `main` 代码和可执行路径判断，不把旧行号、测试名或历史实现直接当成现状。
-
-2026-07-25 的第二份复审再次引用了部分旧行号，并把“类型自身没有锁”直接等同于“生产路径存在并发”。本轮同时检查了实际构造点、调用线程、对象是否逃逸和快照边界；严重度只以可达运行路径为准。该复审的 P0 表实际列出 16 项，不是文字小结所称的 15 项；“11 已修复 + 3 部分修复 + 2 未修复”本身也合计为 16。
+2026-07-26 Task 7 对原始 P0/P1/P2 审查附件重新逐行取证。审计基线为 `44cb7aa75513445e9802c11871fb56922eafb266`；不沿用旧审查的行号、严重度或“已修复”统计。每项都核对当前生产源码和现有覆盖测试，完整门禁的实际输出登记在发布清单与 Task 7 implementer report。
 
 ## 结论口径
 
-- **已修复（本轮）**：复现了当前缺口，先建立失败回归，再修改生产代码。
-- **此前已修复**：审查描述对应旧版本；当前代码、测试或生成契约已经覆盖。
-- **不成立**：当前生产调用链不存在所述风险，盲目加锁或改变行为反而会扩大状态空间。
-- **接受的工程债**：确有可维护性成本，但不构成当前发布阻断。
+- **Fixed**：当前生产源码已经实现修复，且存在直接覆盖该行为的自动化测试。缺任一项都不得标记 Fixed。
+- **Rejected**：审查的技术前提不适用于当前可达生产路径；保留原 claim 并说明为什么不应按建议修改。
+- **Open debt**：风险或维护成本仍真实存在，但当前没有在本任务越界修改生产/测试代码。
+- **Unverified**：只有文档或搜索证据，没有同时得到生产源码与覆盖测试的证明。
 
-## P0 复核
+## P0：发布阻断级原始条目
 
-| 审查项 | 结论 | 当前证据/处理 |
-| --- | --- | --- |
-| `DialogueService` 只在锁内取 agent、下游状态并发裸奔 | 不成立 | `GetReply` 在 `_sync` 内完成 `agent.Respond`；快照和剧情到期读取也在同一所有权边界。事件泵、动画回调和二实例恢复都回到 WPF Dispatcher。没有在可变状态内重复叠锁。 |
-| `OfflineCompanionAgent`/`SceneHistory` 没有自己的锁就是确定性并发损坏 | 不成立（生产路径）；API 已加固 | agent 只在 `DialogueService` 内构造且不逃逸，回复、快照和剧情到期均由同一 `_sync` 串行化；源码没有读取 live `agent.State`/`agent.History` 的生产调用者。`SceneHistory.Entries` 此前确实可向下转换到 backing `List`，且 `Restore(history.Entries)` 会先清空自己的输入；`e7d86f7` 已先物化输入、再清空，并只暴露只读 facade。 |
-| `CharacterState.ActiveStories` 为 public `List` 就能越过 agent 所有权 | 字面属实，P0 结论不成立 | `CharacterState` 是持久化 DTO；所有 agent/快照边界都深拷贝列表，`StoryProgress` 为不可变 record。既有回归会修改返回快照并证明 agent 内部状态不受影响。若未来把该 WinExe 的 DTO 作为第三方库 API，再单独收紧集合类型。 |
-| `CompanionEventPump` 无锁会被多个回调并发调用 | 不成立 | 唯一生产调用位于同步 `DispatcherTimer` handler；构造、轮询和字段更新都归属同一 WPF Dispatcher，handler 内没有 `await` 或第二调用者。测试名中的 concurrent 指同一轮逻辑事件，不是多线程。 |
-| 语料/场景静态初始化失败会让服务命名空间永久不可用 | 此前已修复 | `PersonaCorpus` 与场景目录使用 `Lazy<T>`；`SceneCatalog.LoadPersonaScenes` 捕获非致命加载/契约异常并回退到内置本地目录，失败原因可诊断。故事目录在 fallback 不足时返回空集合。 |
-| 设置和记忆固定 `.tmp` 互相覆盖 | 此前已修复 | 两者统一使用 `AtomicJsonFile`：随机临时名、按规范化目标路径的进程内 semaphore、覆盖式原子移动、仅清理本次临时文件，并有并发写回归。 |
-| 52,132 / 51,326 / 533 只在文档脚本里检查 | 此前已修复 | 共享 persona contract 生成 C# 精确常量；程序集加载、.NET 测试、Python validator 与 CI 均要求精确计数。范围常量不替代精确发布常量。 |
-| 哈希登记与“待复核”互相矛盾 | 此前已修复 | 当前 README 和发布清单区分历史已发布证据、tag 构建提交与其后的文档/资产登记提交，不再把具体哈希称作占位。 |
-| fallback 文档说 scene-first，测试却全局先选行 | 此前已修复 | 当前 fallback 先选择语义场景，再在场景内选变体；旧的全局 LRU 测试和实现已经移除。 |
-| `SettingsService.LoadAsync` 静默回退导致设置丢失不可诊断 | **已修复（`e7d86f7`）** | 缺文件仍安静返回默认值；I/O、权限、JSON、unsupported 以及可解析但违反设置契约的内容都会留下异常诊断，同时诊断器自身的非致命失败不会破坏默认值回退。 |
-| `TrayIconService.TryCleanup` 裸 `catch {}` | **已修复（`e7d86f7`）** | 清理仍保持 best-effort，单个 hide/dispose 失败不会阻止后续资源释放；非致命失败交给统一 reporter，reporter 自身失败也不会遮蔽清理，致命异常不再被吞掉。 |
+| 原始 claim | 结论 | 当前 source 证据 | covering test 证据 |
+| --- | --- | --- | --- |
+| `DialogueService` 只在锁内取 `_agent`，`Respond()` 在锁外并发执行 | **Fixed** | `Services/DialogueService.cs` 的 `GetReply`、`CreateSnapshot`、`NextStoryDueAt` 均在同一 `_sync` 内访问 agent；`Respond()` 也在锁内。 | `DialogueWarmupTests.GetReply_SerializesConcurrentCallsIntoTheMutableAgent` 并发调用后要求 `MaximumConcurrentCalls == 1`。 |
+| `OfflineCompanionAgent` 和 `SceneHistory` 没有自己的锁，必然并发损坏 | **Rejected** | agent 只由 `DialogueService` 持有并在上述所有权锁内调用；`SceneHistory.Entries` 暴露只读 facade，`Restore` 先物化输入，避免 self-restore/别名破坏。给每个内部类型重复加锁会制造新的锁顺序。 | 同一并发序列化测试覆盖 agent 所有权；`SceneEngineTests.History_RestoreFromItsOwnEntriesPreservesEntriesAndIndexes` 与 `History_EntriesExposeAReadOnlyFacade` 覆盖 history 边界。 |
+| `CharacterState.ActiveStories` 是 public `List`，外部可修改 agent 内态 | **Rejected** | `CharacterState` 是持久化 DTO；`CharacterState.Clone` 与 `AgentMemorySnapshot.DetachedCopy` 在 agent/持久化边界复制列表，`StoryProgress` 为不可变 record。 | `OfflineCompanionAgentTests.CreateSnapshot_ReturnsDetachedCharacterStateAndStoryCollection` 修改返回快照后再次取快照，证明内部状态未被穿透。 |
+| `CompanionEventPump` 无锁且多个回调会并发修改 `_pending` | **Rejected** | `MainWindow` 由 `DispatcherTimer` 同步调用 `ProcessEventTimerTick`；`RestoreFromSecondInstance` 在非 Dispatcher 线程时先 `Dispatcher.Invoke`。当前没有第二个生产调用者或跨 await 的 `Poll`。 | `CompanionEventPumpTests` 覆盖同一轮多逻辑事件、story 去重和 idle 边界；`WindowShellTests.MainWindow_HiddenAndClosedQueuedTicksDoNotObserveOrRearm` 覆盖 Dispatcher 生命周期。测试名中的 Concurrent 指逻辑事件同轮出现，不是多线程。 |
+| `PersonaCorpus → SceneCatalog → StoryArcCatalog` 静态初始化失败会毒化类型，无法 fallback | **Fixed** | `SceneCatalog.LoadPersonaScenes` 捕获非致命加载/契约异常并返回 `FallbackDialogueCatalog`；`StoryArcCatalog.Build` 在 fallback 场景不足时返回空集合；目录使用 `Lazy<T>`。 | `SceneCatalogSafetyTests.LoadPersonaScenes_PrimaryFailureReturnsFallbackWithoutPoisoningTheType`、`LoadPersonaScenes_CoverageFailureRecordsDegradedFallbackWithoutValidatingFallback`、`StoryArcBuild_InsufficientFallbackScenesDisablesStoriesInsteadOfThrowing`。 |
+| `SettingsService`/`AgentMemoryService` 固定 `.tmp` 名导致并发覆盖 | **Fixed** | 两者统一调用 `AtomicJsonFile.WriteAsync`；它按规范化目标路径使用进程内 semaphore，并以 `Path.GetRandomFileName()` 创建独立临时文件，覆盖式原子移动且只清理本次临时文件。 | `SettingsServiceTests.ConcurrentSaves_UseIndependentTemporaryFilesAndLeaveOneCompleteDocument`、`AgentMemoryServiceTests.ConcurrentSaves_UseIndependentTemporaryFilesAndLeaveOneCompleteDocument`；`AtomicJsonFileTests.CleanupFailure_ReleasesDestinationGateAndPreservesPrimaryFailure`。 |
+| 52,132 / 51,326 / 533 只写在文档，代码只检查 50k–60k | **Fixed** | `PersonaContract.g.cs` 生成 `ExpandedRuntimeRows=52132`、`LegacySurfaceRows=51326`、`SemanticSceneCount=533`；`PersonaCorpus.Build` 精确拒绝 runtime/surface 偏差。 | `PersonaCorpusTests.Corpus_LoadsTheCuratedEnabledV2Inventory`、`test_contract.PersonaContractFileTests.test_release_inventory_uses_exact_published_counts`、generator `--check` 测试及 validator 精确规模门禁。 |
+| 哈希表已填写，同时文档仍称“待复核/占位”（原 P0） | **Unverified** | `README.md:24,65`、`README-persona-corpus.md:259-261` 与 `docs/release/2026-07-25-expanded-runtime-release-checklist.md:156-183,227-262` 现区分 `v1.0.0` 历史实证、当前 source gate 和 `v1.1.0` 待 tag 产物；Task 7 再次删除含混的“最终门禁已通过”泛称。 | 仓库没有解析这些 Markdown 状态与哈希表的自动化文档合同，因此不能标 Fixed。 |
+| fallback 文档声称 scene-first，测试/实现却全局先选最旧行 | **Fixed** | `SceneScheduler.SelectReusableClickFallback` 先在场景层评分/选择，再只在所选场景内应用 line recency。 | `SceneEngineTests.ClickFallback_SelectsTheSceneBeforeApplyingLineRecencyWithinThatScene` 与 `SafeFeedback_SelectsTheSceneBeforeApplyingLineRecencyWithinThatScene`。 |
 
-## C# 服务与桌面运行时
+## P1：C# Services
 
-| 审查项 | 结论 | 当前证据/处理 |
-| --- | --- | --- |
-| 取消首轮 warmup 后永远复用已取消 Task | **已修复（本轮）** | 已完成且结果为 `Cancelled` 时，`StartAsync`/显式重试都会用新 token 建立新 run；回归验证旧、新 Task 不同并最终进入 Ready。 |
-| `TemporalDialogueService` 每次扫描完整语料 | 此前已修复 | 构建期按时间桶建立索引，运行时不再全表过滤。 |
-| `AgentMemoryService.IsValid` 热路径反复建三张字典 | 此前已修复 | 目录索引使用线程安全 Lazy 缓存。 |
-| Pause 覆盖 Dragging/Landing | **已修复（本轮）** | 暂停请求只记录落地后的目标状态，不破坏拖动/落地瞬态；Resume 可在瞬态中撤销返回 Paused。 |
-| 暂停后在 Landing 中再次开始拖动会丢失返回 Paused 的目标 | **已修复（`e7d86f7`）** | Landing → Dragging 保留 `_returnToPaused`；同时只有 Blink/Greeting/Landing 可以完成，`Complete(Paused/Dragging/Idle)` 不再把状态误改为 Idle，未知 ambient enum 会被明确拒绝。 |
-| 故事节点与普通场景共享 line ID，互相消耗冷却 | **已修复（本轮）** | 保留原始 ID/来源审计，不复制伪造台词；故事来源 `semantic_group` 从普通候选中保留给 story arc，避免普通播放提前消费故事冷却。 |
-| 故事节点应复制/重命名 `DialogueLine.Id` | 不成立 | story scene ID 已有命名空间；复用 canonical line 对象保留来源审计，并让 line 冷却/每日上限跨入口生效。普通入口已排除 story 保留组，复制 ID 反而会绕过配额。 |
-| `DialogueForest.TreeWeights` 与 contract 漂移 | 接受的工程债 | 当前四个值精确等于生成的八组权重聚合：0.18、0.10+0.07、0.10+0.10+0.10+0.08、0.27；不存在当前漂移。后续可直接从 generated group weights 派生以消除维护双写，但不要在本次发布里顺带改变 `PreferredTree` 的选择行为。 |
-| `NotifyIcon` 可在错误线程构造 | **已修复（本轮）** | 在创建任何 WinForms shell 对象前检查目标 Dispatcher 线程；错误线程以明确异常拒绝。 |
-| `MainWindow` 构造函数爆炸 | 此前已修复 | 当前只有少量入口，协作者集中在 `MainWindowDependencies` options 对象；没有再引入 Builder 层。 |
+| 原始 claim | 结论 | 当前 source 证据 | covering test 证据 |
+| --- | --- | --- | --- |
+| 取消首轮 warmup 后，新 token 永远复用已取消 `_run` | **Fixed** | `DialogueWarmupCoordinator.StartAsync` 在已完成且 outcome 为 `Cancelled` 时调用 `StartNewRunLocked`；显式 retry 同样允许 cancelled 新轮次。 | `DialogueWarmupCoordinatorTests.StartAsync_AfterCancelledRunStartsFreshRunWithNewToken`；退避/单飞另由 `StartAsync_TransientFailuresUseExactBoundedBackoffAndOneSharedRun` 覆盖。 |
+| `TemporalDialogueService.GetContextualLines` 每次全扫 52k | **Fixed** | `ContextIndex` 为 `Lazy<IReadOnlyDictionary<ContextBucket,...>>`，`BuildContextIndex` 一次构建不可变 bucket。 | `TemporalDialogueServiceTests.GetContextualLines_ReusesAnImmutableBucketForEquivalentContexts` 与 `GetContextualLines_AfterWarmupHasBoundedSteadyStateAllocations`。 |
+| `AgentMemoryService.IsValid` 每次重建三张目录字典 | **Fixed** | `CatalogIndex` 是 `ExecutionAndPublication` 的 `Lazy<RuntimeCatalogIndex>`，校验和 reconcile 复用同一索引。 | `AgentMemoryServiceTests.IsValid_AfterWarmupHasBoundedSteadyStateAllocations` 与 `ReconcileForRuntime_AfterWarmupDoesNotRebuildCatalogIndexes`。 |
+| `PetActionCoordinator.Pause()` 覆盖 Dragging/Landing，残留 `_returnToPaused` | **Fixed** | `Pause` 在拖动/落地时只设置返回目标，`Resume` 可撤销目标；`Complete` 只接受可完成瞬态。 | `PetActionCoordinatorTests.PauseDuringDrag_PreservesDragAndReturnsToPausedAfterLanding`、`PauseDuringLanding_PreservesLandingAndReturnsToPausedAfterCompletion`、`Complete_RejectsStatesThatAreNotCompletableActions` 等 9 个针对边界的回归。 |
+| 故事与普通场景复用 line ID 导致普通播放提前消耗故事冷却 | **Fixed** | `StoryArcCatalog.ReservedPersonaSemanticGroups` 从 story 节点导出保留组；普通候选排除这些组，同时保留 canonical line ID/来源和跨入口配额语义。 | `SceneEngineTests.StoryArcs_ReserveTheirSourcePersonaScenesFromOrdinaryCandidates` 与 `StoryArcs_UseOnlyEnabledV2Lines`。 |
+| `NotifyIcon` 可能在线程错误处构造，事件失效 | **Fixed** | `TrayIconService` 在创建任何 WinForms shell 对象前校验目标 Dispatcher 线程，回调统一 marshal 到该 Dispatcher。 | `TrayIconServiceTests.Constructor_RejectsNonDispatcherThreadBeforeCreatingNativeShell`、`NotifyIconCallbackRaisedOnAWorker_RunsTheCommandOnTheDispatcher`。 |
+| `MainWindow` 有 8 个、6–14 参数的构造重载，应改 Builder/Options | **Fixed** | 当前协作者集中于 `UI/MainWindowDependencies.cs`；主构造接收一个 dependencies 对象，仅保留两个小型兼容入口。 | `AppLifecycleTests` 和 `WindowShellTests` 多条生命周期测试直接用 `new MainWindow(new MainWindowDependencies(...))` 注入协作者并覆盖真实 WPF 行为。 |
 
-## Python、配置与模拟
+## P1：Python 流水线与配置
 
-| 审查项 | 结论 | 当前证据/处理 |
-| --- | --- | --- |
-| import `selector` 就读取默认配置 | 此前已修复 | 默认配置通过 lazy getter / module `__getattr__` 延迟解析。 |
-| trigger matching 三份实现漂移 | 此前已修复 | 选择器、场景与 validator 共用 `trigger_matching.py`，测试禁止消费者重新声明。 |
-| PII 标记双源 | 此前已修复 | `privacy.py` 是权威规则源；消费者不得复制身份/PII 词表。 |
-| `repr()` fallback hash 不可复现 | 此前已修复 | 未知结构使用 canonical deterministic hash。 |
-| `python -O` 会让输入校验 fail-open | 不成立 | 审查所指路径在 assert 前已有显式结构/约束校验；optimized-mode 负例会验证畸形输入仍被拒绝。其余 assert 只做经过验证后的类型收窄或测试内部不变量。 |
-| contract/scheduler 重复字段双源 | 此前已修复 | scheduler 标注 derivation 来源并由生成/一致性门禁绑定；发布检查拒绝漂移。 |
-| dawn 与 late-night 重叠 | 不成立 | 受控 time token 使用 dawn `[4,6)`、late-night `[0,4)` 和 `[23,24)`；较宽的 daypart 仅用于 trigger 分类，不会同时生成两个互斥 token。 |
-| allowlist ID 含旧行号会随重排失效 | 此前已修复 | 身份采用 exact editorial manifest；legacy lineage 绑定冻结 source SHA 和物理行 epoch，重排必须整体重新审批。 |
-| config 无 `$schema` | 此前已修复 | 四个配置均声明 schema，并在测试/validator 中加载。 |
-| 模拟不覆盖预算、nullable signals、四季和 dawn | 此前已修复 | natural + adversarial 场景覆盖夜间/滚动小时/最小间隔、四季、04:00–05:59、四类 nullable 信号和边界值；回放绑定 corpus/config/derivation hashes。 |
+| 原始 claim | 结论 | 当前 source 证据 | covering test 证据 |
+| --- | --- | --- | --- |
+| import `selector` 立即读默认配置文件 | **Fixed** | `selector.py` 通过 `_default_scheduler_config()` 与 module `__getattr__` 延迟解析 `DEFAULT_SCHEDULER_CONFIG`。 | `test_trigger_contract.SharedTriggerContractTests.test_plain_selector_import_does_not_read_files` 在 monkeypatch `Path.read_text` 为失败后导入模块。 |
+| selector/scenarios/validator 三份 `_trigger_matches` 会漂移 | **Fixed** | 三处都导入 `trigger_matching.trigger_matches`；受控时间 token 也集中在同模块。 | `test_trigger_contract.SharedTriggerContractTests.test_all_three_paths_delegate_to_one_table_driven_matcher` 断言三个 callback 是同一函数对象并跑表驱动行为。 |
+| normalization/content validation 的 PII marker 双源 | **Fixed** | `privacy.py` 是 marker/pattern 与 stage policy 的唯一规则源；builder、normalization、validation consumer 仅导入。 | `test_privacy_policy.PrivacyPolicyContractTests.test_direct_identifiers_have_the_same_findings_at_every_stage` 与 `test_consumers_do_not_redeclare_pii_marker_or_regex_tables`。 |
+| validation hash 用 `repr()` fallback，跨进程不确定 | **Fixed** | `orchestration._stable_validation_node/_stable_validation_sha256` 使用类型化、排序、domain-separated canonical JSON 编码，不使用对象 repr。 | `StableValidationDigestTests` 覆盖映射/集合顺序、未知 key collision、两个 `PYTHONHASHSEED` 子进程的一致 SHA-256。 |
+| `assert` 承担运行时输入校验，`python -O` 后 fail-open | **Rejected** | 所指 assert 位于显式类型/形状校验和 early return 之后，或只收窄已经过滤为 `row is not None` 的内部类型；失败路径由 `_Issues`/异常完成，不依赖 assert。 | `test_simulation.SimulationUnitTests.test_invalid_duration_seeds_and_config_fail_closed`、`test_validation` 的 malformed event/runtime limit 用例；Task 7 另以 `python -O` 运行这些负例，结果登记在 implementer report。 |
+| scheduler 与 contract 的 weights/targets/runtime limits 双源漂移 | **Fixed** | scheduler 带 `derived_from.path/schema_version/sha256`，由 `generate_persona_scheduler.py` 从 contract 派生。 | `test_config_provenance.ConfigSchemaContractTests.test_generated_scheduler_is_current`，以及 `test_contract` 对三组值和 output-mode 聚合的逐项一致性测试。 |
+| `time:dawn [4,6]` 与 late-night `[0,6]` 重叠会同时生成两个 token | **Rejected** | 宽 daypart 分类可包含 dawn，但互斥受控 token 使用 `time:dawn=[4,6)`、`time:late_night=[0,4)∪[23,24)`，由 `canonical_time_context_token` 只返回一个。 | `test_trigger_contract.SharedTriggerContractTests.test_dawn_and_late_night_tokens_are_non_overlapping_at_boundaries` 与 `SceneEngineTests.SceneContext_UsesExactlyOneCanonicalTimeToken`。 |
+| identity allowlist ID 含源行号，语料重排后失效 | **Rejected** | 当前 ID 的确保留 source line，但 source SHA 与物理行 epoch 是冻结 provenance；重排不是受支持的无损操作，必须开启新 lineage epoch 并整体重新审批。去掉行号会削弱而不是增强审计。 | `test_build.RealCorpusBuildTests.test_real_lineage_matches_explicit_catalog_source_mapping`、`PersonaCorpusTests.Corpus_IdentityEasterEggsAreExactAndPrivacyScoped` 与 manifest exact-hash 测试。 |
+| 四个 config 缺 `$schema` | **Fixed** | contract、scheduler、review allowlist、editorial manifest 均声明本地 Draft 2020-12 schema。 | `test_config_provenance.ConfigSchemaContractTests.test_every_public_config_has_a_parseable_resolving_local_schema` 对四份配置解析、检查 schema 并实际 validate。 |
 
-## UI、可访问性与生命周期
+## P1：UI、可访问性与生命周期
 
-| 审查项 | 结论 | 当前证据/处理 |
-| --- | --- | --- |
-| 无可访问性名称、菜单无法键盘使用 | 此前已修复 | 主窗口、人物、气泡 live region 与控制面板已有 Automation 属性；Popup 容器不取焦点，MenuItem 子项仍进入标准键盘导航。 |
-| 硬编码主题不响应 Windows 高对比度 | **已修复（本轮）** | `PetThemeManager` 监听系统高对比度变化；气泡、文字、边框、菜单、选中/禁用态与阴影通过 DynamicResource 切换为系统 palette，退出时解绑。菜单同时处于 checked/highlighted 状态时改用系统 `HighlightText`，避免勾号与高亮背景同色消失。 |
-| 隐式 MenuItem/ContextMenu 样式污染未来控件 | 此前已修复 | 卡哇伊样式使用显式 key，并只在桌宠 `ContextMenu.Resources` 内局部应用。 |
-| 永久动画在托盘隐藏后继续 tick，控制器不释放 | 此前已修复 | `AnimationController` 实现 `IDisposable`，跟踪并移除 clocks；隐藏/暂停会 Suspend，关闭会 Dispose。 |
-| 气泡倒计时跨线程字段可撕裂/关闭后复活 | 此前已修复 | 倒计时使用 `TimeProvider` 和单一 Dispatcher 所有权；悬停 suspend/resume、关闭与过期竞态均有回归。 |
-| `BubbleCountdownController` 没有锁/`IDisposable` 就会泄漏 | 不成立 | controller 不拥有 timer、task、event、CTS 或原生资源；`DispatcherTimer` 由 `MainWindow` 拥有并在隐藏/关闭时停止，controller 的 `Close` 是终态。当前生产调用全部归属 UI Dispatcher。 |
-| `Popup Focusable="False"` 阻断可访问性 | 不成立 | 气泡是只读 live region，不是可交互控件；让独立 Popup 抢焦点会破坏人物和菜单的键盘链。人物 `CharacterStage` 可聚焦，菜单使用标准 `MenuItem` 导航，气泡通过 Automation live region 宣告。 |
-| 已打开气泡拖动人物后偶发漂移 | **已修复（`e7d86f7`）** | 已用真实 WPF 窗口复现：人物窗口移动 210 物理像素时，相对锚定 Popup 的独立 HWND 位移为 0。改用同一 SystemAware 虚拟桌面坐标系下的 `AbsolutePoint`，回归验证已打开气泡在 X/Y 方向与窗口同步移动，同时保留 30-DIP 间距、工作区夹取和最长文案布局。 |
+| 原始 claim | 结论 | 当前 source 证据 | covering test 证据 |
+| --- | --- | --- | --- |
+| 主窗口没有 Automation 名称或 live-region | **Fixed** | `MainWindow.xaml` 为 window、`CharacterStage`、speech、control menu 和命令设置 Automation name/help/live 属性；新台词更新 name 并触发 live-region changed。 | `WindowShellTests.MainWindow_ExposesAccessibleNamesAndLiveSpeechStatus` 与 `MainWindow_NewVisibleSpeechRaisesTheLiveRegionAnnouncementHook`。 |
+| `Popup Focusable="False"` 阻断键盘和读屏 | **Rejected** | 该 Popup 是非交互只读语音 live-region，不应抢走人物/菜单焦点；可交互入口是可聚焦的 `CharacterStage` 和标准 `MenuItem`。把 popup 改为可聚焦会破坏键盘焦点链。 | 上述 live-region 测试，以及 `MainWindow_KeyboardControlMenuRestoresFocusAfterPopupCloses`、`MainWindow_KawaiiContextMenu_PreservesShellAndSubmenuBehavior`。 |
+| 硬编码颜色不响应 Windows 高对比度 | **Fixed** | XAML 消费 `DynamicResource`；`PetThemeManager` 监听高对比度并切换到 `SystemColors` palette、禁用阴影，Dispose 时解绑。 | `PetThemeManagerTests.HighContrastChanges_ApplySystemPaletteAndRestoreNormalTheme`、`Dispose_UnsubscribesFromFutureThemeChanges`，以及菜单 DynamicResource 的 WPF 测试。 |
+| `PetTheme.xaml` 的隐式菜单样式污染未来 TextBox 菜单 | **Fixed** | 三个 kawaii style 都有显式 key，只在 `ControlMenu.Resources` 局部设为隐式样式。 | `WindowShellTests.PetTheme_KeepsControlStylesKeyedUntilTheWindowScopesThem` 与 `MainWindow_KawaiiContextMenu_PreservesShellAndSubmenuBehavior`。 |
+| `AnimationController` 无 IDisposable，隐藏托盘后永久 clock 继续 tick | **Fixed** | controller 实现 `IDisposable`、跟踪/移除 clocks；MainWindow 隐藏时 `Suspend`，关闭时 `Dispose`。 | `AnimationControllerTests.RestartAndDisposeKeepAConstantClockBudgetAndDetachAnimations` 与 `WindowShellTests.MainWindow_TrayHideSuspendsPresentationSchedulersAndQueuesHiddenSpeech`。 |
+| `BubbleCountdownController` 的 long/bool 会在 32 位或跨线程撕裂/看不到关闭 | **Rejected** | 交付目标固定 `win-x64`；controller 不拥有 timer/task/native handle，所有生产调用与拥有它的 `DispatcherTimer` 都在单一 WPF Dispatcher，关闭是终态。对无跨线程入口的状态机增加锁/volatile 不解决可达问题。 | `BubbleCountdownControllerTests.HideAndCloseCannotBeRevivedByLeaveOrShow`、`SuspendFreezesTheDeadlineUntilResume`，以及 WindowShell 的隐藏/关闭 timer 生命周期回归。 |
 
-## 测试与发布工程
+## P2：测试、发布脚本与文档
 
-| 审查项 | 结论 | 当前证据/处理 |
-| --- | --- | --- |
-| WindowShell 高价值用例依赖反射和真实 `Task.Delay` | 已明显优化；仍是工程债 | 反射 helper 调用已约减半，真实动画墙钟等待已移除；环境调度通过内部运行时快照/显式处理入口观测，动画协作者有稳定接口。但仍约有 70 处反射访问，部分位于气泡、退出、warmup 和可访问性高价值测试，不能表述为“只剩低风险边界”；继续按能力面迁移，不为测试把字段公开。 |
-| 性能预算混在功能测试中 | 接受的工程债 | 用例已有 `Trait(Category=Performance)` 并可独立筛选，但 900-click 等方法仍同时断言无静默、比例、冷却、延迟和分配量，测量也包含部分测试/LINQ 开销。当前性能组有充足余量且不阻断发布，后续应拆为共享结果 fixture + 独立功能/性能断言。 |
-| PetAction 只有两个 happy-path，非法转换未覆盖 | **已修复（`e7d86f7`）** | 当前覆盖 ambient 互斥、暂停拖动/落地、瞬态 resume、重复拖动、Landing 中重启拖动、错误 `Complete` 和未知 enum；聚焦状态机测试 11/11 通过。 |
-| manual review 数量硬编码 `3265 + 1248` | **已修复（本轮）** | 测试独立读取 review/PII TSV 数据行得到期望值，并要求结果非空。 |
-| 发布 contract 用正则匹配脚本源码 | **已修复（本轮）** | smoke 进程生命周期提取为可调用模块；契约实际运行 helper，验证参数、隐藏窗口、input-idle 不能冒充成功、默认预算、非零退出、超时 PID 清理和同名无关进程不被终止。 |
-| CI 可能由 runner 预装更高 .NET SDK 接管 | **已修复（本轮）** | 根 `global.json` 精确锁定 SDK，CI 从该文件安装并核对实际版本；tag 派生 `ProductVersion=<semver>+<commit>`。 |
-| tag 规则会接受前导零等非法 SemVer | **已修复（本轮）** | 发布模块集中解析严格 SemVer：拒绝 core 数字前导零、纯数字 prerelease 前导零、build metadata、缺失前导 `v` 和不完整标签；质量门禁直接执行其行为合同。 |
-| `Compress-Archive` 让同一提交重跑产生不同 ZIP | **已修复（本轮）** | 发布模块使用固定 DOS wall-clock、ordinal UTF-8 条目顺序、store 模式、CRC-32 与零 extra/comment/external metadata 写出确定性 ZIP；跨时区合同验证时间戳、条目、内容与两次 SHA-256 完全一致，并拒绝危险/重复叶名称、覆盖既有目标和失败残片。 |
-| 只重跑 Release job 时找不到上一轮 package artifact | **已修复（本轮）** | package job 把实际 artifact 名称作为 job output；下游 release job 消费该输出，不再用自己重跑后变化的 `run_attempt` 重算名称。 |
-| 已发布 tag 可被移动并用 `--clobber` 覆盖资产 | **已修复（本轮）** | 流水线要求 tag push 在本次事件中新建且非强推；已有 Release 必须具有精确八项资产，且每项下载后 SHA-256 与候选逐字节相同才允许原运行失败后的无操作式重跑。任何差异都会失败，不再删除、覆盖或编辑已有资产。被删除 tag 的历史复用仍应由 GitHub tag ruleset 阻止，不能从单次 push payload 反推全部历史。 |
-| smoke 默认超时测试允许 30–120 秒漂移 | **已修复（本轮）** | 可调用策略与行为合同都要求默认值精确等于 30 秒；显式值仍受 1–120 秒参数范围约束。 |
-| 根目录 `LICENSE` 中的 Markdown 被 GitHub 当纯文本展示 | **已修复（本轮）** | 仓库源文件改为 GitHub 可渲染的 `LICENSE.md`，官方原文 SHA-256 保持不变；CI 明确拒绝重新出现无扩展名源文件，并在 ZIP/Release 外层映射回惯用资产名 `LICENSE`。 |
-| GitHub Release 自动说明可能混入英文 | **已修复（本轮）** | 流水线移除 `--generate-notes`，使用带稳定 `zh-CN` 标记的中文标题和六段中文发布说明，并在发布后回读标题、段落、tag、SHA、版本与 ProductVersion；仅法律要求的 `Required Notice` 保留英文原文。 |
-| 离线 EXE 是否存在热更新、签名状态是否只是文档声明 | **已修复（本轮）** | 项目明确不含热更新、自动更新或联网下载代码机制。发布门禁对最终 delivery EXE 实际执行 `Get-AuthenticodeSignature`；当前策略精确要求 `NotSigned` 且 Signer/TimeStamper 证书均为空，并把结果写入证据与中文 Release。未来签名时必须显式切换到 `Valid` 和固定证书身份策略。 |
+| 原始 claim | 结论 | 当前 source 证据 | covering test 证据 |
+| --- | --- | --- | --- |
+| `WindowShellTests` 大量反射私有成员/构造签名，重构脆弱（原 P2） | **Open debt** | `tests/CompanionDesktopPet.Tests/WindowShellTests.cs:475-3847` 当前仍有 `GetPrivateField` 31 处、`SetPrivateField` 3 处、`InvokePrivate`/`InvokePrivateAsync` 30 处（含 helper 定义）；部分新 cadence/lifecycle seam 已改为 internal snapshot/processor，但未清零。 | 完整 .NET suite 只能证明现状可执行，不能消除反射耦合；不标 Fixed。 |
+| 900-click 性能预算与功能断言混在单元测试（原 P2） | **Open debt** | `OfflineCompanionAgentTests.cs:329-411` 的 `Respond_RepeatedClicksRemainResponsiveAndDoNotSuppressAutomatic` 已有 `Trait(Category=Performance)`，但仍在一个方法中同时断言无静默、配额、p95 `<50ms` 与 256 MiB。 | Trait 可筛选，完整 suite 也会运行；结构性混合仍存在，故不标 Fixed。 |
+| `Task.Delay(800)`/`Elapsed <100ms` 墙钟依赖会在慢 CI 抖动（原 P2） | **Open debt（部分缓解）** | 原 `Task.Delay(800)` 动画等待已删除，延迟/倒计时主要使用注入时钟；但 `DialogueWarmupTests.cs:34-38` 与 `WindowShellTests.cs:754-758` 仍各有一个 `<100ms` 同步 fallback 阈值。 | monotonic/manual clock 测试覆盖大部分生命周期；两处真实耗时阈值仍在完整 suite 中，故不标 Fixed。 |
+| `PetActionCoordinatorTests` 只有两个 happy path | **Fixed** | 状态机显式拒绝未知 ambient 与非法 Complete，并保留 pause/drag/landing 目标。 | 当前测试覆盖 ambient 互斥、拖动/落地 pause、瞬态 resume、重复/重启拖动、非法 Complete 与未知 enum，远超原两个用例。 |
+| simulation test 硬编码 `3265 + 1248` manual review 数量 | **Fixed** | `simulation.summarize_editorial_outcomes` 从实际 review/PII collections 求和。 | `test_simulation` 读取 tracked review 与 PII TSV 的实际数据行、要求非空并与 `summary.manual_review_items` 比较。 |
+| `Verify-Publish.Contract.ps1` 用正则匹配脚本文本 | **Fixed** | smoke 生命周期提取到可调用的 `Verify-Publish.Core.psm1::Invoke-PublishSmokeTest`；入口脚本调用模块。 | `tests/Verify-Publish.Contract.ps1` 实际运行 helper，覆盖参数、隐藏窗口、input-idle 假成功、默认预算、非零退出、超时 PID 清理与同名无关进程。 |
+| README 的“已验证”与“待校验”自相矛盾（原 P2；与上方 P0 哈希项独立） | **Unverified** | `README.md:50-65` 将泛称改为明确的 `v1.0.0` 历史实证，并声明 `v1.1.0` 必须重新取证；哈希表也按版本分节。 | 没有 Markdown 状态合同测试，不能仅靠文案审阅标 Fixed。 |
+| README 宣称 `--smoke-test`，代码可能不支持 | **Fixed** | `App.OnStartup` 精确识别 `--smoke-test`；发布 helper 精确以该唯一参数启动。 | `tests/Verify-Publish.Contract.ps1` 检查收到的参数；真实 WPF smoke/CI 发布路径执行同一入口。 |
+| 隐私文案声称不读标题/输入/用户文件，但 `Environment.ProcessPath` 存在张力 | **Fixed（边界已澄清）** | README 明确“用户文件”与桌宠自身 EXE 路径/本地状态边界。新增全屏探测的 native contract 只含 HWND 有效性/可见性/样式、DWM cloaked/frame geometry 和 monitor bounds；没有 title/process/input/clipboard/file/pixel/network API。 | `WindowsForegroundFullscreenDetectorTests` 覆盖有效、不可见、child、cloaked、几何、多显示器及所有 query failure 保持 `null`；`DialogueSchedulerTests` 覆盖全屏只改变 cadence。 |
 
-## 许可边界
+## 补充复审项（不在原始附件中，保留既有覆盖）
 
-仓库继续使用分层许可：可分离 Technical Code 按 PolyForm Noncommercial 1.0.0 提供，属于 **source-available noncommercial**，不是 OSI 开源。形象、图标、姓名/昵称、身份、人格、口吻、背景、关系设定、全部语料、语义树/森林、剧情和编辑性编排明确排除并保留全部权利；官方 Release 只额外允许非商业私下运行，不能抽取、转载、改编、训练或制作衍生角色。
+- `SettingsService.LoadAsync` 诊断：**Fixed**。源码对 I/O/JSON/contract 异常保留诊断同时回退默认值；`SettingsServiceTests.Load_MalformedJson_ReportsTheFallbackReasonOnce`、`Load_ContractInvalidValues_ReportTheFallbackReason`、`Load_DiagnosticFailureDoesNotDisableTheDefaultFallback` 覆盖。
+- tray best-effort cleanup：**Fixed**。源码逐资源释放、报告非致命异常且不吞 fatal；`TrayIconServiceTests.Dispose_SuppressesQueuedCommandsAndIsIdempotentBestEffort`、`PublishFailure_CleansEveryCreatedNativeResourceBeforeRethrowing` 覆盖。
+- 已打开气泡随窗口漂移：**Fixed**。MainWindow 使用同一 SystemAware 虚拟桌面绝对坐标定位 popup；WindowShell 的气泡定位/移动回归覆盖 X/Y 同步、30-DIP 间距与工作区夹取。
+- `DialogueForest.TreeWeights` 手写聚合：**Open debt**。当前值与生成 contract 相等，但仍是双写；没有专门防漂移测试，不标 Fixed。
+- Release 工程（SDK pin、严格 SemVer、确定性 ZIP、artifact handoff、不可变已有 Release、30 秒 smoke、`LICENSE.md`、中文 Release、Authenticode 状态）：均有对应生产 workflow/module 与 `test_contract.py`、`Release-Packaging.Contract.ps1`、`Verify-Publish.Contract.ps1` 行为合同；其完整历史证据保留在发布清单。Task 7 不重写或冒充目标 tag 的二进制证据。
 
-需要注意：PolyForm Noncommercial 对 Technical Code 允许的范围比字面“只准技术学习”更宽，包含其他非商业用途以及按条款修改/分发。不能用 scope 文件暗中改写标准许可证。若未来要求代码本身也严格限于技术学习，应由权利人采用经过法律审定的自定义 source-available 许可，而不是把当前许可证误称为 OSI 开源。
+## 发布结论边界
 
-## 最终验证
-
-最终发布提交必须重新执行：生成契约检查、完整 Python 测试、语料 validator、完整 .NET Release 测试、发布 verifier contract、干净 self-contained single-file publish、隔离 `--smoke-test`、资产 SHA-256 覆盖和 tag/Release 回读。实际提交、测试数量、EXE 字节数与哈希登记在对应版本的发布清单和 GitHub Release 中。
+本审计只证明当前 source/test 对原始 claim 的状态，不把搜索结果、历史测试数字或旧 Release 哈希冒充新鲜证据。Task 7 的 simulation、validator、Python unittest、.NET restore、`IsTestProject`、完整 Release suite 和最终 `main` CI 必须全部以实际输出登记；目标 `v1.1.0` 的 EXE、ProductVersion、签名、隔离 smoke、资产哈希与 Release URL 仍只能由新 annotated tag 流水线产生。
