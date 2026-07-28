@@ -8,6 +8,7 @@ identity marker into an authored source batch.
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections import Counter
 from collections.abc import Iterable
 from typing import Protocol
@@ -38,12 +39,16 @@ _IDENTITY_DEPENDENCY_OR_COERCION_MARKERS = (
     "必须陪着你",
     "永远陪",
 )
-_IDENTITY_SEXUAL_CONTENT_MARKERS = (
-    "上床",
-    "做爱",
-    "性爱",
-    "性行为",
-    "色情",
+_IDENTITY_SEXUAL_CONTENT_PATTERNS = (
+    re.compile(r"(?:上床|做爱|性爱|性行为|色情)"),
+    re.compile(
+        r"(?:和你|跟你).{0,10}(?:同床|同睡|共寝|共枕|睡在一起).{0,10}"
+        r"(?:一夜|过夜|整晚|到天亮|睡)"
+    ),
+    re.compile(
+        r"(?:和你|跟你).{0,10}(?:一张床|床上).{0,10}"
+        r"(?:睡|过夜|整晚|到天亮)"
+    ),
 )
 _IDENTITY_BIOGRAPHY_PATTERNS = (
     re.compile(r"(?:今年|我今年|她今年)?\s*\d{1,2}\s*岁"),
@@ -70,10 +75,29 @@ class _AuthoredIdentityEntry(Protocol):
     text: str
 
 
+def normalize_identity_analysis_text(text: str) -> str:
+    """Remove format/zero-width controls for source-safety analysis only.
+
+    The authored TSV payload remains byte-for-byte untouched.  This deliberately
+    avoids general NFKC/case-folding or wording rewrites: it closes invisible
+    character bypasses without changing normal non-identity corpus semantics.
+    """
+
+    return "".join(
+        character for character in text if unicodedata.category(character) != "Cf"
+    )
+
+
+def _marker_hits_from_analysis(analysis_text: str) -> tuple[str, ...]:
+    return tuple(
+        marker for marker in PERSONA_CONTRACT.pii_markers if marker in analysis_text
+    )
+
+
 def marker_hits(text: str) -> tuple[str, ...]:
     """Return ordered, deduplicated contract identity markers in *text*."""
 
-    return tuple(marker for marker in PERSONA_CONTRACT.pii_markers if marker in text)
+    return _marker_hits_from_analysis(normalize_identity_analysis_text(text))
 
 
 def _diagnostic(
@@ -109,11 +133,11 @@ def _identity_safety_violation(text: str) -> tuple[str, str] | None:
     if dependency is not None:
         return ("dependency, exclusivity, or coercion", dependency)
     sexual = next(
-        (marker for marker in _IDENTITY_SEXUAL_CONTENT_MARKERS if marker in text),
+        (match for pattern in _IDENTITY_SEXUAL_CONTENT_PATTERNS if (match := pattern.search(text))),
         None,
     )
     if sexual is not None:
-        return ("sexual content", sexual)
+        return ("sexual content", sexual.group(0))
     biography = next(
         (
             match
@@ -174,10 +198,11 @@ def validate_authored_identity_entries(entries: Iterable[_AuthoredIdentityEntry]
 
     direct_marker_counts: Counter[tuple[str, str]] = Counter()
     for entry in all_entries:
-        hits = marker_hits(entry.text)
-        nickname = _unregistered_nickname(entry.text)
-        enabled_pii = pii_findings(entry.text, ENABLED_CONTENT_POLICY)
-        for finding in classify_pii(entry.text):
+        analysis_text = normalize_identity_analysis_text(entry.text)
+        hits = _marker_hits_from_analysis(analysis_text)
+        nickname = _unregistered_nickname(analysis_text)
+        enabled_pii = pii_findings(analysis_text, ENABLED_CONTENT_POLICY)
+        for finding in classify_pii(analysis_text):
             if finding.kind == "known_identity" and finding.evidence in known_markers:
                 continue
             if finding in enabled_pii:
@@ -198,11 +223,11 @@ def validate_authored_identity_entries(entries: Iterable[_AuthoredIdentityEntry]
                         hits[0],
                     )
                 )
-            if "?" in entry.text or "？" in entry.text:
+            if "?" in analysis_text or "？" in analysis_text:
                 errors.append(
                     _diagnostic(entry, "identity text must not contain a question mark", hits[0])
                 )
-            observation = _unsupported_observation_marker(entry.text)
+            observation = _unsupported_observation_marker(analysis_text)
             if observation is not None:
                 errors.append(
                     _diagnostic(
@@ -211,7 +236,7 @@ def validate_authored_identity_entries(entries: Iterable[_AuthoredIdentityEntry]
                         hits[0],
                     )
                 )
-            identity_safety = _identity_safety_violation(entry.text)
+            identity_safety = _identity_safety_violation(analysis_text)
             if identity_safety is not None:
                 invariant, evidence = identity_safety
                 errors.append(
@@ -260,10 +285,10 @@ def validate_authored_identity_entries(entries: Iterable[_AuthoredIdentityEntry]
         assigned_marker = direct_marker_batches.get(entry.batch_id)
         if assigned_marker is None:
             continue
-        direct_marker_counts[(entry.batch_id, assigned_marker)] += entry.text.count(
+        direct_marker_counts[(entry.batch_id, assigned_marker)] += analysis_text.count(
             assigned_marker
         )
-        if hits != (assigned_marker,) or entry.text.count(assigned_marker) != 1:
+        if hits != (assigned_marker,) or analysis_text.count(assigned_marker) != 1:
             errors.append(
                 _diagnostic(
                     entry,
@@ -284,4 +309,8 @@ def validate_authored_identity_entries(entries: Iterable[_AuthoredIdentityEntry]
         raise ValueError("authored identity validation failed:\n- " + "\n- ".join(errors))
 
 
-__all__ = ("marker_hits", "validate_authored_identity_entries")
+__all__ = (
+    "marker_hits",
+    "normalize_identity_analysis_text",
+    "validate_authored_identity_entries",
+)

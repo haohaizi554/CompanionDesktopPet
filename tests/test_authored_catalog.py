@@ -155,6 +155,11 @@ class AuthoredCatalogTests(unittest.TestCase):
 
         self.assertIs(RELATIONSHIP_PROFILES, PERSONA_CONTRACT.relationship_profiles)
 
+    def test_marker_hits_removes_format_characters_for_analysis_only(self) -> None:
+        from src.persona_corpus.authored_identity import marker_hits
+
+        self.assertEqual(("小玥",), marker_hits(f"小{chr(0x200B)}玥"))
+
     def test_parse_authored_batches_rejects_wrong_direct_marker_count(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             authored_dir, _ = write_valid_authored_fixture(Path(temporary_directory))
@@ -230,6 +235,9 @@ class AuthoredCatalogTests(unittest.TestCase):
             ("小玥职高肆业了。", "false real-person biography"),
             ("小玥只有你了。", "dependency, exclusivity, or coercion"),
             ("小玥必须陪着你。", "dependency, exclusivity, or coercion"),
+            (f"小玥只{chr(0x200B)}能陪着你。", "dependency, exclusivity, or coercion"),
+            ("小玥和你同床睡了一夜。", "sexual content"),
+            ("小玥和你共寝到天亮。", "sexual content"),
         )
         for text, invariant in cases:
             with self.subTest(text=text), tempfile.TemporaryDirectory() as temporary_directory:
@@ -241,6 +249,21 @@ class AuthoredCatalogTests(unittest.TestCase):
                     rf"b084\.tsv.*authored\.b084.*小玥.*{invariant}",
                 ):
                     parse_authored_batches(authored_dir)
+
+    def test_parse_authored_batches_rejects_marker_split_by_zero_width_format_character(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            authored_dir, _ = write_valid_authored_fixture(Path(temporary_directory))
+            set_field(
+                authored_dir / "b084.tsv",
+                "text",
+                f"小{chr(0x200B)}玥必须陪着你。",
+            )
+
+            with self.assertRaisesRegex(
+                ValueError,
+                r"b084\.tsv.*authored\.b084.*小玥.*dependency, exclusivity, or coercion",
+            ):
+                parse_authored_batches(authored_dir)
 
     def test_parse_authored_batches_rejects_unregistered_nickname_in_ordinary_category(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
