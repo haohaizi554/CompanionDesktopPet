@@ -121,6 +121,29 @@ public sealed class PetActionCoordinatorTests
     }
 
     [Fact]
+    public void BeginLanding_WithoutPriorBeginDrag_IsSilentlyIgnoredAndKeepsIdle()
+    {
+        var coordinator = new PetActionCoordinator();
+
+        coordinator.BeginLanding();
+
+        Assert.Equal(PetActionState.Idle, coordinator.State);
+    }
+
+    [Fact]
+    public void Complete_TwiceInSuccession_SecondCallIsNoOpAfterFirstReturnsToIdle()
+    {
+        var coordinator = new PetActionCoordinator();
+        coordinator.BeginDrag();
+        coordinator.BeginLanding();
+
+        coordinator.Complete(PetActionState.Landing);
+        coordinator.Complete(PetActionState.Landing);
+
+        Assert.Equal(PetActionState.Idle, coordinator.State);
+    }
+
+    [Fact]
     public void PauseDuringDrag_PreservesDragAndReturnsToPausedAfterLanding()
     {
         var coordinator = new PetActionCoordinator();
