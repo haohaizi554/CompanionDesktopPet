@@ -126,6 +126,20 @@ class ConfigSchemaContractTests(unittest.TestCase):
                 with self.assertRaises(ValidationError):
                     validator.validate(invalid)
 
+    def test_contract_schema_rejects_incomplete_tree_weights(self) -> None:
+        config = json.loads(
+            (CONFIG_DIR / "persona-contract.json").read_text(encoding="utf-8")
+        )
+        schema = json.loads(
+            (CONFIG_DIR / "schemas/persona-contract.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        del config["scheduler"]["tree_weights"]["life"]
+
+        with self.assertRaises(ValidationError):
+            Draft202012Validator(schema).validate(config)
+
     def test_contract_schema_rejects_invalid_authored_identity_policy(self) -> None:
         config = json.loads(
             (CONFIG_DIR / "persona-contract.json").read_text(encoding="utf-8")

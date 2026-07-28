@@ -52,6 +52,19 @@ class CSharpContractGeneratorTests(unittest.TestCase):
             with self.subTest(profile=profile):
                 self.assertIn(f'"{profile}"', rendered)
 
+    def test_render_emits_tree_weights_from_the_shared_contract(self) -> None:
+        from tools import generate_persona_contract_cs as generator
+
+        rendered = generator.render_contract()
+
+        self.assertIn("IReadOnlyDictionary<DialogueTreeKind, double> TreeWeights", rendered)
+        self.assertIn("[DialogueTreeKind.Technical] = 0.18", rendered)
+        self.assertAlmostEqual(
+            1.0,
+            sum(generator.PERSONA_CONTRACT.scheduler["tree_weights"].values()),
+            delta=0.001,
+        )
+
     def test_render_preserves_round_trip_double_literals_across_contract_fields(self) -> None:
         from tools import generate_persona_contract_cs as generator
 
@@ -264,6 +277,19 @@ class PersonaContractFileTests(unittest.TestCase):
         for mode, target in expected.items():
             self.assertAlmostEqual(target, aggregate[mode])
             self.assertAlmostEqual(target, scheduler["output_mode_targets"][mode])
+
+    def test_tree_weights_are_complete_normalized_and_immutable(self) -> None:
+        from src.persona_corpus.contract import PERSONA_CONTRACT
+
+        tree_weights = PERSONA_CONTRACT.scheduler["tree_weights"]
+
+        self.assertEqual(
+            {"technical", "growth", "companion", "life"},
+            set(tree_weights),
+        )
+        self.assertAlmostEqual(1.0, sum(tree_weights.values()), delta=0.001)
+        with self.assertRaises(TypeError):
+            tree_weights["technical"] = 1.0
 
     def test_inventory_size_policy_is_shared_and_explicit(self) -> None:
         contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))

@@ -94,6 +94,15 @@ internal static class PersonaContractGenerated
             [DialogueCategoryGroup.SystemAmbient] = 0.08
         };
 
+    public static IReadOnlyDictionary<DialogueTreeKind, double> TreeWeights { get; } =
+        new Dictionary<DialogueTreeKind, double>
+        {
+            [DialogueTreeKind.Technical] = 0.18,
+            [DialogueTreeKind.Growth] = 0.17,
+            [DialogueTreeKind.Companion] = 0.38,
+            [DialogueTreeKind.Life] = 0.27
+        };
+
     public static IReadOnlyDictionary<DialogueOutputMode, double> OutputModeTargets { get; } =
         new Dictionary<DialogueOutputMode, double>
         {

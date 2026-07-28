@@ -184,6 +184,12 @@
     }
   },
   "scheduler": {
+    "tree_weights": {
+      "technical": 0.18,
+      "growth": 0.17,
+      "companion": 0.38,
+      "life": 0.27
+    },
     "category_group_weights": {
       "technical": 0.18,
       "growth": 0.10,

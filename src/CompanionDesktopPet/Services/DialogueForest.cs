@@ -44,13 +44,7 @@ public static class DialogueForest
         PersonaContractGenerated.CategoryGroupOutputModes;
 
     public static IReadOnlyDictionary<DialogueTreeKind, double> TreeWeights { get; } =
-        new Dictionary<DialogueTreeKind, double>
-        {
-            [DialogueTreeKind.Technical] = 0.18,
-            [DialogueTreeKind.Growth] = 0.17,
-            [DialogueTreeKind.Companion] = 0.38,
-            [DialogueTreeKind.Life] = 0.27
-        };
+        PersonaContractGenerated.TreeWeights;
 
     public static IReadOnlySet<DialogueCategoryGroup> BlockAdjacentCategoryGroups { get; } =
         PersonaContractGenerated.BlockAdjacentCategoryGroups;

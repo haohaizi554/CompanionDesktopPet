@@ -42,12 +42,14 @@ public sealed class DialogueForestTests
     [Fact]
     public void Forest_AggregatesGroupTargetsWithoutTheLegacyTechnicalBias()
     {
+        Assert.Same(PersonaContractGenerated.TreeWeights, DialogueForest.TreeWeights);
         Assert.Equal(0.18, DialogueForest.TreeWeights[DialogueTreeKind.Technical], 8);
         Assert.Equal(0.17, DialogueForest.TreeWeights[DialogueTreeKind.Growth], 8);
         Assert.Equal(0.38, DialogueForest.TreeWeights[DialogueTreeKind.Companion], 8);
         Assert.Equal(0.27, DialogueForest.TreeWeights[DialogueTreeKind.Life], 8);
         Assert.True(DialogueForest.TreeWeights[DialogueTreeKind.Technical] <
                     DialogueForest.TreeWeights[DialogueTreeKind.Life]);
+        Assert.InRange(DialogueForest.TreeWeights.Values.Sum(), 0.999, 1.001);
     }
 
     [Fact]

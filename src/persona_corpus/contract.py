@@ -354,6 +354,7 @@ def load_persona_contract(path: Path = DEFAULT_CONTRACT_PATH) -> PersonaContract
 
     scheduler = _mapping(raw.get("scheduler"), "scheduler")
     if set(scheduler) != {
+        "tree_weights",
         "category_group_weights",
         "category_group_output_modes",
         "output_mode_targets",
@@ -361,6 +362,19 @@ def load_persona_contract(path: Path = DEFAULT_CONTRACT_PATH) -> PersonaContract
         "acceptance",
     }:
         raise PersonaContractError("scheduler uses an unexpected key set")
+    tree_weights = _mapping(scheduler.get("tree_weights"), "scheduler.tree_weights")
+    if set(tree_weights) != {"technical", "growth", "companion", "life"} or any(
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+        or float(value) < 0
+        for value in tree_weights.values()
+    ):
+        raise PersonaContractError(
+            "scheduler tree_weights must cover technical, growth, companion, and life"
+        )
+    if abs(sum(float(value) for value in tree_weights.values()) - 1.0) > 1e-9:
+        raise PersonaContractError("scheduler tree_weights must sum to 1.0")
     group_weights = _mapping(
         scheduler.get("category_group_weights"), "scheduler.category_group_weights"
     )

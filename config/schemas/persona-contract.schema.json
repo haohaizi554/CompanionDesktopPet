@@ -111,6 +111,17 @@
       },
       "additionalProperties": false
     },
+    "treeWeights": {
+      "type": "object",
+      "required": ["technical", "growth", "companion", "life"],
+      "properties": {
+        "technical": { "$ref": "#/$defs/weight" },
+        "growth": { "$ref": "#/$defs/weight" },
+        "companion": { "$ref": "#/$defs/weight" },
+        "life": { "$ref": "#/$defs/weight" }
+      },
+      "additionalProperties": false
+    },
     "outputModeWeights": {
       "type": "object",
       "required": ["self_talk", "ambient", "user_direct", "system_observe"],
@@ -267,10 +278,11 @@
     "scheduler": {
       "type": "object",
       "required": [
-        "category_group_weights", "category_group_output_modes", "output_mode_targets",
+        "tree_weights", "category_group_weights", "category_group_output_modes", "output_mode_targets",
         "runtime_limits", "acceptance"
       ],
       "properties": {
+        "tree_weights": { "$ref": "#/$defs/treeWeights" },
         "category_group_weights": { "$ref": "#/$defs/categoryGroupWeights" },
         "category_group_output_modes": {
           "type": "object",

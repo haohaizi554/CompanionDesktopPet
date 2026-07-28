@@ -49,6 +49,7 @@ def render_contract() -> str:
     ]
     release_inventory = PERSONA_CONTRACT.release_inventory
     scheduler = PERSONA_CONTRACT.scheduler
+    tree_weights = scheduler["tree_weights"]
     weights = scheduler["category_group_weights"]
     group_modes = scheduler["category_group_output_modes"]
     mode_targets = scheduler["output_mode_targets"]
@@ -56,7 +57,7 @@ def render_contract() -> str:
     acceptance = scheduler["acceptance"]
     if not all(
         isinstance(value, Mapping)
-        for value in (weights, group_modes, mode_targets, limits, acceptance)
+        for value in (tree_weights, weights, group_modes, mode_targets, limits, acceptance)
     ):
         raise ValueError("shared scheduler contract is malformed")
     controlled = PERSONA_CONTRACT.raw["controlled_values"]
@@ -67,6 +68,12 @@ def render_contract() -> str:
         "            "
         f"[DialogueCategory.{category}] = DialogueCategoryGroup.{_pascal(group)}"
         for category, group in PERSONA_CONTRACT.categories.items()
+    )
+    dialogue_tree_weights = ",\n".join(
+        "            "
+        f"[DialogueTreeKind.{_pascal(tree)}] = "
+        f"{_cs_double(weight, f'scheduler.tree_weights.{tree}')}"
+        for tree, weight in tree_weights.items()
     )
     group_weights = ",\n".join(
         "            "
@@ -198,6 +205,12 @@ internal static class PersonaContractGenerated
         new Dictionary<DialogueCategoryGroup, double>
         {{
 {group_weights}
+        }};
+
+    public static IReadOnlyDictionary<DialogueTreeKind, double> TreeWeights {{ get; }} =
+        new Dictionary<DialogueTreeKind, double>
+        {{
+{dialogue_tree_weights}
         }};
 
     public static IReadOnlyDictionary<DialogueOutputMode, double> OutputModeTargets {{ get; }} =
