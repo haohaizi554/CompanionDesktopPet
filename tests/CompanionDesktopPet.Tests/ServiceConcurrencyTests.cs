@@ -104,6 +104,58 @@ public sealed class ServiceConcurrencyTests
     }
 
     [Fact]
+    public async Task CharacterState_ConcurrentUpdatesAndClonesKeepSnapshotsValidAndDetached()
+    {
+        const int iterationCount = 256;
+        var state = CharacterState.Create(LocalNow);
+        var scene = SceneCatalog.PersonaScenes.First();
+        state.ActiveStories = [new StoryProgress("story", 1, LocalNow.AddHours(1))];
+        using var start = new Barrier(3);
+
+        var clockUpdates = Task.Factory.StartNew(
+            () =>
+            {
+                start.SignalAndWait(ConcurrencyTimeout);
+                for (var index = 1; index <= iterationCount; index++)
+                {
+                    state.AdvanceTo(LocalNow.AddMinutes(index));
+                }
+            },
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default);
+        var sceneUpdates = Task.Factory.StartNew(
+            () =>
+            {
+                start.SignalAndWait(ConcurrencyTimeout);
+                for (var index = 0; index < iterationCount; index++)
+                {
+                    state.ApplyScene(scene);
+                }
+            },
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default);
+        var snapshots = Task.Factory.StartNew(
+            () =>
+            {
+                start.SignalAndWait(ConcurrencyTimeout);
+                for (var index = 0; index < iterationCount; index++)
+                {
+                    var snapshot = state.Clone();
+                    AssertStateSnapshotIsValid(snapshot);
+                    Assert.NotSame(state.ActiveStories, snapshot.ActiveStories);
+                }
+            },
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default);
+
+        await Task.WhenAll(clockUpdates, sceneUpdates, snapshots).WaitAsync(ConcurrencyTimeout);
+        AssertStateSnapshotIsValid(state.Clone());
+    }
+
+    [Fact]
     public async Task CompanionEventPump_ConcurrentDirectPollsEmitEachLogicalTickEventOnceAcrossRepeatedRaces()
     {
         const int callerCount = 32;
@@ -202,6 +254,16 @@ public sealed class ServiceConcurrencyTests
             .ToArray();
 
         return await Task.WhenAll(callers).WaitAsync(ConcurrencyTimeout);
+    }
+
+    private static void AssertStateSnapshotIsValid(CharacterState snapshot)
+    {
+        Assert.InRange(snapshot.Energy, 0, 1);
+        Assert.InRange(snapshot.Sociability, 0, 1);
+        Assert.InRange(snapshot.Boredom, 0, 1);
+        Assert.True(snapshot.LastUpdatedAt >= snapshot.InstalledAt);
+        Assert.True(snapshot.AttachmentDays >= 1);
+        Assert.All(snapshot.ActiveStories, story => Assert.False(string.IsNullOrWhiteSpace(story.ArcId)));
     }
 
     private static async Task AssertCompletesAfterRelease(Task task)
