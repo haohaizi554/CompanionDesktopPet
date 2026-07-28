@@ -18,22 +18,22 @@ public sealed partial class SceneScheduler
 
     private static readonly SafeFeedbackCoverageDate[] CoverageDates =
     [
-        new(new DateTime(2200, 3, 3), "spring", IsWeekend: false, IsHoliday: false),
-        new(new DateTime(2201, 3, 7), "spring", IsWeekend: true, IsHoliday: false),
+        new(new DateTime(2025, 3, 3), "spring", IsWeekend: false, IsHoliday: false),
+        new(new DateTime(2025, 3, 2), "spring", IsWeekend: true, IsHoliday: false),
         new(new DateTime(2026, 3, 3), "spring", IsWeekend: false, IsHoliday: true),
-        new(new DateTime(2200, 3, 8), "spring", IsWeekend: true, IsHoliday: true),
-        new(new DateTime(2200, 6, 2), "summer", IsWeekend: false, IsHoliday: false),
-        new(new DateTime(2200, 6, 7), "summer", IsWeekend: true, IsHoliday: false),
-        new(new DateTime(2026, 6, 19), "summer", IsWeekend: false, IsHoliday: true),
+        new(new DateTime(2025, 3, 8), "spring", IsWeekend: true, IsHoliday: true),
+        new(new DateTime(2025, 6, 2), "summer", IsWeekend: false, IsHoliday: false),
+        new(new DateTime(2025, 6, 7), "summer", IsWeekend: true, IsHoliday: false),
+        new(new DateTime(2025, 8, 29), "summer", IsWeekend: false, IsHoliday: true),
         new(new DateTime(2027, 8, 8), "summer", IsWeekend: true, IsHoliday: true),
-        new(new DateTime(2200, 9, 2), "autumn", IsWeekend: false, IsHoliday: false),
-        new(new DateTime(2200, 9, 6), "autumn", IsWeekend: true, IsHoliday: false),
-        new(new DateTime(2200, 9, 10), "autumn", IsWeekend: false, IsHoliday: true),
-        new(new DateTime(2201, 10, 24), "autumn", IsWeekend: true, IsHoliday: true),
-        new(new DateTime(2200, 12, 22), "winter", IsWeekend: false, IsHoliday: false),
-        new(new DateTime(2200, 12, 20), "winter", IsWeekend: true, IsHoliday: false),
-        new(new DateTime(2026, 2, 17), "winter", IsWeekend: false, IsHoliday: true),
-        new(new DateTime(2201, 2, 14), "winter", IsWeekend: true, IsHoliday: true)
+        new(new DateTime(2025, 9, 2), "autumn", IsWeekend: false, IsHoliday: false),
+        new(new DateTime(2025, 9, 6), "autumn", IsWeekend: true, IsHoliday: false),
+        new(new DateTime(2025, 9, 10), "autumn", IsWeekend: false, IsHoliday: true),
+        new(new DateTime(2025, 9, 13), "autumn", IsWeekend: true, IsHoliday: true),
+        new(new DateTime(2025, 1, 2), "winter", IsWeekend: false, IsHoliday: false),
+        new(new DateTime(2025, 1, 4), "winter", IsWeekend: true, IsHoliday: false),
+        new(new DateTime(2025, 1, 29), "winter", IsWeekend: false, IsHoliday: true),
+        new(new DateTime(2026, 2, 14), "winter", IsWeekend: true, IsHoliday: true)
     ];
 
     internal static IReadOnlyList<DateTime> SafeFeedbackCoverageDates { get; } =

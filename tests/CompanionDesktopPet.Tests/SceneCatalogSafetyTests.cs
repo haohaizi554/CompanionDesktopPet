@@ -129,6 +129,23 @@ public sealed class SceneCatalogSafetyTests
     }
 
     [Fact]
+    public void SafeFeedbackCoverage_DoesNotCrashOnFarFutureDates()
+    {
+        var failure = Record.Exception(() =>
+            TemporalDialogueService.GetFestivals(new DateTime(2200, 1, 1)));
+
+        Assert.Null(failure);
+    }
+
+    [Fact]
+    public void SafeFeedbackCoverageDates_StayInsideTheSupportedLunarValidationWindow()
+    {
+        Assert.All(
+            SceneScheduler.SafeFeedbackCoverageDates,
+            date => Assert.InRange(date.Year, 2025, 2030));
+    }
+
+    [Fact]
     public void SafeFeedbackCoverage_OneGenericSceneFailsTheValidatedContract()
     {
         var line = SafeFeedbackLine("single", "single.group", "single safe line");
@@ -180,7 +197,7 @@ public sealed class SceneCatalogSafetyTests
             SceneScheduler.ValidateSafeFeedbackCoverage(scenes));
 
         Assert.Contains(
-            "Click at 2200-03-03 05:00 with fullscreen=unknown",
+            "Click at 2025-03-03 05:00 with fullscreen=unknown",
             error.Message,
             StringComparison.Ordinal);
     }
@@ -342,7 +359,7 @@ public sealed class SceneCatalogSafetyTests
             SceneScheduler.ValidateSafeFeedbackCoverage(scenes));
 
         Assert.Contains("Automatic", error.Message, StringComparison.Ordinal);
-        Assert.Contains("2200-03", error.Message, StringComparison.Ordinal);
+        Assert.Contains("2025-03", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
