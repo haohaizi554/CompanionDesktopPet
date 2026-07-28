@@ -15,6 +15,7 @@ from ..lexical import (
 )
 from ..models import CorpusLine
 from ..selector import SchedulerConfig
+from ..trigger_matching import trigger_matches as _trigger_matches
 from .constraints import AdversarialSuiteResult
 from .constraints import analyze_constraints
 from .metrics import (
@@ -249,40 +250,6 @@ def _stable_common_endings(
     return result
 
 
-def _trigger_satisfied(attempt: SimulationAttempt, config: SchedulerConfig) -> bool:
-    row = attempt.row
-    if row is None:
-        return True
-    context = attempt.context
-    trigger = row.trigger
-    elapsed = float(context.minutes_since_last_output)
-    if trigger == "any":
-        return True
-    if trigger == "app_start":
-        return context.event == "app_start"
-    if trigger == "day_changed":
-        return context.event == "day_changed"
-    if trigger in {"morning", "noon", "afternoon", "evening", "late_night"}:
-        return context.daypart == trigger
-    if trigger == "weekday":
-        return not context.is_weekend
-    if trigger == "weekend":
-        return context.is_weekend
-    if trigger == "holiday":
-        return context.holiday is not None
-    if trigger == "anniversary":
-        return context.anniversary_days > 0
-    if trigger == "long_silence":
-        return elapsed + _EPSILON >= config.long_silence_minutes
-    if trigger == "ide_foreground":
-        return context.ide_foreground is True
-    if trigger == "long_active":
-        return context.active_minutes is not None and context.active_minutes >= 90
-    if trigger == "idle_return":
-        return context.idle_return is True
-    return False
-
-
 def _required_context_satisfied(attempt: SimulationAttempt) -> bool:
     row = attempt.row
     if row is None:
@@ -462,7 +429,12 @@ def analyze_simulation(
                     elif row.category_group == "emotional_reflection":
                         adjacent_emotional += 1
 
-            if not _trigger_satisfied(attempt, config) or not _required_context_satisfied(attempt):
+            if not _trigger_matches(
+                row.trigger,
+                attempt.context,
+                float(attempt.context.minutes_since_last_output),
+                config.long_silence_minutes,
+            ) or not _required_context_satisfied(attempt):
                 unmet_context_count += 1
             if row.requires_reply or "?" in row.text or "？" in row.text:
                 question_count += 1

@@ -361,7 +361,7 @@ public sealed class OfflineCompanionAgentTests
     [Fact]
     public void Respond_RepeatedClicksPreservePlaybackRulesAndAutomaticAvailability()
     {
-        var run = RunRepeatedClickPlayback(clickCount: 900, measurePerformance: false);
+        var run = RunRepeatedClickPlayback(clickCount: 900);
 
         AssertPlaybackRules(run);
     }
@@ -370,7 +370,7 @@ public sealed class OfflineCompanionAgentTests
     [Trait("Category", "Performance")]
     public void Respond_RepeatedClicksStayWithinSteadyStateBudget()
     {
-        var run = RunRepeatedClickPlayback(clickCount: 900, measurePerformance: true);
+        var run = MeasureRepeatedClickPerformance(clickCount: 900);
         var orderedLatencies = run.ClickLatencies.Order().ToArray();
         var meanLatency = run.ClickLatencies.Average();
         var p95Latency = orderedLatencies[(int)Math.Ceiling(orderedLatencies.Length * 0.95) - 1];
@@ -391,10 +391,8 @@ public sealed class OfflineCompanionAgentTests
         Assert.True(warmMaximumLatency < 500, $"warm maximum click latency: {warmMaximumLatency:F3}ms");
     }
 
-    private static RepeatedClickRun RunRepeatedClickPlayback(int clickCount, bool measurePerformance)
+    private static RepeatedClickRun RunRepeatedClickPlayback(int clickCount)
     {
-        // Startup owns corpus/catalog materialization; the performance gate measures
-        // the steady interactive path after that one-time prewarm.
         _ = SceneCatalog.All.Count;
         var agent = new OfflineCompanionAgent();
         var random = new Random(20260724);
@@ -405,25 +403,14 @@ public sealed class OfflineCompanionAgentTests
         // mirror from the actual replies so those observer allocations do not
         // pollute the measured Respond hot path.
         var observedHistory = new SceneHistory();
-        long allocatedBytes = 0;
-        var stopwatch = measurePerformance ? Stopwatch.StartNew() : null;
-        var clickLatencies = measurePerformance ? new double[clickCount] : Array.Empty<double>();
-
         for (var clickIndex = 0; clickIndex < clickCount; clickIndex++)
         {
             var now = start.AddSeconds(clickIndex * 10);
             var historyBefore = observedHistory.Entries;
-            var allocatedBeforeClick = measurePerformance ? GC.GetAllocatedBytesForCurrentThread() : 0;
-            var clickStarted = measurePerformance ? Stopwatch.GetTimestamp() : 0;
             var click = agent.Respond(
                 CompanionEvent.Click,
                 now,
                 random);
-            if (measurePerformance)
-            {
-                clickLatencies[clickIndex] = Stopwatch.GetElapsedTime(clickStarted).TotalMilliseconds;
-                allocatedBytes += GC.GetAllocatedBytesForCurrentThread() - allocatedBeforeClick;
-            }
             Assert.True(
                 click.ShouldDisplayText,
                 $"Click became silent at index {clickIndex}; history={historyBefore.Count}, scene={click.SceneId}.");
@@ -457,7 +444,6 @@ public sealed class OfflineCompanionAgentTests
             observedHistory.Record(scene, now, click.SourceLine);
         }
 
-        stopwatch?.Stop();
         var playback = observedHistory.Entries.ToArray();
         var automatic = agent.Respond(
             CompanionEvent.Automatic,
@@ -468,8 +454,40 @@ public sealed class OfflineCompanionAgentTests
             playback,
             usedDeepFallback,
             automatic.ShouldDisplayText,
-            automatic.SceneId,
-            stopwatch?.Elapsed ?? TimeSpan.Zero,
+            automatic.SceneId);
+    }
+
+    private static RepeatedClickPerformanceRun MeasureRepeatedClickPerformance(int clickCount)
+    {
+        // Startup owns corpus/catalog materialization. This helper deliberately
+        // times only Respond so functional assertions and history analysis cannot
+        // consume the steady-state budget.
+        _ = SceneCatalog.All.Count;
+        var agent = new OfflineCompanionAgent();
+        var random = new Random(20260724);
+        var start = new DateTime(2026, 7, 24, 9, 0, 0, DateTimeKind.Local);
+        var clickLatencies = new double[clickCount];
+        var respondElapsed = TimeSpan.Zero;
+        long allocatedBytes = 0;
+
+        for (var clickIndex = 0; clickIndex < clickCount; clickIndex++)
+        {
+            var allocatedBeforeClick = GC.GetAllocatedBytesForCurrentThread();
+            var clickStarted = Stopwatch.GetTimestamp();
+
+            _ = agent.Respond(
+                CompanionEvent.Click,
+                start.AddSeconds(clickIndex * 10),
+                random);
+
+            var clickElapsed = Stopwatch.GetElapsedTime(clickStarted);
+            clickLatencies[clickIndex] = clickElapsed.TotalMilliseconds;
+            respondElapsed += clickElapsed;
+            allocatedBytes += GC.GetAllocatedBytesForCurrentThread() - allocatedBeforeClick;
+        }
+
+        return new RepeatedClickPerformanceRun(
+            respondElapsed,
             allocatedBytes,
             clickLatencies);
     }
@@ -518,7 +536,9 @@ public sealed class OfflineCompanionAgentTests
         SceneHistoryEntry[] Playback,
         bool UsedDeepFallback,
         bool AutomaticShouldDisplay,
-        string AutomaticSceneId,
+        string AutomaticSceneId);
+
+    private sealed record RepeatedClickPerformanceRun(
         TimeSpan Elapsed,
         long AllocatedBytes,
         double[] ClickLatencies);

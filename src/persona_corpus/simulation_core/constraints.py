@@ -10,6 +10,7 @@ from ..history import HistoryRecord, SelectionHistory
 from ..lexical import contains_seasoning_marker
 from ..models import CorpusLine
 from ..selector import SchedulerConfig, select_line
+from ..trigger_matching import trigger_matches as _trigger_matches
 from .metrics import derive_dry_sharp_policy, derive_lexical_exposure_policy
 
 
@@ -66,42 +67,6 @@ class AdversarialCaseResult:
 class AdversarialSuiteResult:
     cases: tuple[AdversarialCaseResult, ...]
     hard_violations: tuple[str, ...]
-
-
-def _trigger_satisfied(
-    attempt: AttemptLike,
-    row: CorpusLine,
-    elapsed_minutes: float,
-    config: SchedulerConfig,
-) -> bool:
-    trigger = row.trigger
-    context = attempt.context
-    actual_daypart = daypart_for(attempt.attempted_at)
-    if trigger == "any":
-        return True
-    if trigger == "app_start":
-        return context.event == "app_start"
-    if trigger == "day_changed":
-        return context.event == "day_changed"
-    if trigger in {"morning", "noon", "afternoon", "evening", "late_night"}:
-        return actual_daypart == trigger
-    if trigger == "weekday":
-        return attempt.attempted_at.isoweekday() < 6
-    if trigger == "weekend":
-        return attempt.attempted_at.isoweekday() >= 6
-    if trigger == "holiday":
-        return context.holiday is not None
-    if trigger == "anniversary":
-        return context.anniversary_days > 0
-    if trigger == "long_silence":
-        return elapsed_minutes + _EPSILON >= config.long_silence_minutes
-    if trigger == "ide_foreground":
-        return context.ide_foreground is True
-    if trigger == "long_active":
-        return context.active_minutes is not None and context.active_minutes >= 90
-    if trigger == "idle_return":
-        return context.idle_return is True
-    return False
 
 
 def _required_context_satisfied(attempt: AttemptLike, row: CorpusLine) -> bool:
@@ -190,11 +155,11 @@ def analyze_constraints(
                 ):
                     add(f"adjacent_group_violation:{row.category_group}", attempt)
 
-            if not _trigger_satisfied(
-                attempt,
-                row,
+            if not _trigger_matches(
+                row.trigger,
+                attempt.context,
                 elapsed_for_trigger,
-                config,
+                config.long_silence_minutes,
             ) or not _required_context_satisfied(attempt, row):
                 add("context_or_trigger_violation", attempt)
             required_context_tokens = frozenset(

@@ -16,6 +16,8 @@ from src.persona_corpus.selector import (
     _trigger_matches as selector_trigger_matches,
     load_scheduler_config,
 )
+from src.persona_corpus.simulation_core import constraints as constraint_module
+from src.persona_corpus.simulation_core import report as report_module
 from src.persona_corpus.simulation_core.scenarios import (
     _trigger_matches as scenario_trigger_matches,
 )
@@ -74,12 +76,24 @@ class SharedTriggerContractTests(unittest.TestCase):
         self.assertTrue(callable(matcher), "shared trigger_matches must be callable")
         return matcher
 
-    def test_all_three_paths_delegate_to_one_table_driven_matcher(self) -> None:
+    def test_all_trigger_consumers_delegate_to_one_table_driven_matcher(self) -> None:
         shared = self.shared_matcher()
+        constraint_trigger_matches = getattr(
+            constraint_module,
+            "_trigger_matches",
+            None,
+        )
+        report_trigger_matches = getattr(
+            report_module,
+            "_trigger_matches",
+            None,
+        )
         callbacks = (
             selector_trigger_matches,
             scenario_trigger_matches,
             _simulation_trigger_matches,
+            constraint_trigger_matches,
+            report_trigger_matches,
         )
         for callback in callbacks:
             self.assertIs(shared, callback)
@@ -108,6 +122,8 @@ class SharedTriggerContractTests(unittest.TestCase):
                 (selector_trigger_matches, self.context),
                 (scenario_trigger_matches, self.context),
                 (_simulation_trigger_matches, payload),
+                (constraint_trigger_matches, self.context),
+                (report_trigger_matches, self.context),
             ):
                 with self.subTest(
                     trigger=trigger,
