@@ -45,6 +45,30 @@ public sealed class OfflineCompanionAgentTests
     }
 
     [Fact]
+    public void WarmUp_CatalogFailureThrowsDeterministicExceptionWithOriginalInnerException()
+    {
+        var originalFailure = new InvalidDataException("corrupt persona corpus");
+        var fallback = SceneCatalog.BuildPersonaScenes(FallbackDialogueCatalog.All);
+        var agent = new OfflineCompanionAgent(() => new SceneCatalogLoadResult(fallback, originalFailure));
+
+        var exception = Assert.Throws<InvalidDataException>(agent.WarmUp);
+
+        Assert.Equal(
+            "The validated v2 persona corpus is unavailable; degraded dialogue cannot report ready.",
+            exception.Message);
+        Assert.Same(originalFailure, exception.InnerException);
+    }
+
+    [Fact]
+    public void WarmUp_HealthyCatalogCompletesNormally()
+    {
+        var agent = new OfflineCompanionAgent(
+            () => new SceneCatalogLoadResult(SceneCatalog.PersonaScenes, null));
+
+        agent.WarmUp();
+    }
+
+    [Fact]
     public void SceneCatalog_AllScenesDisableCorpusDrivenAnimationCues()
     {
         Assert.All(SceneCatalog.All, scene => Assert.Equal("none", scene.AnimationCue));

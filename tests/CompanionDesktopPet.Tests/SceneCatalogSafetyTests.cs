@@ -46,6 +46,22 @@ public sealed class SceneCatalogSafetyTests
     }
 
     [Fact]
+    public void LoadPersonaScenes_DiagnosticFailureStillReturnsFallbackAndOriginalFailure()
+    {
+        var primaryFailure = new InvalidDataException("broken embedded corpus");
+        var diagnosticFailure = new InvalidOperationException("trace unavailable");
+        var fallback = PersonaCorpus.All.Take(1).ToArray();
+
+        var result = SceneCatalog.LoadPersonaScenes(
+            () => throw primaryFailure,
+            () => fallback,
+            reportFailure: _ => throw diagnosticFailure);
+
+        Assert.Same(primaryFailure, result.Failure);
+        Assert.Equal(fallback[0].SemanticGroup, Assert.Single(result.Scenes).SemanticGroup);
+    }
+
+    [Fact]
     public void StoryArcBuild_InsufficientFallbackScenesDisablesStoriesInsteadOfThrowing()
     {
         var fallbackScenes = SceneCatalog.BuildPersonaScenes(PersonaCorpus.All.Take(1).ToArray());

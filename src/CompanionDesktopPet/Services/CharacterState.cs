@@ -32,39 +32,175 @@ public sealed record StoryProgress(
 
 public sealed class CharacterState
 {
-    private readonly object _activeStoriesSync = new();
+    private readonly object _sync = new();
+    private double _energy;
+    private double _sociability;
+    private double _boredom;
+    private PetMood _mood;
+    private PetActivity _activity;
+    private DateTime _installedAt;
+    private DateTime _lastUpdatedAt;
+    private int _attachmentDays;
     private List<StoryProgress> _activeStories = [];
 
     [JsonRequired]
-    public double Energy { get; set; }
+    public double Energy
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _energy;
+            }
+        }
+        set
+        {
+            lock (_sync)
+            {
+                _energy = value;
+            }
+        }
+    }
 
     [JsonRequired]
-    public double Sociability { get; set; }
+    public double Sociability
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _sociability;
+            }
+        }
+        set
+        {
+            lock (_sync)
+            {
+                _sociability = value;
+            }
+        }
+    }
 
     [JsonRequired]
-    public double Boredom { get; set; }
+    public double Boredom
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _boredom;
+            }
+        }
+        set
+        {
+            lock (_sync)
+            {
+                _boredom = value;
+            }
+        }
+    }
 
     [JsonRequired]
-    public PetMood Mood { get; set; }
+    public PetMood Mood
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _mood;
+            }
+        }
+        set
+        {
+            lock (_sync)
+            {
+                _mood = value;
+            }
+        }
+    }
 
     [JsonRequired]
-    public PetActivity Activity { get; set; }
+    public PetActivity Activity
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _activity;
+            }
+        }
+        set
+        {
+            lock (_sync)
+            {
+                _activity = value;
+            }
+        }
+    }
 
     [JsonRequired]
-    public DateTime InstalledAt { get; set; }
+    public DateTime InstalledAt
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _installedAt;
+            }
+        }
+        set
+        {
+            lock (_sync)
+            {
+                _installedAt = value;
+            }
+        }
+    }
 
     [JsonRequired]
-    public DateTime LastUpdatedAt { get; set; }
+    public DateTime LastUpdatedAt
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _lastUpdatedAt;
+            }
+        }
+        set
+        {
+            lock (_sync)
+            {
+                _lastUpdatedAt = value;
+            }
+        }
+    }
 
     [JsonRequired]
-    public int AttachmentDays { get; set; }
+    public int AttachmentDays
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _attachmentDays;
+            }
+        }
+        set
+        {
+            lock (_sync)
+            {
+                _attachmentDays = value;
+            }
+        }
+    }
 
     [JsonRequired]
     public IReadOnlyList<StoryProgress> ActiveStories
     {
         get
         {
-            lock (_activeStoriesSync)
+            lock (_sync)
             {
                 return Array.AsReadOnly(_activeStories.ToArray());
             }
@@ -73,7 +209,7 @@ public sealed class CharacterState
         {
             ArgumentNullException.ThrowIfNull(value);
             var copied = value.ToArray();
-            lock (_activeStoriesSync)
+            lock (_sync)
             {
                 _activeStories = [.. copied];
             }
@@ -94,49 +230,56 @@ public sealed class CharacterState
 
     public void AdvanceTo(DateTime now)
     {
-        if (now <= LastUpdatedAt)
+        lock (_sync)
         {
-            AttachmentDays = Math.Max(1, (now.Date - InstalledAt.Date).Days + 1);
-            return;
-        }
+            if (now <= _lastUpdatedAt)
+            {
+                _attachmentDays = Math.Max(1, (now.Date - _installedAt.Date).Days + 1);
+                return;
+            }
 
-        var hours = Math.Min((now - LastUpdatedAt).TotalHours, 72);
-        if (Activity == PetActivity.Sleeping)
-        {
-            Energy = Clamp(Energy + (hours * 0.085));
-            Boredom = Clamp(Boredom - (hours * 0.025));
-            Sociability = Clamp(Sociability + (hours * 0.015));
-        }
-        else
-        {
-            Energy = Clamp(Energy - (hours * 0.035));
-            Boredom = Clamp(Boredom + (hours * 0.045));
-            Sociability = Clamp(Sociability + (hours * 0.008));
-        }
+            var hours = Math.Min((now - _lastUpdatedAt).TotalHours, 72);
+            if (_activity == PetActivity.Sleeping)
+            {
+                _energy = Clamp(_energy + (hours * 0.085));
+                _boredom = Clamp(_boredom - (hours * 0.025));
+                _sociability = Clamp(_sociability + (hours * 0.015));
+            }
+            else
+            {
+                _energy = Clamp(_energy - (hours * 0.035));
+                _boredom = Clamp(_boredom + (hours * 0.045));
+                _sociability = Clamp(_sociability + (hours * 0.008));
+            }
 
-        Mood = Energy switch
-        {
-            < 0.22 => PetMood.Sleepy,
-            _ when Boredom > 0.76 => PetMood.Playful,
-            _ when Sociability < 0.25 => PetMood.Quiet,
-            _ when Energy > 0.66 => PetMood.Focused,
-            _ => PetMood.Calm
-        };
-        LastUpdatedAt = now;
-        AttachmentDays = Math.Max(1, (now.Date - InstalledAt.Date).Days + 1);
+            _mood = _energy switch
+            {
+                < 0.22 => PetMood.Sleepy,
+                _ when _boredom > 0.76 => PetMood.Playful,
+                _ when _sociability < 0.25 => PetMood.Quiet,
+                _ when _energy > 0.66 => PetMood.Focused,
+                _ => PetMood.Calm
+            };
+            _lastUpdatedAt = now;
+            _attachmentDays = Math.Max(1, (now.Date - _installedAt.Date).Days + 1);
+        }
     }
 
     public void ApplyScene(SceneDefinition scene)
     {
-        Energy = Clamp(Energy + scene.EnergyDelta);
-        Sociability = Clamp(Sociability + scene.SociabilityDelta);
-        Boredom = Clamp(Boredom + scene.BoredomDelta);
+        ArgumentNullException.ThrowIfNull(scene);
+        lock (_sync)
+        {
+            _energy = Clamp(_energy + scene.EnergyDelta);
+            _sociability = Clamp(_sociability + scene.SociabilityDelta);
+            _boredom = Clamp(_boredom + scene.BoredomDelta);
+        }
     }
 
     internal void AddActiveStory(StoryProgress story)
     {
         ArgumentNullException.ThrowIfNull(story);
-        lock (_activeStoriesSync)
+        lock (_sync)
         {
             _activeStories.Add(story);
         }
@@ -145,7 +288,7 @@ public sealed class CharacterState
     internal bool RemoveActiveStory(StoryProgress story)
     {
         ArgumentNullException.ThrowIfNull(story);
-        lock (_activeStoriesSync)
+        lock (_sync)
         {
             return _activeStories.Remove(story);
         }
@@ -154,24 +297,30 @@ public sealed class CharacterState
     internal int RemoveActiveStories(Predicate<StoryProgress> predicate)
     {
         ArgumentNullException.ThrowIfNull(predicate);
-        lock (_activeStoriesSync)
+        lock (_sync)
         {
             return _activeStories.RemoveAll(predicate);
         }
     }
 
-    internal CharacterState Clone() => new()
+    internal CharacterState Clone()
     {
-        Energy = Energy,
-        Sociability = Sociability,
-        Boredom = Boredom,
-        Mood = Mood,
-        Activity = Activity,
-        InstalledAt = InstalledAt,
-        LastUpdatedAt = LastUpdatedAt,
-        AttachmentDays = AttachmentDays,
-        ActiveStories = ActiveStories
-    };
+        lock (_sync)
+        {
+            return new CharacterState
+            {
+                Energy = _energy,
+                Sociability = _sociability,
+                Boredom = _boredom,
+                Mood = _mood,
+                Activity = _activity,
+                InstalledAt = _installedAt,
+                LastUpdatedAt = _lastUpdatedAt,
+                AttachmentDays = _attachmentDays,
+                ActiveStories = _activeStories.ToArray()
+            };
+        }
+    }
 
     private static double Clamp(double value) => Math.Clamp(value, 0, 1);
 }
