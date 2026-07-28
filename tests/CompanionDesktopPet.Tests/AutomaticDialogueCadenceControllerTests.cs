@@ -129,7 +129,7 @@ public sealed class AutomaticDialogueCadenceControllerTests
     private static readonly DateTime Daytime = new(2026, 7, 26, 10, 0, 0);
 
     private static AutomaticDialogueCadenceController CreateController(TimeProvider timeProvider) =>
-        new(new DialogueScheduler(new EndpointRandom()), timeProvider);
+        new(new DialogueScheduler(new EndpointRandom().Next), timeProvider);
 
     private sealed class EndpointRandom : Random
     {

@@ -10,13 +10,15 @@ internal enum AutomaticCadenceMode
 
 public sealed class DialogueScheduler
 {
-    private readonly Random _random;
+    private readonly Func<int, int, int> _next;
 
-    public DialogueScheduler(Random random)
+    public DialogueScheduler()
+        : this(Random.Shared.Next)
     {
-        ArgumentNullException.ThrowIfNull(random);
-        _random = random;
     }
+
+    internal DialogueScheduler(Func<int, int, int> next) =>
+        _next = next ?? throw new ArgumentNullException(nameof(next));
 
     public TimeSpan NextDelay() => NextDelay(DateTime.Now);
 
@@ -45,6 +47,6 @@ public sealed class DialogueScheduler
             AutomaticCadenceMode.Fullscreen => (60, 120),
             _ => throw new ArgumentOutOfRangeException()
         };
-        return TimeSpan.FromSeconds(_random.Next(minimum * 60, maximum * 60 + 1));
+        return TimeSpan.FromSeconds(_next(minimum * 60, maximum * 60 + 1));
     }
 }

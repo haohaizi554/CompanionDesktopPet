@@ -133,7 +133,7 @@ public partial class MainWindow : Window
         _foregroundFullscreenDetector = options.ForegroundFullscreenDetector
             ?? new WindowsForegroundFullscreenDetector();
         _automaticCadence = new AutomaticDialogueCadenceController(
-            options.DialogueScheduler ?? new DialogueScheduler(_random),
+            options.DialogueScheduler ?? new DialogueScheduler(),
             _timeProvider);
         _animation = options.AnimationController ?? new AnimationController(
             BreathingScale,

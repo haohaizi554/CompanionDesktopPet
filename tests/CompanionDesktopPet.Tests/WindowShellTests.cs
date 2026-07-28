@@ -889,7 +889,7 @@ public sealed class WindowShellTests
                 TimeProvider = time,
                 WarmupCoordinator = coordinator,
                 ForegroundFullscreenDetector = detector,
-                DialogueScheduler = new DialogueScheduler(schedulerRandom)
+                DialogueScheduler = new DialogueScheduler(schedulerRandom.Next)
             });
             try
             {
@@ -968,7 +968,7 @@ public sealed class WindowShellTests
                 TimeProvider = time,
                 WarmupCoordinator = coordinator,
                 ForegroundFullscreenDetector = detector,
-                DialogueScheduler = new DialogueScheduler(schedulerRandom)
+                DialogueScheduler = new DialogueScheduler(schedulerRandom.Next)
             });
             try
             {
@@ -2175,7 +2175,7 @@ public sealed class WindowShellTests
                 DialogueService = dialogue,
                 TimeProvider = time,
                 ForegroundFullscreenDetector = detector,
-                DialogueScheduler = new DialogueScheduler(new EndpointRandom()),
+                DialogueScheduler = new DialogueScheduler(new EndpointRandom().Next),
                 AnimationController = animations,
                 SaveSettingsAsync = settings =>
                 {
@@ -2932,7 +2932,7 @@ public sealed class WindowShellTests
                 DialogueService = dialogue,
                 TimeProvider = time,
                 ForegroundFullscreenDetector = new SequenceFullscreenDetector(false, false),
-                DialogueScheduler = new DialogueScheduler(new EndpointRandom())
+                DialogueScheduler = new DialogueScheduler(new EndpointRandom().Next)
             });
             try
             {
@@ -3044,7 +3044,7 @@ public sealed class WindowShellTests
                     DialogueService = new DialogueService(),
                     TimeProvider = time,
                     ForegroundFullscreenDetector = new SequenceFullscreenDetector(false, false),
-                    DialogueScheduler = new DialogueScheduler(new EndpointRandom())
+                    DialogueScheduler = new DialogueScheduler(new EndpointRandom().Next)
                 });
 
                 enterThroughRealHandler(window, time);
@@ -4026,7 +4026,7 @@ public sealed class WindowShellTests
             DialogueService = dialogue,
             TimeProvider = timeProvider,
             ForegroundFullscreenDetector = fullscreenDetector,
-            DialogueScheduler = new DialogueScheduler(schedulerRandom ?? new EndpointRandom())
+            DialogueScheduler = new DialogueScheduler((schedulerRandom ?? new EndpointRandom()).Next)
         });
     }
 
