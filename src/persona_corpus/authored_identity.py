@@ -63,6 +63,10 @@ _UNREGISTERED_NICKNAME_PATTERN = re.compile(
     r"(?<![\u3400-\u9fff])小[\u3400-\u9fff]"
     r"(?=(?:把|在|会|想|只|能|必须|今年|来自|住在|说|告诉|陪|来了|走了))"
 )
+_NONIDENTITY_SMALL_WORD_PREFIXES = (
+    "小程序",
+    "小功能",
+)
 
 
 class _AuthoredIdentityEntry(Protocol):
@@ -152,8 +156,14 @@ def _identity_safety_violation(text: str) -> tuple[str, str] | None:
 
 
 def _unregistered_nickname(text: str) -> str | None:
-    match = _UNREGISTERED_NICKNAME_PATTERN.search(text)
-    return None if match is None else match.group(0)
+    for match in _UNREGISTERED_NICKNAME_PATTERN.finditer(text):
+        if any(
+            text.startswith(prefix, match.start())
+            for prefix in _NONIDENTITY_SMALL_WORD_PREFIXES
+        ):
+            continue
+        return match.group(0)
+    return None
 
 
 def validate_authored_identity_entries(entries: Iterable[_AuthoredIdentityEntry]) -> None:

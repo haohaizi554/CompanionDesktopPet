@@ -21,10 +21,13 @@ from typing import Any, Iterator, Mapping
 
 from .authored_identity import validate_authored_identity_entries
 from .contract import PERSONA_CONTRACT, PersonaContractError, category_group_for
+from .normalization import normalize_text
 from .schema import AUTHORED_HEADER, AUTHORED_LEDGER_HEADER
 
 
 AUTHORED_MANIFEST_FORMAT = "persona-authorship-manifest-v1"
+AUTHORED_MANIFEST_SCHEMA_REFERENCE = "./schemas/persona-authorship-manifest.schema.json"
+AUTHORED_MANIFEST_SCHEMA_VERSION = 1
 EXPECTED_BATCH_IDS = tuple(f"b{number:03d}" for number in range(1, 101))
 ROWS_PER_BATCH = 300
 EXPECTED_ENTRY_COUNT = len(EXPECTED_BATCH_IDS) * ROWS_PER_BATCH
@@ -53,6 +56,8 @@ _SEMANTIC_GROUP_METADATA_FIELDS = (
 
 _MANIFEST_KEYS = frozenset(
     {
+        "$schema",
+        "schema_version",
         "format",
         "authored_header",
         "batch_count",
@@ -468,6 +473,19 @@ def parse_authored_batches(authored_dir: Path) -> tuple[AuthoredEntry, ...]:
     texts = [entry.text for entry in sorted_entries]
     if len(texts) != len(set(texts)):
         raise AuthoredCatalogError("authored batches contain duplicate text")
+    normalized_first_entry: dict[str, AuthoredEntry] = {}
+    for entry in sorted_entries:
+        normalized = normalize_text(entry.text)
+        if not normalized:
+            raise AuthoredCatalogError(
+                f"authored text normalizes to empty for {entry.variant_id!r}"
+            )
+        first_entry = normalized_first_entry.setdefault(normalized, entry)
+        if first_entry is not entry:
+            raise AuthoredCatalogError(
+                "authored batches contain duplicate normalized text between "
+                f"{first_entry.variant_id!r} and {entry.variant_id!r}"
+            )
     return sorted_entries
 
 
@@ -548,6 +566,8 @@ def build_authorship_manifest_payload(
     }
     root_sha256 = _root_sha256(batch_digests)
     return {
+        "$schema": AUTHORED_MANIFEST_SCHEMA_REFERENCE,
+        "schema_version": AUTHORED_MANIFEST_SCHEMA_VERSION,
         "format": AUTHORED_MANIFEST_FORMAT,
         "authored_header": list(AUTHORED_HEADER),
         "batch_count": len(EXPECTED_BATCH_IDS),
@@ -629,6 +649,14 @@ def _validate_manifest(
 ) -> tuple[Mapping[str, AuthoredBatchDigest], str]:
     if manifest["format"] != AUTHORED_MANIFEST_FORMAT:
         raise AuthoredCatalogError(f"{manifest_path}: manifest format mismatch")
+    if manifest["$schema"] != AUTHORED_MANIFEST_SCHEMA_REFERENCE:
+        raise AuthoredCatalogError(f"{manifest_path}: manifest schema reference mismatch")
+    _require_manifest_integer(
+        manifest_path,
+        "schema_version",
+        manifest["schema_version"],
+        AUTHORED_MANIFEST_SCHEMA_VERSION,
+    )
     if manifest["authored_header"] != list(AUTHORED_HEADER):
         raise AuthoredCatalogError(f"{manifest_path}: authored_header mismatch")
     for key, expected_value in (
@@ -718,6 +746,8 @@ __all__ = [
     "AUTHORED_HEADER",
     "AUTHORED_LEDGER_HEADER",
     "AUTHORED_MANIFEST_FORMAT",
+    "AUTHORED_MANIFEST_SCHEMA_REFERENCE",
+    "AUTHORED_MANIFEST_SCHEMA_VERSION",
     "AuthoredBatchDigest",
     "AuthoredCatalog",
     "AuthoredCatalogError",

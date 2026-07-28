@@ -97,6 +97,24 @@ class PrivacyPolicyContractTests(unittest.TestCase):
                 self.assertEqual(findings[0], findings[1])
                 self.assertEqual(findings[1], findings[2])
 
+    def test_name_classifier_requires_identity_syntax_not_ordinary_prose(self) -> None:
+        from src.persona_corpus.privacy import ENABLED_CONTENT_POLICY, pii_kinds
+
+        ordinary_prose = (
+            "一个难缠错误终于有了名字和原因。",
+            "名字解析要带上地域和解析器。",
+            "备份文件并不叫安全网。",
+            "不把一次卡顿叫成无能。",
+            "邮箱、姓名和地址的顺序随区域变化。",
+        )
+        for text in ordinary_prose:
+            with self.subTest(text=text):
+                self.assertNotIn("person_name", pii_kinds(text, ENABLED_CONTENT_POLICY))
+
+        for text in ("姓名：张伟。", "她叫张伟。", "我是李静。"):
+            with self.subTest(text=text):
+                self.assertIn("person_name", pii_kinds(text, ENABLED_CONTENT_POLICY))
+
     def test_named_stage_policies_make_conservative_legacy_review_explicit(self) -> None:
         from src.persona_corpus.privacy import (
             ENABLED_CONTENT_POLICY,

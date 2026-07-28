@@ -19,6 +19,7 @@ CONFIG_DIR = ROOT / "config"
 CONFIG_SCHEMAS = {
     "persona-contract.json": "./schemas/persona-contract.schema.json",
     "persona-scheduler.json": "./schemas/persona-scheduler.schema.json",
+    "persona-authorship-manifest.json": "./schemas/persona-authorship-manifest.schema.json",
     "persona-editorial-manifest.json": "./schemas/persona-editorial-manifest.schema.json",
     "persona-review-allowlist.json": "./schemas/persona-review-allowlist.schema.json",
 }
@@ -71,6 +72,29 @@ class ConfigSchemaContractTests(unittest.TestCase):
             validator.validate(missing_group)
         with self.assertRaises(ValidationError):
             validator.validate(unknown_limit)
+
+    def test_authorship_manifest_schema_rejects_missing_batch_and_bad_hash(self) -> None:
+        config = json.loads(
+            (CONFIG_DIR / "persona-authorship-manifest.json").read_text(encoding="utf-8")
+        )
+        schema = json.loads(
+            (CONFIG_DIR / "schemas/persona-authorship-manifest.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        validator = Draft202012Validator(schema)
+
+        missing_batch = deepcopy(config)
+        del missing_batch["batches"]["b100"]
+        bad_hash = deepcopy(config)
+        bad_hash["root_sha256"] = "not-a-sha256"
+        unknown_field = deepcopy(config)
+        unknown_field["generated_at"] = "nondeterministic"
+
+        for invalid in (missing_batch, bad_hash, unknown_field):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(ValidationError):
+                    validator.validate(invalid)
 
     def test_contract_schema_rejects_incomplete_or_invalid_temporal_contract(self) -> None:
         config = json.loads(

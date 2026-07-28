@@ -122,9 +122,14 @@ CONTEXTUAL_CHINESE_NAME_PATTERN = re.compile(
     rf"(?:{'|'.join(sorted(map(re.escape, COMMON_CHINESE_GIVEN_NAMES), key=len, reverse=True))})"
     rf"(?=(?:{'|'.join(map(re.escape, NAME_CONTEXT_MARKERS))}))"
 )
+_COMMON_GIVEN_NAME_PATTERN = "|".join(
+    sorted(map(re.escape, COMMON_CHINESE_GIVEN_NAMES), key=len, reverse=True)
+)
 LABELED_CHINESE_NAME_PATTERN = re.compile(
-    rf"(?:姓名|名字|真名|叫作|叫|我是)\s*[:：]?\s*"
-    rf"[{COMMON_CHINESE_SURNAMES}][\u3400-\u9fff]{{1,2}}"
+    rf"(?:(?:姓名|名字|真名)\s*[:：]\s*"
+    rf"[{COMMON_CHINESE_SURNAMES}][\u3400-\u9fff]{{1,2}}|"
+    rf"(?:叫作|叫|我是)\s*[{COMMON_CHINESE_SURNAMES}]"
+    rf"(?:{_COMMON_GIVEN_NAME_PATTERN}))"
 )
 
 _LOCATION = r"(?:湖南|长沙|广东)"

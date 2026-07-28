@@ -280,6 +280,12 @@ class AuthoredCatalogTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             authored_dir, _ = write_valid_authored_fixture(Path(temporary_directory))
             set_field(authored_dir / "b001.tsv", "text", "小程序把日志写进队列。")
+            set_field(
+                authored_dir / "b001.tsv",
+                "text",
+                "小功能也写清测试方式。",
+                row_index=2,
+            )
 
             self.assertEqual(30_000, len(parse_authored_batches(authored_dir)))
 
@@ -439,10 +445,24 @@ class AuthoredCatalogTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "duplicate text"):
                 load_authored_catalog(authored_dir, manifest)
 
+    def test_parse_authored_batches_rejects_duplicate_normalized_text(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            authored_dir, _ = write_valid_authored_fixture(Path(temporary_directory))
+            set_field(
+                authored_dir / "b002.tsv",
+                "text",
+                "ＦＩＸＴＵＲＥ　Ｂ００１　ＥＮＴＲＹ　０００１！！！",
+            )
+
+            with self.assertRaisesRegex(ValueError, "duplicate normalized text"):
+                parse_authored_batches(authored_dir)
+
     def test_manifest_builder_writes_canonical_complete_inventory(self) -> None:
         manifest = json.loads(self.manifest_path.read_text(encoding="utf-8"))
 
         self.assertEqual("persona-authorship-manifest-v1", manifest["format"])
+        self.assertEqual("./schemas/persona-authorship-manifest.schema.json", manifest["$schema"])
+        self.assertEqual(1, manifest["schema_version"])
         self.assertEqual(100, manifest["batch_count"])
         self.assertEqual(300, manifest["rows_per_batch"])
         self.assertEqual(30_000, manifest["total_rows"])
