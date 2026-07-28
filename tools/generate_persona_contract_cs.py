@@ -104,6 +104,21 @@ def render_contract() -> str:
     # The generated member is a set. Preserve its existing display order while
     # deriving it from the sole privacy-marker source instead of a second list.
     seasoning_excluded_identity_markers = tuple(reversed(PERSONA_CONTRACT.pii_markers))
+    authored_identity = PERSONA_CONTRACT.authored_identity
+    direct_marker_batches = authored_identity["direct_marker_batches"]
+    session_exposure = authored_identity["session_exposure"]
+    if not isinstance(direct_marker_batches, Mapping) or not isinstance(
+        session_exposure, Mapping
+    ):
+        raise ValueError("shared authored identity contract is malformed")
+    authored_identity_markers = tuple(str(marker) for marker in authored_identity["markers"])
+    authored_identity_profiles = tuple(
+        sorted(str(profile) for profile in authored_identity["allowed_relationship_profiles"])
+    )
+    authored_direct_marker_batches = ",\n".join(
+        "            " + f"[{_quoted(str(batch))}] = {_quoted(str(marker))}"
+        for batch, marker in direct_marker_batches.items()
+    )
     identity_rules = ",\n".join(
         "            "
         f"[{_quoted(item.line_id)}] = new({_quoted(item.source_reference)}, "
@@ -130,6 +145,16 @@ internal sealed record IdentityEasterEggRule(
     double CooldownHours,
     int MaxPerDay,
     double Weight);
+
+internal sealed record AuthoredIdentityPolicy(
+    IReadOnlyList<string> Markers,
+    IReadOnlyDictionary<string, string> DirectMarkerBatchById,
+    IReadOnlySet<string> AllowedRelationshipProfiles,
+    bool AllowMarkersInAnyCategory,
+    int MinimumInterveningBubblesSameSemanticGroup,
+    int RecentBubblesPerSemanticGroup,
+    int DirectMarkerMaxPerIdentityClass,
+    bool PersistAcrossRestarts);
 
 internal static class PersonaContractGenerated
 {{
@@ -235,6 +260,49 @@ internal static class PersonaContractGenerated
 {_set_lines(seasoning_excluded_identity_markers)}
         }};
 
+    public static AuthoredIdentityPolicy AuthoredIdentity {{ get; }} = new(
+        new[]
+        {{
+{_set_lines(authored_identity_markers)}
+        }},
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {{
+{authored_direct_marker_batches}
+        }},
+        new HashSet<string>(StringComparer.Ordinal)
+        {{
+{_set_lines(authored_identity_profiles)}
+        }},
+        {str(authored_identity['allow_markers_in_any_category']).lower()},
+        {int(session_exposure['minimum_intervening_bubbles_same_semantic_group'])},
+        {int(session_exposure['recent_bubbles_per_semantic_group'])},
+        {int(session_exposure['direct_marker_max_per_identity_class'])},
+        {str(session_exposure['persist_across_restarts']).lower()});
+
+    public static IReadOnlyList<string> FindAuthoredIdentityMarkers(string text)
+    {{
+        if (string.IsNullOrEmpty(text))
+        {{
+            return [];
+        }}
+
+        var normalized = text.Normalize(System.Text.NormalizationForm.FormKC);
+        var builder = new System.Text.StringBuilder(normalized.Length);
+        foreach (var character in normalized)
+        {{
+            if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(character)
+                != System.Globalization.UnicodeCategory.Format)
+            {{
+                builder.Append(character);
+            }}
+        }}
+
+        var analysisText = builder.ToString();
+        return AuthoredIdentity.Markers
+            .Where(marker => analysisText.Contains(marker, StringComparison.Ordinal))
+            .ToArray();
+    }}
+
     public static bool ContainsSeasoningMarker(string text)
     {{
         if (string.IsNullOrEmpty(text))
@@ -258,10 +326,10 @@ internal static class PersonaContractGenerated
     public static IReadOnlySet<string> IdentityMarkers {{ get; }} =
         new HashSet<string>(StringComparer.Ordinal)
         {{
-{_set_lines(EDITORIAL_MANIFEST.allowed_identity_markers)}
+{_set_lines(authored_identity_markers)}
         }};
 
-    public static IReadOnlySet<string> ForbiddenIdentityMarkers {{ get; }} =
+    public static IReadOnlySet<string> LegacyForbiddenIdentityMarkers {{ get; }} =
         new HashSet<string>(StringComparer.Ordinal)
         {{
 {_set_lines(EDITORIAL_MANIFEST.forbidden_identity_markers)}

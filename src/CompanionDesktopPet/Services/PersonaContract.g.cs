@@ -11,6 +11,16 @@ internal sealed record IdentityEasterEggRule(
     int MaxPerDay,
     double Weight);
 
+internal sealed record AuthoredIdentityPolicy(
+    IReadOnlyList<string> Markers,
+    IReadOnlyDictionary<string, string> DirectMarkerBatchById,
+    IReadOnlySet<string> AllowedRelationshipProfiles,
+    bool AllowMarkersInAnyCategory,
+    int MinimumInterveningBubblesSameSemanticGroup,
+    int RecentBubblesPerSemanticGroup,
+    int DirectMarkerMaxPerIdentityClass,
+    bool PersistAcrossRestarts);
+
 internal static class PersonaContractGenerated
 {
     public const int CuratedCoreMinimumRows = 800;
@@ -214,6 +224,58 @@ internal static class PersonaContractGenerated
         "雷琳玥"
         };
 
+    public static AuthoredIdentityPolicy AuthoredIdentity { get; } = new(
+        new[]
+        {
+        "雷琳玥",
+        "小玥",
+        "玥仔",
+        "玥玥"
+        },
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["b083"] = "雷琳玥",
+            ["b084"] = "小玥",
+            ["b085"] = "玥仔",
+            ["b086"] = "玥玥"
+        },
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+        "neutral",
+        "nickname_easter_egg",
+        "playful_friend",
+        "warm_friend"
+        },
+        true,
+        3,
+        8,
+        3,
+        false);
+
+    public static IReadOnlyList<string> FindAuthoredIdentityMarkers(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return [];
+        }
+
+        var normalized = text.Normalize(System.Text.NormalizationForm.FormKC);
+        var builder = new System.Text.StringBuilder(normalized.Length);
+        foreach (var character in normalized)
+        {
+            if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(character)
+                != System.Globalization.UnicodeCategory.Format)
+            {
+                builder.Append(character);
+            }
+        }
+
+        var analysisText = builder.ToString();
+        return AuthoredIdentity.Markers
+            .Where(marker => analysisText.Contains(marker, StringComparison.Ordinal))
+            .ToArray();
+    }
+
     public static bool ContainsSeasoningMarker(string text)
     {
         if (string.IsNullOrEmpty(text))
@@ -237,12 +299,13 @@ internal static class PersonaContractGenerated
     public static IReadOnlySet<string> IdentityMarkers { get; } =
         new HashSet<string>(StringComparer.Ordinal)
         {
-        "玥玥",
+        "雷琳玥",
         "小玥",
-        "雷琳玥"
+        "玥仔",
+        "玥玥"
         };
 
-    public static IReadOnlySet<string> ForbiddenIdentityMarkers { get; } =
+    public static IReadOnlySet<string> LegacyForbiddenIdentityMarkers { get; } =
         new HashSet<string>(StringComparer.Ordinal)
         {
         "湖南",

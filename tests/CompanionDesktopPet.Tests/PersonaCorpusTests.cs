@@ -45,6 +45,22 @@ public sealed class PersonaCorpusTests
         Assert.Equal(0.12, PersonaContractGenerated.EasterEggPlaybackMaximum, 8);
     }
 
+    [Fact]
+    public void GeneratedContract_ExposesTheFourAuthoredIdentityMarkersAndSessionPolicy()
+    {
+        var policy = PersonaContractGenerated.AuthoredIdentity;
+
+        Assert.Equal(
+            ["\u96f7\u7433\u73a5", "\u5c0f\u73a5", "\u73a5\u4ed4", "\u73a5\u73a5"],
+            policy.Markers);
+        Assert.Equal("\u73a5\u4ed4", policy.DirectMarkerBatchById["b085"]);
+        Assert.True(policy.AllowMarkersInAnyCategory);
+        Assert.Equal(3, policy.MinimumInterveningBubblesSameSemanticGroup);
+        Assert.Equal(8, policy.RecentBubblesPerSemanticGroup);
+        Assert.Equal(3, policy.DirectMarkerMaxPerIdentityClass);
+        Assert.False(policy.PersistAcrossRestarts);
+    }
+
     [Theory]
     [InlineData("嗯嗯，这次可以。")]
     [InlineData("哈？这次可以。")]
@@ -367,6 +383,36 @@ public sealed class PersonaCorpusTests
             ("source_reference", "catalog:editorial-easter-egg.identity-v1;variant:egg_editorial_full_name_01"));
 
         Assert.Throws<InvalidDataException>(() => PersonaCorpus.Load(wrongTopic));
+    }
+
+    [Fact]
+    public void Load_AllowsAuthorizedAuthoredMarkerOutsideTheEasterEggCategory()
+    {
+        using var stream = CorpusStream(
+            new UTF8Encoding(false, true),
+            ("id", "v2_authored_identity_python_001"),
+            ("text", "\u5c0f\u73a5\u628a\u62a5\u9519\u6808\u6298\u6210\u4e86\u4e00\u5c0f\u6bb5\u7ebf\u7d22\u3002"),
+            ("source_kind", "curated_standalone"),
+            ("source_reference", "authored:b084;variant:authored_identity_python_001"));
+
+        var line = Assert.Single(PersonaCorpus.Load(stream));
+
+        Assert.Equal(["\u5c0f\u73a5"], line.IdentityMarkerClasses);
+        Assert.Equal(DialogueCategory.Python, line.Category);
+        Assert.Equal(DialogueCategoryGroup.Technical, line.CategoryGroup);
+    }
+
+    [Fact]
+    public void Load_RejectsAnAuthoredIdentityLineWithASeparateDirectIdentifier()
+    {
+        using var stream = CorpusStream(
+            new UTF8Encoding(false, true),
+            ("id", "v2_authored_identity_python_002"),
+            ("text", "\u5c0f\u73a5\u628a 13800138000 \u4ece\u7b14\u8bb0\u91cc\u5212\u6389\u4e86\u3002"),
+            ("source_kind", "curated_standalone"),
+            ("source_reference", "authored:b084;variant:authored_identity_python_002"));
+
+        Assert.Throws<InvalidDataException>(() => PersonaCorpus.Load(stream));
     }
 
     [Theory]

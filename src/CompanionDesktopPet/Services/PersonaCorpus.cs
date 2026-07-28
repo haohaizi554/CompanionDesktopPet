@@ -2,6 +2,7 @@ using System.Globalization;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace CompanionDesktopPet.Services;
 
@@ -97,6 +98,7 @@ public sealed record DialogueLine(
 {
     private string _text = Text;
     private bool? _hasSeasoningMarker;
+    private IReadOnlyList<string>? _identityMarkerClasses;
     private SurfaceExposureProfile? _surfaceExposure;
 
     public string Text
@@ -106,12 +108,16 @@ public sealed record DialogueLine(
         {
             _text = value;
             _hasSeasoningMarker = null;
+            _identityMarkerClasses = null;
             _surfaceExposure = null;
         }
     }
 
     public bool HasSeasoningMarker =>
         _hasSeasoningMarker ??= PersonaContractGenerated.ContainsSeasoningMarker(Text);
+
+    public IReadOnlyList<string> IdentityMarkerClasses =>
+        _identityMarkerClasses ??= PersonaContractGenerated.FindAuthoredIdentityMarkers(Text);
 
     internal SurfaceExposureProfile SurfaceExposureProfile =>
         _surfaceExposure ??= SurfaceExposure.Profile(Text);
@@ -143,6 +149,9 @@ public static class PersonaCorpus
     {
         "archived_question", "manual_review"
     };
+    private static readonly Regex DirectIdentifierPattern = new(
+        @"(?<!\d)(?:1[3-9]\d{9}|[1-9]\d{16}[\dXx]?)(?!\d)|[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}",
+        RegexOptions.CultureInvariant);
     public static IReadOnlyList<DialogueLine> All => Snapshot.Value.All;
 
     public static IReadOnlyList<DialogueLine> Regular => Snapshot.Value.Regular;
@@ -339,38 +348,32 @@ public static class PersonaCorpus
                     lineNumber);
             }
 
-            string[] identityHits = [];
-            if (PersonaContractGenerated.IdentityMarkers.Any(marker =>
-                    text.Contains(marker, StringComparison.Ordinal)))
-            {
-                identityHits = PersonaContractGenerated.IdentityMarkers
-                    .Where(marker => text.Contains(marker, StringComparison.Ordinal))
-                    .ToArray();
-            }
+            var identityHits = PersonaContractGenerated.FindAuthoredIdentityMarkers(text);
             var hasIdentityRule = PersonaContractGenerated.IdentityEasterEggRules.TryGetValue(
                 id, out var identityRule);
-            if (identityHits.Length > 0 || hasIdentityRule)
+            if (hasIdentityRule)
             {
-                var digest = Convert.ToHexString(
-                        System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(text)))
-                    .ToLowerInvariant();
-                if (!hasIdentityRule
-                    || identityRule is null
-                    || PersonaContractGenerated.ForbiddenIdentityMarkers.Any(marker =>
-                        text.Contains(marker, StringComparison.Ordinal))
-                    || category != DialogueCategory.EasterEgg
-                    || categoryGroup != DialogueCategoryGroup.EasterEgg
-                    || sourceReference != identityRule.SourceReference
-                    || topicId != identityRule.TopicId
-                    || digest != identityRule.TextSha256
-                    || identityHits.Length != identityRule.AllowedMarkers.Count
-                    || identityHits.Any(marker => !identityRule.AllowedMarkers.Contains(marker))
-                    || cooldown != identityRule.CooldownHours
-                    || maxPerDay != identityRule.MaxPerDay
-                    || weight != identityRule.Weight)
-                {
-                    throw Error(lineNumber, "identity EasterEgg does not exactly match the editorial manifest");
-                }
+                ValidateLegacyIdentityEasterEgg(
+                    identityRule!,
+                    identityHits,
+                    text,
+                    category,
+                    categoryGroup,
+                    topicId,
+                    sourceReference,
+                    cooldown,
+                    maxPerDay,
+                    weight,
+                    lineNumber);
+            }
+            else if (identityHits.Count > 0)
+            {
+                ValidateAuthoredIdentityLine(
+                    identityHits,
+                    text,
+                    sourceKind,
+                    sourceReference,
+                    lineNumber);
             }
 
             if (semanticCooldown < cooldown)
@@ -578,6 +581,57 @@ public static class PersonaCorpus
         if (variant != expectedVariant || id != expectedId)
         {
             throw Error(lineNumber, "legacy surface id or variant digest does not match immutable lineage");
+        }
+    }
+
+    private static void ValidateLegacyIdentityEasterEgg(
+        IdentityEasterEggRule identityRule,
+        IReadOnlyList<string> identityHits,
+        string text,
+        DialogueCategory category,
+        DialogueCategoryGroup categoryGroup,
+        string topicId,
+        string sourceReference,
+        double cooldown,
+        int maxPerDay,
+        double weight,
+        int lineNumber)
+    {
+        var digest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)))
+            .ToLowerInvariant();
+        if (PersonaContractGenerated.LegacyForbiddenIdentityMarkers.Any(marker =>
+                text.Contains(marker, StringComparison.Ordinal))
+            || category != DialogueCategory.EasterEgg
+            || categoryGroup != DialogueCategoryGroup.EasterEgg
+            || sourceReference != identityRule.SourceReference
+            || topicId != identityRule.TopicId
+            || digest != identityRule.TextSha256
+            || identityHits.Count != identityRule.AllowedMarkers.Count
+            || identityHits.Any(marker => !identityRule.AllowedMarkers.Contains(marker))
+            || cooldown != identityRule.CooldownHours
+            || maxPerDay != identityRule.MaxPerDay
+            || weight != identityRule.Weight)
+        {
+            throw Error(lineNumber, "identity EasterEgg does not exactly match the editorial manifest");
+        }
+    }
+
+    private static void ValidateAuthoredIdentityLine(
+        IReadOnlyList<string> identityHits,
+        string text,
+        string sourceKind,
+        string sourceReference,
+        int lineNumber)
+    {
+        if (sourceKind != "curated_standalone"
+            || !sourceReference.StartsWith("authored:", StringComparison.Ordinal)
+            || !PersonaContractGenerated.AuthoredIdentity.AllowMarkersInAnyCategory
+            || text.Contains('?')
+            || text.Contains('\uFF1F')
+            || DirectIdentifierPattern.IsMatch(text)
+            || identityHits.Any(marker => !PersonaContractGenerated.AuthoredIdentity.Markers.Contains(marker)))
+        {
+            throw Error(lineNumber, "authored identity text violates the generated identity policy");
         }
     }
 
