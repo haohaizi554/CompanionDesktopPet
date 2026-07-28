@@ -54,12 +54,12 @@ public partial class App : System.Windows.Application
             var agentMemory = await agentMemoryService.LoadForDeferredWarmupAsync();
             var factories = AppSystemIntegrationFactories.Default;
             _autoStartService = CreateAutoStartService(_smokeTest, factories);
-            var window = new MainWindow(
-                settings,
-                settingsService,
-                agentMemoryService,
-                agentMemory,
-                _autoStartService);
+            var window = new MainWindow(new MainWindowOptionsBuilder(settings, settingsService)
+            {
+                AgentMemoryService = agentMemoryService,
+                AgentMemory = agentMemory,
+                AutoStartService = _autoStartService
+            }.Build());
             if (_smokeTest)
             {
                 window.ContentRendered += HandleSmokeContentRendered;

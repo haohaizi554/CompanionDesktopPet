@@ -554,16 +554,15 @@ public sealed class WindowShellTests
         {
             var settingsDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
             var shutdownRequests = 0;
-            var normalWindow = new MainWindow(
-                PetSettings.Default,
-                new SettingsService(settingsDirectory),
+            var normalWindow = CreateWindow(
+                settingsDirectory,
+                suppressApplicationShutdownOnClose: false,
                 shutdownApplication: () => shutdownRequests++);
             normalWindow.Show();
             normalWindow.Close();
 
-            var suppressedWindow = new MainWindow(
-                PetSettings.Default,
-                new SettingsService(settingsDirectory),
+            var suppressedWindow = CreateWindow(
+                settingsDirectory,
                 suppressApplicationShutdownOnClose: true,
                 shutdownApplication: () => shutdownRequests++);
             suppressedWindow.Show();
@@ -879,7 +878,7 @@ public sealed class WindowShellTests
             using var factory = new ControlledDialogueFactory("hidden warmup reply");
             var dialogue = DialogueService.CreateDeferred(factory.Create, time);
             var coordinator = new DialogueWarmupCoordinator(dialogue, time);
-            var window = new MainWindow(new MainWindowDependencies(
+            var window = new MainWindow(new MainWindowOptions(
                 PetSettings.Default,
                 new SettingsService(settingsDirectory))
             {
@@ -958,7 +957,7 @@ public sealed class WindowShellTests
                 throw new InvalidDataException("permanent hidden warmup failure");
             }, time);
             var coordinator = new DialogueWarmupCoordinator(dialogue, time);
-            var window = new MainWindow(new MainWindowDependencies(
+            var window = new MainWindow(new MainWindowOptions(
                 PetSettings.Default,
                 new SettingsService(settingsDirectory))
             {
@@ -1242,10 +1241,7 @@ public sealed class WindowShellTests
         RunOnStaThread(() =>
         {
             var settingsDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
-            var window = new MainWindow(
-                PetSettings.Default,
-                new SettingsService(settingsDirectory),
-                suppressApplicationShutdownOnClose: true);
+            var window = CreateWindow(settingsDirectory);
             window.Show();
             window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
 
@@ -1276,7 +1272,7 @@ public sealed class WindowShellTests
             var settingsDirectory = CreateSettingsDirectory();
             var idleTimeProvider = new FixedIdleTimeProvider(TimeSpan.FromMinutes(7));
             var autoStartService = new FakeAutoStartService { Enabled = true };
-            var dependencies = new MainWindowDependencies(
+            var dependencies = new MainWindowOptions(
                 PetSettings.Default,
                 new SettingsService(settingsDirectory))
             {
@@ -1323,7 +1319,7 @@ public sealed class WindowShellTests
     }
 
     [Fact]
-    public void MainWindow_LegacyNullAgentMemoryServiceCallRemainsUnambiguous()
+    public void MainWindow_OptionsAcceptANullAgentMemoryService()
     {
         RunOnStaThread(() =>
         {
@@ -1331,11 +1327,13 @@ public sealed class WindowShellTests
             MainWindow? window = null;
             try
             {
-                window = new MainWindow(
+                window = new MainWindow(new MainWindowOptions(
                     PetSettings.Default,
-                    new SettingsService(settingsDirectory),
-                    null,
-                    suppressApplicationShutdownOnClose: true);
+                    new SettingsService(settingsDirectory))
+                {
+                    AgentMemoryService = null,
+                    SuppressApplicationShutdownOnClose = true
+                });
 
                 Assert.NotNull(window);
             }
@@ -1488,6 +1486,25 @@ public sealed class WindowShellTests
                 DeleteSettingsDirectory(settingsDirectory);
             }
         });
+    }
+
+    [Fact]
+    public void MainWindowOptionsBuilder_CreatesTheSingleCompositionRootValue()
+    {
+        var settings = PetSettings.Default;
+        var settingsService = new SettingsService(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")));
+        var autoStartService = new FakeAutoStartService { Enabled = true };
+
+        var options = new MainWindowOptionsBuilder(settings, settingsService)
+        {
+            AutoStartService = autoStartService,
+            SuppressApplicationShutdownOnClose = true
+        }.Build();
+
+        Assert.Same(settings, options.Settings);
+        Assert.Same(settingsService, options.SettingsService);
+        Assert.Same(autoStartService, options.AutoStartService);
+        Assert.True(options.SuppressApplicationShutdownOnClose);
     }
 
     [Fact]
@@ -2117,10 +2134,7 @@ public sealed class WindowShellTests
         RunOnStaThread(() =>
         {
             var settingsDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
-            var window = new MainWindow(
-                PetSettings.Default,
-                new SettingsService(settingsDirectory),
-                suppressApplicationShutdownOnClose: true);
+            var window = CreateWindow(settingsDirectory);
             Assert.Equal(
                 TimeSpan.FromSeconds(30),
                 window.CaptureRuntimeState().EventTimerInterval);
@@ -2151,7 +2165,7 @@ public sealed class WindowShellTests
             var dialogue = new DialogueService();
             var animations = new ControlledAnimationController();
             var savedSettings = new List<PetSettings>();
-            var window = new MainWindow(new MainWindowDependencies(
+            var window = new MainWindow(new MainWindowOptions(
                 PetSettings.Default,
                 new SettingsService(settingsDirectory))
             {
@@ -2877,10 +2891,7 @@ public sealed class WindowShellTests
         RunOnStaThread(() =>
         {
             var settingsDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
-            var window = new MainWindow(
-                PetSettings.Default,
-                new SettingsService(settingsDirectory),
-                suppressApplicationShutdownOnClose: true);
+            var window = CreateWindow(settingsDirectory);
             window.Show();
             window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
             var startup = GetLastReply(window);
@@ -2913,7 +2924,7 @@ public sealed class WindowShellTests
             time.SetLocalNow(new DateTime(2026, 7, 26, 10, 0, 0));
             using var factory = new ControlledDialogueFactory("unused full reply");
             var dialogue = DialogueService.CreateDeferred(factory.Create, time);
-            var window = new MainWindow(new MainWindowDependencies(
+            var window = new MainWindow(new MainWindowOptions(
                 PetSettings.Default,
                 new SettingsService(settingsDirectory))
             {
@@ -2960,10 +2971,7 @@ public sealed class WindowShellTests
         RunOnStaThread(() =>
         {
             var settingsDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
-            var window = new MainWindow(
-                PetSettings.Default,
-                new SettingsService(settingsDirectory),
-                suppressApplicationShutdownOnClose: true);
+            var window = CreateWindow(settingsDirectory);
             window.Show();
             window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
             var bubble = Assert.IsAssignableFrom<FrameworkElement>(window.FindName("SpeechBubble"));
@@ -3028,7 +3036,7 @@ public sealed class WindowShellTests
                 var settingsDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
                 var time = new ManualTimeProvider();
                 time.SetLocalNow(new DateTime(2026, 7, 26, 10, 0, 0));
-                var window = new MainWindow(new MainWindowDependencies(
+                var window = new MainWindow(new MainWindowOptions(
                     PetSettings.Default,
                     new SettingsService(settingsDirectory))
                 {
@@ -3528,7 +3536,7 @@ public sealed class WindowShellTests
         {
             var settingsDirectory = CreateSettingsDirectory();
             var announcements = new List<FrameworkElement>();
-            var window = new MainWindow(new MainWindowDependencies(
+            var window = new MainWindow(new MainWindowOptions(
                 PetSettings.Default,
                 new SettingsService(settingsDirectory))
             {
@@ -3846,10 +3854,7 @@ public sealed class WindowShellTests
         var settingsDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         RunOnStaThread(() =>
         {
-            var window = new MainWindow(
-                PetSettings.Default,
-                new SettingsService(settingsDirectory),
-                suppressApplicationShutdownOnClose: true);
+            var window = CreateWindow(settingsDirectory);
 
             Assert.Equal(WindowStyle.None, window.WindowStyle);
             Assert.True(window.AllowsTransparency);
@@ -3906,18 +3911,24 @@ public sealed class WindowShellTests
     private static Task RunOnStaThreadAsync(Func<Task> action) =>
         StaHost.Value.InvokeAsync(action);
 
-    private static MainWindow CreateWindow(string settingsDirectory) =>
-        new(
+    private static MainWindow CreateWindow(
+        string settingsDirectory,
+        bool suppressApplicationShutdownOnClose = true,
+        Action? shutdownApplication = null) =>
+        new(new MainWindowOptions(
             PetSettings.Default,
-            new SettingsService(settingsDirectory),
-            suppressApplicationShutdownOnClose: true);
+            new SettingsService(settingsDirectory))
+        {
+            SuppressApplicationShutdownOnClose = suppressApplicationShutdownOnClose,
+            ShutdownApplication = shutdownApplication
+        });
 
     private static MainWindow CreateWindowWithScheduler(
         string settingsDirectory,
         AmbientActionScheduler ambientScheduler,
         PetSettings? settings = null,
         IPetAnimationController? animationController = null) =>
-        new(new MainWindowDependencies(
+        new(new MainWindowOptions(
             settings ?? PetSettings.Default,
             new SettingsService(settingsDirectory))
         {
@@ -3931,7 +3942,7 @@ public sealed class WindowShellTests
         IAutoStartService autoStartService,
         bool suppressApplicationShutdownOnClose = true,
         Action? shutdownApplication = null) =>
-        new(new MainWindowDependencies(
+        new(new MainWindowOptions(
             PetSettings.Default,
             new SettingsService(settingsDirectory))
         {
@@ -3945,7 +3956,7 @@ public sealed class WindowShellTests
         string settingsDirectory,
         Func<AgentMemorySnapshot, Task> saveAgentMemoryAsync,
         DialogueService dialogue) =>
-        new(new MainWindowDependencies(
+        new(new MainWindowOptions(
             PetSettings.Default,
             new SettingsService(settingsDirectory))
         {
@@ -3962,7 +3973,7 @@ public sealed class WindowShellTests
         Func<PetSettings, Task> saveSettingsAsync,
         Func<AgentMemorySnapshot, Task> saveAgentMemoryAsync,
         Action shutdownApplication) =>
-        new(new MainWindowDependencies(
+        new(new MainWindowOptions(
             PetSettings.Default,
             new SettingsService(settingsDirectory))
         {
@@ -3982,7 +3993,7 @@ public sealed class WindowShellTests
         TimeProvider timeProvider,
         Func<AgentMemorySnapshot, Task>? saveAgentMemoryAsync = null,
         DialogueWarmupCoordinator? warmupCoordinator = null) =>
-        new(new MainWindowDependencies(
+        new(new MainWindowOptions(
             PetSettings.Default,
             new SettingsService(settingsDirectory))
         {
@@ -4005,7 +4016,7 @@ public sealed class WindowShellTests
     {
         var dialogue = DialogueService.CreateDeferred(_ => agent, timeProvider);
         Assert.True(dialogue.WarmupAsync().GetAwaiter().GetResult());
-        return new MainWindow(new MainWindowDependencies(
+        return new MainWindow(new MainWindowOptions(
             PetSettings.Default,
             new SettingsService(settingsDirectory))
         {

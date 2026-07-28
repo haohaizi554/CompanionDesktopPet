@@ -101,41 +101,41 @@ public partial class MainWindow : Window
     private bool InteractionFrozen => _exitCommandRunning || _isClosed;
     private bool PresentationSuspended => InteractionFrozen || _isHiddenToTray;
 
-    internal MainWindow(MainWindowDependencies dependencies)
+    internal MainWindow(MainWindowOptions options)
     {
-        ArgumentNullException.ThrowIfNull(dependencies);
+        ArgumentNullException.ThrowIfNull(options);
         InitializeComponent();
-        _settings = dependencies.Settings;
-        _settingsService = dependencies.SettingsService;
-        _saveAgentMemoryAsync = dependencies.SaveAgentMemoryAsync
-            ?? (dependencies.AgentMemoryService is null
+        _settings = options.Settings;
+        _settingsService = options.SettingsService;
+        _saveAgentMemoryAsync = options.SaveAgentMemoryAsync
+            ?? (options.AgentMemoryService is null
                 ? null
-                : dependencies.AgentMemoryService.SaveAsync);
-        _saveSettingsAsync = dependencies.SaveSettingsAsync ?? _settingsService.SaveAsync;
-        _idleTimeProvider = dependencies.IdleTimeProvider ?? new WindowsIdleTimeProvider();
-        _ambientScheduler = dependencies.AmbientScheduler ?? new AmbientActionScheduler();
-        _autoStartService = dependencies.AutoStartService
-            ?? (dependencies.SuppressApplicationShutdownOnClose
+                : options.AgentMemoryService.SaveAsync);
+        _saveSettingsAsync = options.SaveSettingsAsync ?? _settingsService.SaveAsync;
+        _idleTimeProvider = options.IdleTimeProvider ?? new WindowsIdleTimeProvider();
+        _ambientScheduler = options.AmbientScheduler ?? new AmbientActionScheduler();
+        _autoStartService = options.AutoStartService
+            ?? (options.SuppressApplicationShutdownOnClose
                 ? DisabledAutoStartService.Instance
                 : new WindowsAutoStartService());
-        _timeProvider = dependencies.TimeProvider ?? TimeProvider.System;
-        _suppressApplicationShutdownOnClose = dependencies.SuppressApplicationShutdownOnClose;
-        _shutdownApplication = dependencies.ShutdownApplication
+        _timeProvider = options.TimeProvider ?? TimeProvider.System;
+        _suppressApplicationShutdownOnClose = options.SuppressApplicationShutdownOnClose;
+        _shutdownApplication = options.ShutdownApplication
             ?? (() => System.Windows.Application.Current?.Shutdown());
-        _dialogue = dependencies.DialogueService
+        _dialogue = options.DialogueService
             ?? DialogueService.CreateDeferred(
-                dependencies.AgentMemory,
+                options.AgentMemory,
                 timeProvider: _timeProvider);
-        _dialogueWarmup = dependencies.WarmupCoordinator
+        _dialogueWarmup = options.WarmupCoordinator
             ?? new DialogueWarmupCoordinator(_dialogue, _timeProvider);
-        _announceLiveRegionChanged = dependencies.AnnounceLiveRegionChanged
+        _announceLiveRegionChanged = options.AnnounceLiveRegionChanged
             ?? RaiseLiveRegionChanged;
-        _foregroundFullscreenDetector = dependencies.ForegroundFullscreenDetector
+        _foregroundFullscreenDetector = options.ForegroundFullscreenDetector
             ?? new WindowsForegroundFullscreenDetector();
         _automaticCadence = new AutomaticDialogueCadenceController(
-            dependencies.DialogueScheduler ?? new DialogueScheduler(_random),
+            options.DialogueScheduler ?? new DialogueScheduler(_random),
             _timeProvider);
-        _animation = dependencies.AnimationController ?? new AnimationController(
+        _animation = options.AnimationController ?? new AnimationController(
             BreathingScale,
             SwayRotation,
             FloatingOffset,
@@ -182,40 +182,6 @@ public partial class MainWindow : Window
         _memoryTimer.Tick += MemoryTimer_Tick;
         _eventTimer.Tick += EventTimer_Tick;
         _ambientTimer.Tick += AmbientTimer_Tick;
-    }
-
-    public MainWindow(
-        PetSettings settings,
-        SettingsService settingsService,
-        AgentMemoryService? agentMemoryService = null,
-        AgentMemorySnapshot? agentMemory = null,
-        IIdleTimeProvider? idleTimeProvider = null,
-        bool suppressApplicationShutdownOnClose = false,
-        Action? shutdownApplication = null)
-        : this(new MainWindowDependencies(settings, settingsService)
-        {
-            AgentMemoryService = agentMemoryService,
-            AgentMemory = agentMemory,
-            IdleTimeProvider = idleTimeProvider,
-            SuppressApplicationShutdownOnClose = suppressApplicationShutdownOnClose,
-            ShutdownApplication = shutdownApplication
-        })
-    {
-    }
-
-    internal MainWindow(
-        PetSettings settings,
-        SettingsService settingsService,
-        AgentMemoryService? agentMemoryService,
-        AgentMemorySnapshot? agentMemory,
-        IAutoStartService autoStartService)
-        : this(new MainWindowDependencies(settings, settingsService)
-        {
-            AgentMemoryService = agentMemoryService,
-            AgentMemory = agentMemory,
-            AutoStartService = autoStartService
-        })
-    {
     }
 
     private void Window_Loaded(object sender, RoutedEventArgs e)

@@ -74,7 +74,7 @@ public sealed class AppLifecycleTests
             using var primary = new SingleInstanceGuard(name);
             using var duplicate = new SingleInstanceGuard(name);
             var exiting = false;
-            var window = new MainWindow(new MainWindowDependencies(
+            var window = new MainWindow(new MainWindowOptions(
                 PetSettings.Default,
                 new SettingsService(directory))
             {
@@ -122,7 +122,7 @@ public sealed class AppLifecycleTests
         RunOnStaThread(() =>
         {
             var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
-            var window = new MainWindow(new MainWindowDependencies(
+            var window = new MainWindow(new MainWindowOptions(
                 PetSettings.Default,
                 new SettingsService(directory))
             {
@@ -177,7 +177,7 @@ public sealed class AppLifecycleTests
         RunOnStaThread(() =>
         {
             var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
-            var window = new MainWindow(new MainWindowDependencies(
+            var window = new MainWindow(new MainWindowOptions(
                 PetSettings.Default,
                 new SettingsService(directory))
             {
@@ -223,7 +223,7 @@ public sealed class AppLifecycleTests
         RunOnStaThread(() =>
         {
             var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
-            var window = new MainWindow(new MainWindowDependencies(
+            var window = new MainWindow(new MainWindowOptions(
                 PetSettings.Default,
                 new SettingsService(directory))
             {
