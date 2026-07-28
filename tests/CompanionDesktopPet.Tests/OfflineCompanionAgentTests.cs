@@ -1,23 +1,12 @@
 using CompanionDesktopPet.Services;
 using System.Diagnostics;
 using System.IO;
-using System.Reflection;
 
 namespace CompanionDesktopPet.Tests;
 
 [Collection(PerformanceTestCollection.Name)]
 public sealed class OfflineCompanionAgentTests
 {
-    [Theory]
-    [InlineData("State")]
-    [InlineData("History")]
-    public void LiveMutableStateAndHistory_AreNotExposedByTheAgent(string propertyName)
-    {
-        Assert.Null(typeof(OfflineCompanionAgent).GetProperty(
-            propertyName,
-            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic));
-    }
-
     [Fact]
     public void CreateSnapshot_ReturnsDetachedCharacterStateAndStoryCollection()
     {

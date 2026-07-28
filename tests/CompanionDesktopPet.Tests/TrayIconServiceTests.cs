@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
-using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Windows.Threading;
 using CompanionDesktopPet.Services;
@@ -350,11 +349,7 @@ public sealed class TrayIconServiceTests
             source.Dispose();
             stream.Dispose();
 
-            var field = typeof(TrayIconService).GetField(
-                "_ownedIcon",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.NotNull(field);
-            var ownedIcon = Assert.IsType<Icon>(field!.GetValue(service));
+            var ownedIcon = service.OwnedIcon;
             Assert.NotEqual(IntPtr.Zero, ownedIcon.Handle);
             Assert.Same(ownedIcon, shell.Icon);
         });

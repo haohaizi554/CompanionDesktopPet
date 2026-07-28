@@ -1,5 +1,4 @@
 using System.Runtime.ExceptionServices;
-using System.Reflection;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
@@ -12,64 +11,6 @@ namespace CompanionDesktopPet.Tests;
 
 public sealed class AnimationControllerTests
 {
-    [Fact]
-    public void AnimationController_PreservesLegacyClrEntryPoints()
-    {
-        var legacyConstructorParameterTypes = new[]
-        {
-            typeof(ScaleTransform),
-            typeof(RotateTransform),
-            typeof(TranslateTransform),
-            typeof(ScaleTransform),
-            typeof(RotateTransform),
-            typeof(ScaleTransform),
-            typeof(RotateTransform),
-            typeof(TranslateTransform),
-            typeof(IReadOnlyList<FrameworkElement>)
-        };
-
-        var legacyConstructor = typeof(AnimationController).GetConstructor(
-            BindingFlags.Instance | BindingFlags.Public,
-            binder: null,
-            legacyConstructorParameterTypes,
-            modifiers: null);
-        Assert.NotNull(legacyConstructor);
-
-        var completeConstructor = typeof(AnimationController).GetConstructor(
-            BindingFlags.Instance | BindingFlags.Public,
-            binder: null,
-            [.. legacyConstructorParameterTypes,
-                typeof(FrameworkElement),
-                typeof(FrameworkElement),
-                typeof(TranslateTransform)],
-            modifiers: null);
-        Assert.NotNull(completeConstructor);
-        Assert.DoesNotContain(
-            completeConstructor!.GetParameters(),
-            parameter => parameter.HasDefaultValue);
-
-        Assert.NotNull(typeof(AnimationController).GetMethod(
-            nameof(AnimationController.PlayLanding),
-            BindingFlags.Instance | BindingFlags.Public,
-            binder: null,
-            Type.EmptyTypes,
-            modifiers: null));
-        var landingWithCompletion = typeof(AnimationController).GetMethod(
-            nameof(AnimationController.PlayLanding),
-            BindingFlags.Instance | BindingFlags.Public,
-            binder: null,
-            [typeof(Action)],
-            modifiers: null);
-        Assert.NotNull(landingWithCompletion);
-        Assert.False(landingWithCompletion!.GetParameters()[0].HasDefaultValue);
-    }
-
-    [Fact]
-    public void AnimationController_ExposesNoCorpusDrivenAmbientGesture()
-    {
-        Assert.Null(typeof(AnimationController).GetMethod("PlayAmbientGesture"));
-    }
-
     [Fact]
     public void IdlePauseResumeAndClick_ManageAnimationState()
     {

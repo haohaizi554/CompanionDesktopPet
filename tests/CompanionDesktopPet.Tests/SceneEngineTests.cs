@@ -591,15 +591,14 @@ public sealed class SceneEngineTests
     [Fact]
     public void SceneContext_LeavesFullscreenUnknownByDefault()
     {
-        var property = typeof(SceneContext).GetProperty(nameof(SceneContext.IsFullscreen));
         var now = new DateTime(2026, 7, 22, 15, 0, 0);
         var context = new SceneContext(
             CompanionEvent.Automatic,
             now,
             CharacterState.Create(now));
 
-        Assert.Equal(typeof(bool?), property!.PropertyType);
-        Assert.Null(property.GetValue(context));
+        bool? fullscreen = context.IsFullscreen;
+        Assert.Null(fullscreen);
         Assert.DoesNotContain("not_fullscreen", ContextTokens(context));
     }
 

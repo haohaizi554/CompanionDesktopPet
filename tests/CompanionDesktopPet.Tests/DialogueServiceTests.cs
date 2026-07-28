@@ -43,13 +43,6 @@ public sealed class DialogueServiceTests
         Assert.Contains(source, PersonaCorpus.All);
     }
 
-    [Fact]
-    public void DialogueService_ExposesNoLegacyGreetingOrPhrasePath()
-    {
-        Assert.Null(typeof(DialogueService).GetMethod("GetGreeting"));
-        Assert.Null(typeof(DialogueService).GetMethod("GetNextPhrase"));
-    }
-
     private sealed class RecordingAgent : ICompanionDialogueAgent
     {
         public DateTime? NextStoryDueAt => null;

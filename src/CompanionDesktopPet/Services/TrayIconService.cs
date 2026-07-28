@@ -79,6 +79,7 @@ public sealed class TrayIconService : IDisposable
     internal Forms.ToolStripMenuItem PauseMenuItem { get; }
     internal Forms.ToolStripMenuItem AutoStartMenuItem { get; }
     internal Forms.ToolStripMenuItem ExitMenuItem { get; }
+    internal Icon OwnedIcon => _ownedIcon;
 
     public TrayIconService(
         Dispatcher dispatcher,
