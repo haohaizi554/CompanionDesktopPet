@@ -84,4 +84,4 @@
 
 ## 发布结论边界
 
-本审计只证明当前 source/test 对原始 claim 的状态，不把搜索结果、历史测试数字或旧 Release 哈希冒充新鲜证据。Task 7 的 simulation、validator、Python unittest、.NET restore、`IsTestProject`、完整 Release suite 和最终 `main` CI 必须全部以实际输出登记；目标 `v1.1.0` 的 EXE、ProductVersion、签名、隔离 smoke、资产哈希与 Release URL 仍只能由新 annotated tag 流水线产生。
+本审计只证明当前 source/test 对原始 claim 的状态，不把搜索结果、历史测试数字或旧 Release 哈希冒充新鲜证据。2026-07-29 后续发布步骤已由新的 annotated `v1.1.0` 标签流水线实际产生 EXE、ProductVersion、签名状态、隔离 smoke、资产哈希与中文 Release；完整结果统一登记在发布与清理清单，本审计不重复抄写二进制证据。

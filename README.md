@@ -21,7 +21,7 @@ outputs/CompanionDesktopPet/使用说明.txt
 
 `佳怡桌宠.exe` 是 `win-x64` 自包含单文件应用，运行时不需要另行安装 .NET，也不依赖旁置或外部应用 DLL、JSON、PDB 等运行时 sidecar。“自包含单 EXE”不表示进程绝不加载 DLL；作为 Windows 桌面应用，它仍会正常使用操作系统提供的系统 DLL 与系统组件。
 
-当前公开交付仍是历史 Release [v1.0.0](https://github.com/haohaizi554/CompanionDesktopPet/releases/tag/v1.0.0)：EXE 从提交 `ad5aa867a06d84d64fc4399cb4d258becce1b8ab` 使用 .NET SDK `10.0.301` 构建，`ProductVersion=1.0.0+ad5aa867a06d84d64fc4399cb4d258becce1b8ab`，大小为 `80,299,750` 字节，SHA-256 为 `b79bf57a94d63387b6d8db288e53f64b06af32a3aa4881e7c069634839442a82`。publish、交付与隔离烟测副本的哈希一致，真实 WPF smoke 自行以退出码 0 结束。GitHub 会清洗非 ASCII 附件名，因此外层资产使用 `Jiayi-Desktop-Pet.exe`、`Jiayi-Desktop-Pet-README-zh-CN.txt` 和 `Jiayi-Desktop-Pet-win-x64.zip`；ZIP 内仍保留 `佳怡桌宠.exe` 与 `使用说明.txt`。完整证据见[发布与清理清单](docs/release/2026-07-25-expanded-runtime-release-checklist.md)。该 v1.0.0 EXE 未做 Authenticode 代码签名，从网络下载时可能出现 Windows SmartScreen/安全软件信誉提示。当前源码中的后续修复只有在新的版本标签完成全部门禁、生成新哈希并回读 GitHub Release 后，才属于新的公开交付。
+当前公开交付是 [v1.1.0](https://github.com/haohaizi554/CompanionDesktopPet/releases/tag/v1.1.0)：EXE 从提交 `dda5350cb2fe102d78a41c5d998eaa4592ded267` 使用 .NET SDK `9.0.301` 构建，`ProductVersion=1.1.0+dda5350cb2fe102d78a41c5d998eaa4592ded267`，大小为 `80,454,312` 字节，SHA-256 为 `75a074d6c3731e135be99ceb694e0d3fa6ea9a9f9bcc0f52b736eb3c030cb692`。标签流水线与通过 `127.0.0.1:7890` 代理回下载后的 publish、交付及隔离烟测副本哈希一致，真实 WPF smoke 均自行以退出码 0 结束。GitHub 外层资产使用 `Jiayi-Desktop-Pet.exe`、`Jiayi-Desktop-Pet-README-zh-CN.txt` 和 `Jiayi-Desktop-Pet-win-x64.zip`；ZIP 内保留 `佳怡桌宠.exe` 与 `使用说明.txt`。完整证据见[发布与清理清单](docs/release/2026-07-25-expanded-runtime-release-checklist.md)。该 v1.1.0 EXE 未做 Authenticode 代码签名，从网络下载时可能出现 Windows SmartScreen/安全软件信誉提示。
 
 ## 体验与操作
 
@@ -30,7 +30,7 @@ outputs/CompanionDesktopPet/使用说明.txt
 - 气泡与人物之间保持 30 DIP 的视觉距离；鼠标停在人物或气泡上时，只暂停当前气泡剩余的消失倒计时，移开后从剩余时间继续。
 - 右键人物：打开卡哇伊风格控制面板，可说句话、`打个招呼♡`、暂停/继续动画、调整大小、切换置顶、设置开机自启动、恢复位置、藏到托盘或退出。
 - 托盘：双击图标切换显示/隐藏；右键菜单可显示/隐藏、说句话、暂停/继续、切换开机自启动或退出。
-- 当前源码已支持 Windows 高对比度模式：气泡与控制面板会采用系统颜色和无阴影样式，关闭后恢复卡哇伊主题。此能力不在上面的历史 v1.0.0 EXE 中；必须等 v1.1.0 完成最终构建与 Release 实证后，才可作为公开交付能力宣称。
+- v1.1.0 已支持 Windows 高对比度模式：气泡与控制面板会采用系统颜色和无阴影样式，关闭后恢复卡哇伊主题。
 
 暂停会复位并暂停待机动作、自动眨眼和问候；点击爱心与左右倾斜、拖动/落地、手动说话和托盘操作仍可使用。
 
@@ -62,7 +62,7 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run
 - 点击专用恢复路径通过 8 小时连续会话、900 次连续点击和旧版静默记忆恢复测试；主动播报仍遵守原有静默预算。
 - 启动不在 UI 线程同步构建大型目录；预热期间使用固定本地 fallback，且真实 WPF 烟测只接受完整语料产生的启动回复。
 - WPF 只嵌入已集成的 v2 运行时资源；75,375 条源物理数据行及其 archive 证据不会整体进入运行时。
-- 历史 `v1.0.0` 的 Release 测试、干净 self-contained single-file publish、源/副本 SHA-256、固定种子重建和隔离单 EXE 烟测均已通过其最终门禁；`v1.1.0` 必须在目标 tag 上重新生成独立证据，不能沿用历史数字或二进制哈希。
+- `v1.1.0` 已在目标 annotated tag 上重新完成 Release 测试、干净 self-contained single-file publish、源/副本 SHA-256、固定种子重建、隔离单 EXE 烟测、8 项资产上传与代理回下载复验；未沿用 v1.0.0 的历史数字或二进制哈希。
 
 完整语料维护契约、20 字段说明和精确命令见 [README-persona-corpus.md](README-persona-corpus.md)。
 
