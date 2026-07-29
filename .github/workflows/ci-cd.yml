@@ -906,11 +906,11 @@ jobs:
 
           ## 发布亮点
 
-          - 运行时语料已替换为 100 个 authored 批次，每批 300 条，共 30,000 条 `curated_authored`；`legacy_surface_variant` 为 0 条。
-          - 30,000 条语料按唯一 `semantic_group` 聚合为 1,190 个场景；v2 元数据从 20 列扩展到 21 列，新增 `relationship_profile`。
-          - 关系画像精确分布为：`neutral` 26,165 条、`warm_friend` 1,550 条、`playful_friend` 2,185 条、`nickname_easter_egg` 100 条。
+          - 运行时语料已替换为 100 个 authored 批次，每批 300 条，共 30,000 条 curated_authored；legacy_surface_variant 为 0 条。
+          - 30,000 条语料按唯一 semantic_group 聚合为 1,190 个场景；v2 元数据从 20 列扩展到 21 列，新增 relationship_profile。
+          - 关系画像精确分布为：neutral 26,165 条、warm_friend 1,550 条、playful_friend 2,185 条、nickname_easter_egg 100 条。
           - 新增逐行 authorship ledger；manifest、ledger、运行时 TSV 与归档 TSV 均由发布门禁登记并复核 SHA-256。
-          - 运行时对 `warm_friend` 实施最近 20 次最多 2 次、对 `nickname_easter_egg` 实施最近 100 次最多 1 次的暴露上限。
+          - 运行时对 warm_friend 实施最近 20 次最多 2 次、对 nickname_easter_egg 实施最近 100 次最多 1 次的暴露上限。
 
           ## 验证结果
 

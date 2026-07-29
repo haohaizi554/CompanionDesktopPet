@@ -259,9 +259,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
 | `data/optimized/persona-authorship-ledger.tsv` | `31305579ebf55d2d49c3227d7c7664b16e89abd0e9aab3cbbfa11ae3e0cace8d` |
 | `reports/simulation-report.md` | `c55beb9155042acf326deef7a6b57f85913704d35dd9c02c4ccc5036df10eb3e` |
 | `reports/simulation-events.json` | `4e4b66d7eeac6dd01dd70e117e97b67a75f52ff2cf1c21f6fa34920e0e105493` |
-| 当前 `v1.2.1` 的 `outputs/CompanionDesktopPet/佳怡桌宠.exe` | `7d5343c01e1ed89ef15e3d9595f6c9fb1ec24f8275db15628a5b541ad5c1ff03` |
+| 当前 `v1.3.0` 的 `outputs/CompanionDesktopPet/佳怡桌宠.exe` | `9d20f5a546d10c65ac5b65558dbcc722f96ceef5e63fb89484dcb69bc420d5e6` |
 | 历史 `v1.0.0` 的 `outputs/CompanionDesktopPet/佳怡桌宠.exe` | `b79bf57a94d63387b6d8db288e53f64b06af32a3aa4881e7c069634839442a82` |
 
-当前 EXE 是 `v1.2.1` 实证：annotated tag 指向提交 `421b54a349062ab540b27bfe6f9a97ba7df5b6f2`，使用 .NET SDK `9.0.301` 构建，`ProductVersion=1.2.1+421b54a349062ab540b27bfe6f9a97ba7df5b6f2`，大小为 `80,454,500` 字节。云端 publish、delivery、isolated、直接 Release 资产、ZIP 内 EXE、经 `127.0.0.1:7890` 回下载后的仓库交付副本与任务交付副本 SHA-256 全部等于上表值；云端 smoke PID `8556` 与最终本地复核 smoke PID `46072` 均自行以退出码 0 结束。历史 v1.0.0/v1.1.0 的独立证据仍保留在发布清单中。
+当前 EXE 是 `v1.3.0` 实证：annotated tag 指向提交 `20fcbe2051e4d1c0f382a59aab5f30b22b8462f5`，使用 .NET SDK `9.0.301` 构建，`ProductVersion=1.3.0+20fcbe2051e4d1c0f382a59aab5f30b22b8462f5`，大小为 `79,112,877` 字节。云端 publish、delivery、isolated、直接 Release 资产、ZIP 内 EXE、经 `127.0.0.1:7890` 回下载后的仓库交付副本与任务交付副本 SHA-256 全部等于上表值；云端 smoke PID `1952` 与最终本地复核 smoke PID `32112` 均自行以退出码 0 结束。历史 v1.0.0/v1.1.0/v1.2.1 的独立证据仍保留在发布清单中。
 
-发布表中任何哈希占位都必须先清零；v1.2.1 的 EXE、资产与校验和来自目标标签流水线和代理回下载实证，没有预填或沿用旧值。完整 8 项资产哈希、ZIP 清单、签名状态和 CI 链接见发布与清理清单。
+发布表中任何哈希占位都必须先清零；v1.3.0 的 EXE、资产与校验和来自目标标签流水线和代理回下载实证，没有预填或沿用旧值。完整 8 项资产哈希、ZIP 清单、签名状态和 CI 链接见发布与清理清单。
