@@ -167,7 +167,7 @@ public sealed class TemporalDialogueServiceTests
     [Theory]
     [InlineData(4)]
     [InlineData(5)]
-    public void GetContextualLines_AtDawnUsesContextAgnosticAuthoredRowsWhenNoDawnInventoryExists(int hour)
+    public void GetContextualLines_AtDawnUsesTheMergedLegacyDawnInventory(int hour)
     {
         var lines = TemporalDialogueService.GetContextualLines(new DateTime(2026, 7, 22, hour, 30, 0));
         var dawnText = PersonaCorpus.All
@@ -180,10 +180,11 @@ public sealed class TemporalDialogueServiceTests
             .Select(line => line.Text)
             .ToHashSet(StringComparer.Ordinal);
         var enabledText = PersonaCorpus.All.Select(line => line.Text).ToHashSet(StringComparer.Ordinal);
-        Assert.Empty(dawnText);
-        Assert.Empty(lateNightText);
+        Assert.NotEmpty(dawnText);
+        Assert.NotEmpty(lateNightText);
         Assert.NotEmpty(lines);
         Assert.All(lines, line => Assert.Contains(line, enabledText));
+        Assert.Contains(lines, dawnText.Contains);
     }
 
     [Fact]

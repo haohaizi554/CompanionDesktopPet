@@ -84,6 +84,9 @@ public sealed class SceneHistory
         (int)(PersonaContractGenerated.DrySharpPlaybackMaximum * DrySharpPlaybackWindow);
     public const int SeasoningRecentWindow = PersonaContractGenerated.SeasoningRecentWindow;
     public const int SeasoningRecentMaximum = PersonaContractGenerated.SeasoningRecentMaximum;
+    public const int SeasoningPlaybackWindow = PersonaContractGenerated.SourceTierRecentWindow;
+    public const int SeasoningPlaybackMaximum =
+        (int)(PersonaContractGenerated.SeasoningPlaybackMaximum * SeasoningPlaybackWindow);
 
     private readonly object _sync = new();
     private readonly List<SceneHistoryEntry> _entries = [];
@@ -368,9 +371,12 @@ public sealed class SceneHistory
         lock (_sync)
         {
             return !line.HasSeasoningMarker
-                   || CandidateWindowCount(
-                       SeasoningRecentWindow,
-                       IsSeasoningEntry) <= SeasoningRecentMaximum;
+                   || (CandidateWindowCount(
+                           SeasoningRecentWindow,
+                           IsSeasoningEntry) <= SeasoningRecentMaximum
+                       && CandidateWindowCount(
+                           SeasoningPlaybackWindow,
+                           IsSeasoningEntry) <= SeasoningPlaybackMaximum);
         }
     }
 
@@ -679,7 +685,7 @@ public sealed partial class SceneScheduler
                 ignoreTrigger: false,
                 bypassInterruptionBudget))
             .ToArray();
-        var historyEntries = history.Entries;
+        var historyEntries = history.SnapshotRecentEntries(PersonaContractGenerated.SourceTierRecentWindow);
         var candidates = ApplySourceTierPolicy(eligibleScenes, historyEntries)
             .Select(scene => Score(scene, recent, SourceTierScoreBonus(historyEntries, scene.SourceTier)))
             .ToArray();
@@ -708,7 +714,7 @@ public sealed partial class SceneScheduler
             .Where(scene => !history.IsSemanticGroupCoolingDown(scene, context.Now))
             .Where(history.MeetsRareRecentQuotas)
             .ToArray();
-        var historyEntries = history.Entries;
+        var historyEntries = history.SnapshotRecentEntries(PersonaContractGenerated.SourceTierRecentWindow);
         var quotaRelaxed = ApplySourceTierPolicy(quotaRelaxedScenes, historyEntries)
             .Select(scene => Score(scene, recent, SourceTierScoreBonus(historyEntries, scene.SourceTier)))
             .ToArray();
@@ -790,7 +796,7 @@ public sealed partial class SceneScheduler
         ArgumentNullException.ThrowIfNull(history);
         ArgumentNullException.ThrowIfNull(random);
 
-        var playback = history.Entries;
+        var playback = history.SnapshotRecentEntries(PersonaContractGenerated.SourceTierRecentWindow);
         var quotaEligibleScenes = ApplySourceTierPolicy(
             scenes.Where(history.MeetsRareRecentQuotas).ToArray(), playback);
         if (quotaEligibleScenes.Length == 0)
@@ -986,15 +992,26 @@ public sealed partial class SceneScheduler
 
         var authoredAvailable = scenes.Any(scene => scene.SourceTier == PersonaSourceTier.Authored);
         var legacyAvailable = scenes.Any(scene => scene.SourceTier == PersonaSourceTier.Legacy);
-        var recent = history.TakeLast(PersonaContractGenerated.SourceTierRecentWindow).ToArray();
-        if (recent.Length < PersonaContractGenerated.SourceTierWarmupObservations)
+        var recentStart = Math.Max(0, history.Count - PersonaContractGenerated.SourceTierRecentWindow);
+        var recentCount = history.Count - recentStart;
+        if (recentCount < PersonaContractGenerated.SourceTierWarmupObservations)
         {
             return scenes.ToArray();
         }
 
-        var legacyCount = recent.Count(entry => entry.SourceTier == PersonaSourceTier.Legacy);
-        var currentRatio = legacyCount / (double)recent.Length;
-        var preceding = recent.TakeLast(PersonaContractGenerated.SourceTierRecentWindow - 1).ToArray();
+        var legacyCount = 0;
+        for (var index = recentStart; index < history.Count; index++)
+        {
+            legacyCount += history[index].SourceTier == PersonaSourceTier.Legacy ? 1 : 0;
+        }
+        var currentRatio = legacyCount / (double)recentCount;
+        var precedingStart = Math.Max(0, history.Count - (PersonaContractGenerated.SourceTierRecentWindow - 1));
+        var precedingLegacy = 0;
+        for (var index = precedingStart; index < history.Count; index++)
+        {
+            precedingLegacy += history[index].SourceTier == PersonaSourceTier.Legacy ? 1 : 0;
+        }
+        var precedingCount = history.Count - precedingStart;
         return scenes.Where(scene =>
         {
             if (scene.SourceTier == PersonaSourceTier.Authored
@@ -1004,9 +1021,8 @@ public sealed partial class SceneScheduler
                 return false;
             }
 
-            var projectedLegacy = preceding.Count(entry => entry.SourceTier == PersonaSourceTier.Legacy)
-                                  + (scene.SourceTier == PersonaSourceTier.Legacy ? 1 : 0);
-            var projectedRatio = projectedLegacy / (double)(preceding.Length + 1);
+            var projectedLegacy = precedingLegacy + (scene.SourceTier == PersonaSourceTier.Legacy ? 1 : 0);
+            var projectedRatio = projectedLegacy / (double)(precedingCount + 1);
             return scene.SourceTier != PersonaSourceTier.Legacy
                    || projectedRatio <= PersonaContractGenerated.SourceTierUpperBound
                    || !authoredAvailable;
@@ -1017,13 +1033,17 @@ public sealed partial class SceneScheduler
         IReadOnlyList<SceneHistoryEntry> history,
         PersonaSourceTier candidateTier)
     {
-        var recent = history.TakeLast(PersonaContractGenerated.SourceTierRecentWindow).ToArray();
-        var preceding = recent.TakeLast(PersonaContractGenerated.SourceTierRecentWindow - 1).ToArray();
-        var projectedLegacy = preceding.Count(entry => entry.SourceTier == PersonaSourceTier.Legacy)
-                              + (candidateTier == PersonaSourceTier.Legacy ? 1 : 0);
-        var projectedTotal = preceding.Length + 1;
+        var recentCount = Math.Min(history.Count, PersonaContractGenerated.SourceTierRecentWindow);
+        var precedingStart = Math.Max(0, history.Count - (PersonaContractGenerated.SourceTierRecentWindow - 1));
+        var precedingLegacy = 0;
+        for (var index = precedingStart; index < history.Count; index++)
+        {
+            precedingLegacy += history[index].SourceTier == PersonaSourceTier.Legacy ? 1 : 0;
+        }
+        var projectedLegacy = precedingLegacy + (candidateTier == PersonaSourceTier.Legacy ? 1 : 0);
+        var projectedTotal = history.Count - precedingStart + 1;
         var deficit = PersonaContractGenerated.SourceTierTarget * projectedTotal - projectedLegacy;
-        var multiplier = recent.Length < PersonaContractGenerated.SourceTierWarmupObservations ? 2.0 : 0.5;
+        var multiplier = recentCount < PersonaContractGenerated.SourceTierWarmupObservations ? 2.0 : 0.5;
         return candidateTier == PersonaSourceTier.Legacy ? deficit * multiplier : -deficit * multiplier;
     }
 
