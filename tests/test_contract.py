@@ -37,6 +37,31 @@ class ReleaseTestProjectContractTests(unittest.TestCase):
 
 
 class CSharpContractGeneratorTests(unittest.TestCase):
+    def test_render_emits_hybrid_inventory_and_source_tier_policy(self) -> None:
+        from tools import generate_persona_contract_cs as generator
+
+        rendered = generator.render_contract()
+
+        expected = (
+            'RuntimeProfile = "hybrid";',
+            "ExpectedRuntimeRows = 82132;",
+            "ExpectedAuthoredRuntimeRows = 30000;",
+            "ExpectedLegacyCuratedRows = 806;",
+            "ExpectedLegacySurfaceRows = 51326;",
+            "ExpectedSceneCount = 1723;",
+            "SourceTierRecentWindow = 100;",
+            "SourceTierWarmupObservations = 20;",
+            "SourceTierTarget = 0.3;",
+            "SourceTierLowerBound = 0.25;",
+            "SourceTierUpperBound = 0.35;",
+            "SourceTierPerSeedLowerBound = 0.2;",
+            "SourceTierPerSeedUpperBound = 0.4;",
+            'SourceTierMissingHistoryDefault = "authored";',
+        )
+        for literal in expected:
+            with self.subTest(literal=literal):
+                self.assertIn(literal, rendered)
+
     def test_render_emits_the_contract_controlled_relationship_profiles(self) -> None:
         from tools import generate_persona_contract_cs as generator
 
@@ -297,7 +322,7 @@ class PersonaContractFileTests(unittest.TestCase):
         self.assertEqual(
             {
                 "curated_core": [800, 1200],
-                "expanded_runtime": [30000, 60000],
+                "expanded_runtime": [30000, 90000],
             },
             contract["inventory"],
         )
@@ -306,7 +331,7 @@ class PersonaContractFileTests(unittest.TestCase):
 
         self.assertEqual((800, 1200), PERSONA_CONTRACT.inventory["curated_core"])
         self.assertEqual(
-            (30000, 60000), PERSONA_CONTRACT.inventory["expanded_runtime"]
+            (30000, 90000), PERSONA_CONTRACT.inventory["expanded_runtime"]
         )
 
     def test_release_inventory_uses_exact_published_counts(self) -> None:
@@ -314,18 +339,40 @@ class PersonaContractFileTests(unittest.TestCase):
 
         self.assertEqual(
             {
-                "expanded_runtime_rows": 30000,
-                "semantic_scene_count": 1190,
-                "legacy_surface_rows": 0,
+                "authored_runtime_rows": 30000,
+                "legacy_curated_rows": 806,
+                "legacy_surface_rows": 51326,
+                "expanded_runtime_rows": 82132,
+                "semantic_scene_count": 1723,
             },
             contract["release_inventory"],
         )
 
         from src.persona_corpus.contract import PERSONA_CONTRACT
 
-        self.assertEqual(30000, PERSONA_CONTRACT.release_inventory["expanded_runtime_rows"])
-        self.assertEqual(1190, PERSONA_CONTRACT.release_inventory["semantic_scene_count"])
-        self.assertEqual(0, PERSONA_CONTRACT.release_inventory["legacy_surface_rows"])
+        self.assertEqual("hybrid", PERSONA_CONTRACT.runtime_profile)
+        self.assertEqual(82132, PERSONA_CONTRACT.release_inventory["expanded_runtime_rows"])
+        self.assertEqual(30000, PERSONA_CONTRACT.release_inventory["authored_runtime_rows"])
+        self.assertEqual(806, PERSONA_CONTRACT.release_inventory["legacy_curated_rows"])
+        self.assertEqual(51326, PERSONA_CONTRACT.release_inventory["legacy_surface_rows"])
+        self.assertEqual(1723, PERSONA_CONTRACT.release_inventory["semantic_scene_count"])
+
+    def test_source_tier_policy_is_explicit_and_immutable(self) -> None:
+        from src.persona_corpus.contract import PERSONA_CONTRACT
+
+        self.assertEqual(
+            {
+                "recent_window": 100,
+                "warmup_observations": 20,
+                "target": 0.30,
+                "acceptance": (0.25, 0.35),
+                "per_seed_acceptance": (0.20, 0.40),
+                "missing_history_default": "authored",
+            },
+            dict(PERSONA_CONTRACT.source_tier),
+        )
+        with self.assertRaises(TypeError):
+            PERSONA_CONTRACT.source_tier["target"] = 1.0  # type: ignore[index]
 
     def test_topic_id_is_lineage_metadata_not_a_semantic_scene_dimension(self) -> None:
         contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
@@ -397,7 +444,7 @@ class PersonaContractFileTests(unittest.TestCase):
         self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
 
 
-class AuthoredIdentityContractTests(unittest.TestCase):
+class HybridRuntimeContractTests(unittest.TestCase):
     def setUp(self) -> None:
         self._temporary_directory = tempfile.TemporaryDirectory()
         self.addCleanup(self._temporary_directory.cleanup)
@@ -412,38 +459,46 @@ class AuthoredIdentityContractTests(unittest.TestCase):
         path.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
         return path
 
-    def test_contract_declares_authored_runtime_and_zero_legacy_inventory(self) -> None:
+    def test_contract_declares_hybrid_runtime_inventory(self) -> None:
         raw = self.load_contract_json()
 
-        self.assertEqual([30000, 60000], raw["inventory"]["expanded_runtime"])
-        self.assertEqual(30000, raw["release_inventory"]["expanded_runtime_rows"])
-        self.assertEqual(0, raw["release_inventory"]["legacy_surface_rows"])
+        self.assertEqual("hybrid", raw["runtime_profile"])
+        self.assertEqual([30000, 90000], raw["inventory"]["expanded_runtime"])
+        self.assertEqual(82132, raw["release_inventory"]["expanded_runtime_rows"])
+        self.assertEqual(30000, raw["release_inventory"]["authored_runtime_rows"])
+        self.assertEqual(806, raw["release_inventory"]["legacy_curated_rows"])
+        self.assertEqual(51326, raw["release_inventory"]["legacy_surface_rows"])
         self.assertIn("curated_authored", raw["controlled_values"]["source_kinds"])
 
-    def test_contract_requires_zero_legacy_surface_rows_for_authored_runtime(self) -> None:
+    def test_contract_rejects_partition_sum_mismatch(self) -> None:
         from src.persona_corpus.contract import PersonaContractError, load_persona_contract
 
         raw = self.load_contract_json()
-        raw["inventory"]["expanded_runtime"] = [30000, 60000]
-        raw["release_inventory"]["expanded_runtime_rows"] = 30000
-        raw["release_inventory"]["legacy_surface_rows"] = 1
+        raw["release_inventory"]["expanded_runtime_rows"] = 82131
 
-        with self.assertRaisesRegex(PersonaContractError, "legacy_surface_rows"):
+        with self.assertRaisesRegex(PersonaContractError, "partition sum"):
             load_persona_contract(self.write_json(raw))
 
-    def test_contract_schema_rejects_nonzero_legacy_surface_rows(self) -> None:
+    def test_contract_schema_rejects_invalid_source_tier_ratio_order(self) -> None:
         from jsonschema import Draft202012Validator, ValidationError
 
         raw = self.load_contract_json()
-        raw["inventory"]["expanded_runtime"] = [30000, 60000]
-        raw["release_inventory"]["expanded_runtime_rows"] = 30000
-        raw["release_inventory"]["legacy_surface_rows"] = 1
+        raw["source_tier"]["acceptance"] = [0.35, 0.25]
         schema = json.loads(
             (ROOT / "config/schemas/persona-contract.schema.json").read_text(encoding="utf-8")
         )
 
         with self.assertRaises(ValidationError):
             Draft202012Validator(schema).validate(raw)
+
+    def test_contract_rejects_source_tier_target_outside_acceptance(self) -> None:
+        from src.persona_corpus.contract import PersonaContractError, load_persona_contract
+
+        raw = self.load_contract_json()
+        raw["source_tier"]["target"] = 0.40
+
+        with self.assertRaisesRegex(PersonaContractError, "source_tier.target"):
+            load_persona_contract(self.write_json(raw))
 
     def test_contract_rejects_missing_or_misordered_authored_identity_marker(self) -> None:
         from src.persona_corpus.contract import PersonaContractError, load_persona_contract

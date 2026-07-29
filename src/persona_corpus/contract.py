@@ -16,8 +16,10 @@ _TOP_LEVEL_KEYS = frozenset(
     {
         "$schema",
         "schema_version",
+        "runtime_profile",
         "inventory",
         "release_inventory",
+        "source_tier",
         "category_groups",
         "categories",
         "controlled_values",
@@ -121,8 +123,10 @@ def _require_exact_hour_partition(
 @dataclass(frozen=True, slots=True)
 class PersonaContract:
     schema_version: int
+    runtime_profile: str
     inventory: Mapping[str, tuple[int, int]]
     release_inventory: Mapping[str, int]
+    source_tier: Mapping[str, object]
     category_groups: tuple[str, ...]
     categories: Mapping[str, str]
     output_modes: frozenset[str]
@@ -162,6 +166,8 @@ def load_persona_contract(path: Path = DEFAULT_CONTRACT_PATH) -> PersonaContract
         )
     if type(raw.get("schema_version")) is not int or raw["schema_version"] != 1:
         raise PersonaContractError("schema_version must be integer 1")
+    if raw.get("runtime_profile") != "hybrid":
+        raise PersonaContractError("runtime_profile must be hybrid")
 
     inventory_raw = _mapping(raw.get("inventory"), "inventory")
     if set(inventory_raw) != {"curated_core", "expanded_runtime"}:
@@ -172,44 +178,88 @@ def load_persona_contract(path: Path = DEFAULT_CONTRACT_PATH) -> PersonaContract
     }
     release_inventory_raw = _mapping(raw.get("release_inventory"), "release_inventory")
     expected_release_inventory = {
+        "authored_runtime_rows",
+        "legacy_curated_rows",
+        "legacy_surface_rows",
         "expanded_runtime_rows",
         "semantic_scene_count",
-        "legacy_surface_rows",
     }
     if set(release_inventory_raw) != expected_release_inventory:
         raise PersonaContractError(
-            "release_inventory must contain exactly expanded_runtime_rows, "
-            "semantic_scene_count, and legacy_surface_rows"
+            "release_inventory must contain exactly authored_runtime_rows, "
+            "legacy_curated_rows, legacy_surface_rows, expanded_runtime_rows, "
+            "and semantic_scene_count"
         )
-    if (
-        type(release_inventory_raw["expanded_runtime_rows"]) is not int
-        or release_inventory_raw["expanded_runtime_rows"] != 30000
-    ):
-        raise PersonaContractError(
-            "release_inventory.expanded_runtime_rows must be integer 30000"
-        )
-    if (
-        type(release_inventory_raw["semantic_scene_count"]) is not int
-        or release_inventory_raw["semantic_scene_count"] <= 0
-    ):
-        raise PersonaContractError(
-            "release_inventory.semantic_scene_count must be a positive integer"
-        )
-    if (
-        type(release_inventory_raw["legacy_surface_rows"]) is not int
-        or release_inventory_raw["legacy_surface_rows"] != 0
-    ):
-        raise PersonaContractError(
-            "release_inventory.legacy_surface_rows must be integer 0"
-        )
+    expected_release_counts = {
+        "authored_runtime_rows": 30000,
+        "legacy_curated_rows": 806,
+        "legacy_surface_rows": 51326,
+        "expanded_runtime_rows": 82132,
+        "semantic_scene_count": 1723,
+    }
+    for name, expected in expected_release_counts.items():
+        if type(release_inventory_raw[name]) is not int:
+            raise PersonaContractError(f"release_inventory.{name} must be an integer")
+        if name != "expanded_runtime_rows" and release_inventory_raw[name] != expected:
+            raise PersonaContractError(
+                f"release_inventory.{name} must be integer {expected}"
+            )
     release_inventory = {
         str(name): int(value) for name, value in release_inventory_raw.items()
     }
+    partition_total = (
+        release_inventory["authored_runtime_rows"]
+        + release_inventory["legacy_curated_rows"]
+        + release_inventory["legacy_surface_rows"]
+    )
+    if partition_total != release_inventory["expanded_runtime_rows"]:
+        raise PersonaContractError(
+            "release_inventory partition sum must equal expanded_runtime_rows"
+        )
+    if release_inventory["expanded_runtime_rows"] != 82132:
+        raise PersonaContractError(
+            "release_inventory.expanded_runtime_rows must be integer 82132"
+        )
     expanded_runtime_rows = release_inventory["expanded_runtime_rows"]
     expanded_runtime_minimum, expanded_runtime_maximum = inventory["expanded_runtime"]
     if not expanded_runtime_minimum <= expanded_runtime_rows <= expanded_runtime_maximum:
         raise PersonaContractError(
             "release_inventory.expanded_runtime_rows must be within inventory.expanded_runtime"
+        )
+
+    source_tier_raw = _mapping(raw.get("source_tier"), "source_tier")
+    expected_source_tier_keys = {
+        "recent_window",
+        "warmup_observations",
+        "target",
+        "acceptance",
+        "per_seed_acceptance",
+        "missing_history_default",
+    }
+    if set(source_tier_raw) != expected_source_tier_keys:
+        raise PersonaContractError("source_tier uses an unexpected key set")
+    if source_tier_raw.get("recent_window") != 100:
+        raise PersonaContractError("source_tier.recent_window must be integer 100")
+    if source_tier_raw.get("warmup_observations") != 20:
+        raise PersonaContractError("source_tier.warmup_observations must be integer 20")
+    acceptance = source_tier_raw.get("acceptance")
+    per_seed_acceptance = source_tier_raw.get("per_seed_acceptance")
+    if acceptance != [0.25, 0.35]:
+        raise PersonaContractError("source_tier.acceptance must be [0.25, 0.35]")
+    if per_seed_acceptance != [0.20, 0.40]:
+        raise PersonaContractError(
+            "source_tier.per_seed_acceptance must be [0.20, 0.40]"
+        )
+    target = source_tier_raw.get("target")
+    if isinstance(target, bool) or not isinstance(target, (int, float)):
+        raise PersonaContractError("source_tier.target must be numeric")
+    if not acceptance[0] <= target <= acceptance[1]:
+        raise PersonaContractError("source_tier.target must be inside acceptance")
+    if target != 0.30:
+        raise PersonaContractError("source_tier.target must be 0.30")
+    if source_tier_raw.get("missing_history_default") != "authored":
+        raise PersonaContractError(
+            "source_tier.missing_history_default must be authored"
         )
 
     category_groups = _string_tuple(raw.get("category_groups"), "category_groups")
@@ -723,8 +773,10 @@ def load_persona_contract(path: Path = DEFAULT_CONTRACT_PATH) -> PersonaContract
     frozen_raw = _freeze(raw)
     return PersonaContract(
         schema_version=1,
+        runtime_profile="hybrid",
         inventory=MappingProxyType(inventory),
         release_inventory=MappingProxyType(release_inventory),
+        source_tier=frozen_raw["source_tier"],
         category_groups=category_groups,
         categories=MappingProxyType(
             {str(category): str(group) for category, group in categories_raw.items()}

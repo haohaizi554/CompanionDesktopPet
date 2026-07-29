@@ -4,13 +4,14 @@
   "title": "Companion Desktop Pet persona contract",
   "type": "object",
   "required": [
-    "$schema", "schema_version", "inventory", "release_inventory",
+    "$schema", "schema_version", "runtime_profile", "inventory", "release_inventory", "source_tier",
     "category_groups", "categories", "controlled_values", "privacy", "authored_identity", "scheduler",
     "dry_sharp", "lexical_exposure", "temporal", "lineage"
   ],
   "properties": {
     "$schema": { "const": "./schemas/persona-contract.schema.json" },
     "schema_version": { "const": 1 },
+    "runtime_profile": { "const": "hybrid" },
     "inventory": {
       "type": "object",
       "required": ["curated_core", "expanded_runtime"],
@@ -22,11 +23,26 @@
     },
     "release_inventory": {
       "type": "object",
-      "required": ["expanded_runtime_rows", "semantic_scene_count", "legacy_surface_rows"],
+      "required": ["authored_runtime_rows", "legacy_curated_rows", "legacy_surface_rows", "expanded_runtime_rows", "semantic_scene_count"],
       "properties": {
-        "expanded_runtime_rows": { "type": "integer", "minimum": 1 },
-        "semantic_scene_count": { "type": "integer", "minimum": 1 },
-        "legacy_surface_rows": { "const": 0 }
+        "authored_runtime_rows": { "const": 30000 },
+        "legacy_curated_rows": { "const": 806 },
+        "legacy_surface_rows": { "const": 51326 },
+        "expanded_runtime_rows": { "const": 82132 },
+        "semantic_scene_count": { "const": 1723 }
+      },
+      "additionalProperties": false
+    },
+    "source_tier": {
+      "type": "object",
+      "required": ["recent_window", "warmup_observations", "target", "acceptance", "per_seed_acceptance", "missing_history_default"],
+      "properties": {
+        "recent_window": { "const": 100 },
+        "warmup_observations": { "const": 20 },
+        "target": { "const": 0.30 },
+        "acceptance": { "const": [0.25, 0.35] },
+        "per_seed_acceptance": { "const": [0.20, 0.40] },
+        "missing_history_default": { "const": "authored" }
       },
       "additionalProperties": false
     },

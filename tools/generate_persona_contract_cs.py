@@ -48,6 +48,7 @@ def render_contract() -> str:
         "expanded_runtime"
     ]
     release_inventory = PERSONA_CONTRACT.release_inventory
+    source_tier = PERSONA_CONTRACT.source_tier
     scheduler = PERSONA_CONTRACT.scheduler
     tree_weights = scheduler["tree_weights"]
     weights = scheduler["category_group_weights"]
@@ -165,15 +166,27 @@ internal sealed record AuthoredIdentityPolicy(
 
 internal static class PersonaContractGenerated
 {{
+    public const string RuntimeProfile = {_quoted(PERSONA_CONTRACT.runtime_profile)};
     public const int CuratedCoreMinimumRows = {curated_core_minimum};
     public const int CuratedCoreMaximumRows = {curated_core_maximum};
     public const int ExpandedRuntimeMinimumRows = {expanded_runtime_minimum};
     public const int ExpandedRuntimeMaximumRows = {expanded_runtime_maximum};
-    public const int ExpectedAuthoredRuntimeRows = {int(release_inventory['expanded_runtime_rows'])};
+    public const int ExpectedRuntimeRows = {int(release_inventory['expanded_runtime_rows'])};
+    public const int ExpectedAuthoredRuntimeRows = {int(release_inventory['authored_runtime_rows'])};
+    public const int ExpectedLegacyCuratedRows = {int(release_inventory['legacy_curated_rows'])};
     public const int ExpectedLegacySurfaceRows = {int(release_inventory['legacy_surface_rows'])};
-    public const int ExpandedRuntimeRows = ExpectedAuthoredRuntimeRows;
-    public const int SemanticSceneCount = {int(release_inventory['semantic_scene_count'])};
+    public const int ExpectedSceneCount = {int(release_inventory['semantic_scene_count'])};
+    public const int ExpandedRuntimeRows = ExpectedRuntimeRows;
+    public const int SemanticSceneCount = ExpectedSceneCount;
     public const int LegacySurfaceRows = ExpectedLegacySurfaceRows;
+    public const int SourceTierRecentWindow = {int(source_tier['recent_window'])};
+    public const int SourceTierWarmupObservations = {int(source_tier['warmup_observations'])};
+    public const double SourceTierTarget = {_cs_double(source_tier['target'], 'source_tier.target')};
+    public const double SourceTierLowerBound = {_cs_double(source_tier['acceptance'][0], 'source_tier.acceptance[0]')};
+    public const double SourceTierUpperBound = {_cs_double(source_tier['acceptance'][1], 'source_tier.acceptance[1]')};
+    public const double SourceTierPerSeedLowerBound = {_cs_double(source_tier['per_seed_acceptance'][0], 'source_tier.per_seed_acceptance[0]')};
+    public const double SourceTierPerSeedUpperBound = {_cs_double(source_tier['per_seed_acceptance'][1], 'source_tier.per_seed_acceptance[1]')};
+    public const string SourceTierMissingHistoryDefault = {_quoted(str(source_tier['missing_history_default']))};
     public const string DrySharpSceneHashNamespace = {_quoted(str(dry_sharp['scene_hash_namespace']))};
     public const string DrySharpSceneAssignmentField = {_quoted(str(dry_sharp['scene_assignment_field']))};
     public const double DrySharpSceneHashThreshold = {_cs_double(dry_sharp['scene_hash_threshold'], 'dry_sharp.scene_hash_threshold')};

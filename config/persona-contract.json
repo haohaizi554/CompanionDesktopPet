@@ -1,6 +1,7 @@
 {
   "$schema": "./schemas/persona-contract.schema.json",
   "schema_version": 1,
+  "runtime_profile": "hybrid",
   "inventory": {
     "curated_core": [
       800,
@@ -8,13 +9,23 @@
     ],
     "expanded_runtime": [
       30000,
-      60000
+      90000
     ]
   },
   "release_inventory": {
-    "expanded_runtime_rows": 30000,
-    "semantic_scene_count": 1190,
-    "legacy_surface_rows": 0
+    "authored_runtime_rows": 30000,
+    "legacy_curated_rows": 806,
+    "legacy_surface_rows": 51326,
+    "expanded_runtime_rows": 82132,
+    "semantic_scene_count": 1723
+  },
+  "source_tier": {
+    "recent_window": 100,
+    "warmup_observations": 20,
+    "target": 0.30,
+    "acceptance": [0.25, 0.35],
+    "per_seed_acceptance": [0.20, 0.40],
+    "missing_history_default": "authored"
   },
   "category_groups": [
     "technical",

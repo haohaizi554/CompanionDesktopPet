@@ -23,15 +23,27 @@ internal sealed record AuthoredIdentityPolicy(
 
 internal static class PersonaContractGenerated
 {
+    public const string RuntimeProfile = "hybrid";
     public const int CuratedCoreMinimumRows = 800;
     public const int CuratedCoreMaximumRows = 1200;
     public const int ExpandedRuntimeMinimumRows = 30000;
-    public const int ExpandedRuntimeMaximumRows = 60000;
+    public const int ExpandedRuntimeMaximumRows = 90000;
+    public const int ExpectedRuntimeRows = 82132;
     public const int ExpectedAuthoredRuntimeRows = 30000;
-    public const int ExpectedLegacySurfaceRows = 0;
-    public const int ExpandedRuntimeRows = ExpectedAuthoredRuntimeRows;
-    public const int SemanticSceneCount = 1190;
+    public const int ExpectedLegacyCuratedRows = 806;
+    public const int ExpectedLegacySurfaceRows = 51326;
+    public const int ExpectedSceneCount = 1723;
+    public const int ExpandedRuntimeRows = ExpectedRuntimeRows;
+    public const int SemanticSceneCount = ExpectedSceneCount;
     public const int LegacySurfaceRows = ExpectedLegacySurfaceRows;
+    public const int SourceTierRecentWindow = 100;
+    public const int SourceTierWarmupObservations = 20;
+    public const double SourceTierTarget = 0.3;
+    public const double SourceTierLowerBound = 0.25;
+    public const double SourceTierUpperBound = 0.35;
+    public const double SourceTierPerSeedLowerBound = 0.2;
+    public const double SourceTierPerSeedUpperBound = 0.4;
+    public const string SourceTierMissingHistoryDefault = "authored";
     public const string DrySharpSceneHashNamespace = "persona-dry-sharp-scene-v1";
     public const string DrySharpSceneAssignmentField = "semantic_group";
     public const double DrySharpSceneHashThreshold = 0.07;
