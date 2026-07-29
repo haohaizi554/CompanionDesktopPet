@@ -25,9 +25,9 @@
 如需彻底关闭，请右击人物并选择“先休息啦（退出）”，或从托盘菜单退出。
 
 本版本校验信息：
-大小：80,454,500 字节
-SHA-256：7d5343c01e1ed89ef15e3d9595f6c9fb1ec24f8275db15628a5b541ad5c1ff03
-built-from：421b54a349062ab540b27bfe6f9a97ba7df5b6f2
+大小：84,047,575 字节
+SHA-256：19472bed0ea847b90cd73274b66c00d420cf4884ea2ae32ad4984029b3247387
+built-from：d30e0102a3896b173ce1554b6769a705158effbe
 Authenticode：NotSigned
 
 当前 EXE 未做 Authenticode 代码签名，从网络下载时可能出现 Windows SmartScreen 或安全软件信誉提示。

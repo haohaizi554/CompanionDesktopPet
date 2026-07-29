@@ -21,7 +21,7 @@ outputs/CompanionDesktopPet/使用说明.txt
 
 `佳怡桌宠.exe` 是 `win-x64` 自包含单文件应用，运行时不需要另行安装 .NET，也不依赖旁置或外部应用 DLL、JSON、PDB 等运行时 sidecar。“自包含单 EXE”不表示进程绝不加载 DLL；作为 Windows 桌面应用，它仍会正常使用操作系统提供的系统 DLL 与系统组件。
 
-当前公开交付是 [v1.2.1](https://github.com/haohaizi554/CompanionDesktopPet/releases/tag/v1.2.1)：EXE 从提交 `421b54a349062ab540b27bfe6f9a97ba7df5b6f2` 使用 .NET SDK `9.0.301` 构建，`ProductVersion=1.2.1+421b54a349062ab540b27bfe6f9a97ba7df5b6f2`，大小为 `80,454,500` 字节，SHA-256 为 `7d5343c01e1ed89ef15e3d9595f6c9fb1ec24f8275db15628a5b541ad5c1ff03`。本版修复调度随机源并发、远未来农历日期安全反馈、UI 线程契约与菜单样式问题，将行为树权重纳入契约，并补齐全屏、角色状态、场景历史、事件策略和非法动作转换测试。标签流水线、通过 `127.0.0.1:7890` 回下载的 Release EXE、ZIP 内 EXE、仓库交付副本与隔离烟测副本逐字节一致；云端与本地真实 WPF smoke 均自行以退出码 0 结束。Release 标题精确为版本号 `v1.2.1`，正文为具体中文变更说明。完整证据见[发布与清理清单](docs/release/2026-07-25-expanded-runtime-release-checklist.md)。该 EXE 未做 Authenticode 代码签名，从网络下载时可能出现 Windows SmartScreen/安全软件信誉提示。
+当前公开交付是 [v1.4.0](https://github.com/haohaizi554/CompanionDesktopPet/releases/tag/v1.4.0)：EXE 从提交 `d30e0102a3896b173ce1554b6769a705158effbe` 使用 .NET SDK `9.0.301` 构建，`ProductVersion=1.4.0+d30e0102a3896b173ce1554b6769a705158effbe`，大小为 `84,047,575` 字节，SHA-256 为 `19472bed0ea847b90cd73274b66c00d420cf4884ea2ae32ad4984029b3247387`。标签流水线实际通过 Python `390/390`、.NET Release `645/645`、15,000 次模拟与完整打包门禁；8 项 Release 资产经 `127.0.0.1:7890` 回下载后，直链 EXE、ZIP 内 EXE 与隔离烟测副本逐字节一致，最终本地 smoke PID `31808` 自行以退出码 0 结束。Release 标题精确为 `v1.4.0`，正文为具体中文变更、验证数字与构建来源。完整证据见[发布与清理清单](docs/release/2026-07-25-expanded-runtime-release-checklist.md)。该 EXE 未做 Authenticode 代码签名，从网络下载时可能出现 Windows SmartScreen/安全软件信誉提示。
 
 ## 体验与操作
 
