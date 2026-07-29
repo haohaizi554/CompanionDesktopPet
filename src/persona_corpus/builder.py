@@ -4,7 +4,7 @@ import csv
 import hashlib
 import re
 from collections import defaultdict
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 from pathlib import Path
 from types import MappingProxyType
 from typing import Iterable, Mapping, Sequence, TypeVar
@@ -80,6 +80,7 @@ TONE_ALIASES = {
 }
 SOURCE_KIND_ALIASES = {
     "topic_rewrite": "rewritten_topic",
+    "curated_authored": "curated_standalone",
     "legacy_standalone": "preserved_easter_egg",
 }
 LEGACY_SOURCE_KINDS = frozenset(("topic_rewrite", "legacy_standalone"))
@@ -120,6 +121,15 @@ class BuildResult:
     surface_manifest: tuple[SurfaceManifestRow, ...]
     authorship_ledger: tuple[AuthorshipLedgerRow, ...]
     dispositions: Mapping[int, tuple[str, ...]]
+    partition_manifest: Mapping[str, object]
+
+
+def source_tier_for(source_kind: str) -> str:
+    """Derive the runtime source tier without adding a TSV column."""
+
+    if source_kind not in PERSONA_CONTRACT.source_kinds:
+        raise ValueError(f"unknown source kind {source_kind!r}")
+    return "authored" if source_kind == "curated_authored" else "legacy"
 
 
 def _stable_digest(*parts: object, length: int = 12) -> str:
@@ -410,6 +420,7 @@ def build_v2(
     *,
     catalog: Sequence[CatalogEntry] | None = None,
     authored: AuthoredCatalog | None = None,
+    apply_scene_dose: bool = True,
 ) -> BuildResult:
     """Create a deterministic, curated one-way corpus plus complete dispositions."""
     if pii_policy != "review":
@@ -466,7 +477,8 @@ def build_v2(
         enabled.extend(
             materialize_legacy_surface_candidates(prepared_surfaces.candidates, enabled)
         )
-        enabled = list(apply_dry_sharp_scene_dose(enabled))
+        if apply_scene_dose:
+            enabled = list(apply_dry_sharp_scene_dose(enabled))
         surface_sources = {row.source_line for row in prepared_surfaces.candidates}
     else:
         surface_sources = set()
@@ -561,6 +573,163 @@ def build_v2(
         surface_manifest=surface_manifest,
         authorship_ledger=authorship_ledger,
         dispositions=frozen_dispositions,
+        partition_manifest=MappingProxyType({}),
+    )
+
+
+def _partition_identity_sha256(rows: Sequence[CorpusLine]) -> str:
+    payload = "\n".join(
+        "\0".join((row.id, row.source_kind, row.source_reference, row.text))
+        for row in sorted(rows, key=lambda item: item.id)
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _hybrid_dry_sharp_rows(
+    authored_rows: Sequence[CorpusLine],
+    legacy_rows: Sequence[CorpusLine],
+) -> tuple[tuple[CorpusLine, ...], tuple[str, ...]]:
+    policy = PERSONA_CONTRACT.dry_sharp
+    authored_scenes = {
+        row.semantic_group for row in authored_rows if row.tone == "dry_sharp"
+    }
+    release_target = 12
+    legacy_target = release_target - len(authored_scenes)
+    if legacy_target < 0:
+        raise ValueError("authored dry_sharp scenes exceed hybrid release target")
+
+    forbidden_groups = frozenset(str(value) for value in policy["forbidden_category_groups"])
+    forbidden_triggers = frozenset(str(value) for value in policy["forbidden_triggers"])
+    forbidden_context = frozenset(str(value) for value in policy["forbidden_context_tokens"])
+    normalized_legacy = tuple(
+        replace(row, relationship_profile="neutral", tone="dry")
+        if row.tone == "dry_sharp"
+        else replace(row, relationship_profile="neutral")
+        for row in legacy_rows
+    )
+    by_scene: dict[str, list[CorpusLine]] = defaultdict(list)
+    for row in normalized_legacy:
+        by_scene[row.semantic_group].append(row)
+    eligible: list[str] = []
+    for semantic_group, variants in by_scene.items():
+        first = variants[0]
+        if any(row.tone != first.tone for row in variants):
+            raise ValueError(
+                f"legacy semantic group {semantic_group!r} has inconsistent tone metadata"
+            )
+        contexts = frozenset(first.required_context.split(","))
+        if (
+            first.tone == "dry"
+            and first.category_group not in forbidden_groups
+            and first.trigger not in forbidden_triggers
+            and contexts.isdisjoint(forbidden_context)
+        ):
+            eligible.append(semantic_group)
+    selected = tuple(
+        sorted(
+            eligible,
+            key=lambda semantic_group: (
+                hashlib.sha256(
+                    f"persona-hybrid-dry-sharp-v1\0{semantic_group}".encode("utf-8")
+                ).hexdigest(),
+                semantic_group,
+            ),
+        )[:legacy_target]
+    )
+    if len(selected) != legacy_target:
+        raise ValueError("eligible legacy dry scenes cannot fill hybrid release target")
+    selected_set = frozenset(selected)
+    promoted = tuple(
+        replace(row, tone="dry_sharp")
+        if row.semantic_group in selected_set
+        else row
+        for row in normalized_legacy
+    )
+    return promoted, tuple(sorted(selected))
+
+
+def build_hybrid(
+    source: Sequence[LegacyLine],
+    mappings: Sequence[SourceMapping],
+    seed: int,
+    pii_policy: str = "review",
+    *,
+    catalog: Sequence[CatalogEntry] | None = None,
+    authored: AuthoredCatalog,
+) -> BuildResult:
+    """Build the v1.4.0 authored-plus-v1.2.1 runtime as one exact corpus."""
+
+    authored_result = build_v2(
+        (), (), seed, pii_policy=pii_policy, authored=authored
+    )
+    legacy_result = build_v2(
+        source,
+        mappings,
+        seed,
+        pii_policy=pii_policy,
+        catalog=catalog,
+        apply_scene_dose=False,
+    )
+    legacy_rows, selected_legacy_sharp = _hybrid_dry_sharp_rows(
+        authored_result.enabled, legacy_result.enabled
+    )
+    enabled = tuple((*authored_result.enabled, *legacy_rows))
+    normalized = tuple(normalize_text(row.text) for row in enabled)
+    if len(enabled) != len({row.id for row in enabled}):
+        raise ValueError("hybrid corpus contains duplicate stable IDs")
+    if len(normalized) != len(set(normalized)):
+        raise ValueError("hybrid corpus contains normalized duplicate enabled text")
+
+    tier_by_scene: dict[str, str] = {}
+    for row in enabled:
+        tier = source_tier_for(row.source_kind)
+        previous = tier_by_scene.setdefault(row.semantic_group, tier)
+        if previous != tier:
+            raise ValueError(f"semantic group {row.semantic_group!r} mixes source tiers")
+
+    release = PERSONA_CONTRACT.release_inventory
+    authored_count = sum(source_tier_for(row.source_kind) == "authored" for row in enabled)
+    surface_count = sum(row.source_kind == "legacy_surface_variant" for row in enabled)
+    legacy_count = len(enabled) - authored_count
+    legacy_curated_count = legacy_count - surface_count
+    actual = {
+        "authored_runtime_rows": authored_count,
+        "legacy_curated_rows": legacy_curated_count,
+        "legacy_surface_rows": surface_count,
+        "expanded_runtime_rows": len(enabled),
+        "semantic_scene_count": len(tier_by_scene),
+    }
+    if any(actual[name] != int(release[name]) for name in actual):
+        raise ValueError(f"hybrid release inventory mismatch: {actual!r}")
+
+    ordered = tuple(
+        sorted(
+            enabled,
+            key=lambda row: (
+                hashlib.sha256(f"{seed}\0{row.id}".encode("utf-8")).hexdigest(),
+                row.id,
+            ),
+        )
+    )
+    authored_identity_sha256 = _partition_identity_sha256(authored_result.enabled)
+    legacy_identity_sha256 = _partition_identity_sha256(legacy_rows)
+    partition_manifest = MappingProxyType(
+        {
+            **actual,
+            "authored_identity_sha256": authored_identity_sha256,
+            "legacy_identity_sha256": legacy_identity_sha256,
+            "legacy_dry_sharp_scene_ids": selected_legacy_sharp,
+        }
+    )
+    return BuildResult(
+        enabled=ordered,
+        archive=legacy_result.archive,
+        review=legacy_result.review,
+        pii_review=legacy_result.pii_review,
+        surface_manifest=legacy_result.surface_manifest,
+        authorship_ledger=authored_result.authorship_ledger,
+        dispositions=legacy_result.dispositions,
+        partition_manifest=partition_manifest,
     )
 
 

@@ -17,11 +17,11 @@
 
 | File | Data rows | SHA-256 |
 | --- | ---: | --- |
-| `persona-corpus-v2.tsv` | 30,000 | `1d887627e6b4a8f303a0151cea8b99726d176b9953a396782e88cde69de5633c` |
-| `persona-corpus-archive.tsv` | 75,375 | `a9e78adefbeff30e44f88e7eae1a953a8e76c499f29d58d1ec334eb6f75e03bc` |
+| `persona-corpus-v2.tsv` | 82,132 | `339358c524785db30badf420a3bdc2b89c7753486e907ff1a5216f68ca5d7ece` |
+| `persona-corpus-archive.tsv` | 75,375 | `b7d9a5f2fd6f4750ea2b688206f77bf45a2b59ca12c09f36281c72efc620721d` |
 | `persona-corpus-review.tsv` | 3,265 | `a251b1e01003a078d7912f71099e57c5c6830a75195558ea61428105990b866a` |
 | `pii-review.tsv` | 1,248 | `702037759f730759be83fb1c643a8f61382fa1c3f8f2a25e2c0351a177eec6e7` |
-| `persona-surface-manifest.tsv` | 0 | `a2353ed6480ec1e75c40add4ae36ed7884724ca88a64b25f8b1c9282f975037c` |
+| `persona-surface-manifest.tsv` | 51,326 | `bcf9c97be0e4b1d7b7db11fcb46f44de17ef0ade6cb2e79d69f8af69bdbc637d` |
 | `persona-authorship-ledger.tsv` | 30,000 | `31305579ebf55d2d49c3227d7c7664b16e89abd0e9aab3cbbfa11ae3e0cace8d` |
 
 ## 正式发布结果

@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import re
 import unittest
+from collections import Counter
 from dataclasses import fields, replace
 from pathlib import Path
 
@@ -282,21 +283,34 @@ class RealLegacySurfaceCandidateTests(unittest.TestCase):
         cls.runtime = load_v2(V2_PATH)
         cls.surface_manifest = V2_PATH.with_name("persona-surface-manifest.tsv")
 
-    def test_canonical_runtime_contains_only_authored_rows(self) -> None:
-        self.assertEqual(30_000, len(self.runtime))
-        self.assertEqual({"curated_authored"}, {row.source_kind for row in self.runtime})
-        self.assertFalse(any(row.source_kind == "legacy_surface_variant" for row in self.runtime))
+    def test_canonical_runtime_contains_exact_hybrid_partitions(self) -> None:
+        counts = Counter(row.source_kind for row in self.runtime)
 
-    def test_canonical_surface_manifest_is_header_only_audit_output(self) -> None:
+        self.assertEqual(82_132, len(self.runtime))
+        self.assertEqual(30_000, counts["curated_authored"])
+        self.assertEqual(51_326, counts["legacy_surface_variant"])
+        self.assertEqual(537, counts["rewritten_topic"])
+        self.assertEqual(140, counts["new_ambient"])
+        self.assertEqual(30, counts["preserved_easter_egg"])
+        self.assertEqual(99, counts["curated_standalone"])
+
+    def test_canonical_surface_manifest_tracks_every_restored_surface(self) -> None:
         lines = self.surface_manifest.read_text(encoding="utf-8").splitlines()
-        self.assertEqual(1, len(lines))
+        self.assertEqual(51_327, len(lines))
         self.assertEqual("\t".join(SURFACE_MANIFEST_HEADER), lines[0])
 
-    def test_legacy_archive_remains_complete_and_disabled_from_runtime(self) -> None:
+    def test_legacy_archive_remains_complete_and_only_audited_surfaces_are_restored(self) -> None:
         archive = load_archive()
         self.assertEqual(75_375, len(archive))
-        enabled_text = {normalize_text(row.text) for row in self.runtime}
-        self.assertTrue(all(normalize_text(row.original_text) not in enabled_text for row in archive))
+        archive_text = {normalize_text(row.original_text) for row in archive}
+        surface_text = {
+            normalize_text(row.text)
+            for row in self.runtime
+            if row.source_kind == "legacy_surface_variant"
+        }
+        self.assertEqual(51_326, len(surface_text))
+        self.assertTrue(surface_text <= archive_text)
+        self.assertEqual(51_802, sum(row.can_recover for row in archive))
 
 
 if __name__ == "__main__":

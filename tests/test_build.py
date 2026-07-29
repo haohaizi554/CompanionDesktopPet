@@ -14,6 +14,7 @@ from pathlib import Path
 
 from src.persona_corpus.builder import (
     BuildResult,
+    build_hybrid,
     build_v2,
     serialize_archive,
     serialize_authorship_ledger,
@@ -22,6 +23,7 @@ from src.persona_corpus.builder import (
     serialize_surface_manifest,
     serialize_v2,
     write_build_outputs,
+    source_tier_for,
 )
 from src.persona_corpus.authored_catalog import load_authored_catalog
 from src.persona_corpus.extraction import SourceMapping
@@ -175,6 +177,67 @@ class AuthoredBuildContractTests(unittest.TestCase):
         self.assertEqual(
             f"catalog:authored-v1:{first_entry.batch_id};variant:{first_entry.variant_id}",
             first.source_reference,
+        )
+
+
+class HybridBuildContractTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        from src.persona_corpus.builder import load_source_mappings
+        from src.persona_corpus.loader import load_legacy
+
+        cls.result = build_hybrid(
+            load_legacy(SOURCE_PATH),
+            load_source_mappings(MAPPING_PATH),
+            20260729,
+            authored=load_authored_catalog(AUTHORED_DIR, AUTHORSHIP_MANIFEST_PATH),
+        )
+
+    def test_hybrid_build_has_exact_unique_partition_inventory(self) -> None:
+        from src.persona_corpus.normalization import normalize_text
+
+        rows = self.result.enabled
+        self.assertEqual(82_132, len(rows))
+        self.assertEqual(30_000, sum(source_tier_for(row.source_kind) == "authored" for row in rows))
+        self.assertEqual(52_132, sum(source_tier_for(row.source_kind) == "legacy" for row in rows))
+        self.assertEqual(51_326, sum(row.source_kind == "legacy_surface_variant" for row in rows))
+        self.assertEqual(82_132, len({row.id for row in rows}))
+        self.assertEqual(82_132, len({normalize_text(row.text) for row in rows}))
+        self.assertEqual(1_723, len({row.semantic_group for row in rows}))
+        self.assertEqual(30_000, len(self.result.authorship_ledger))
+        self.assertEqual(51_326, len(self.result.surface_manifest))
+
+    def test_hybrid_build_preserves_v121_legacy_identity_and_normalizes_metadata(self) -> None:
+        legacy = [
+            row for row in self.result.enabled if source_tier_for(row.source_kind) == "legacy"
+        ]
+        identity = "\n".join(
+            "\0".join((row.id, row.source_kind, row.source_reference, row.text))
+            for row in sorted(legacy, key=lambda item: item.id)
+        ).encode("utf-8")
+
+        self.assertEqual(
+            "f2f3c26fea57266f9b2d97876d3389092dc2feb25d02ad13e65aaf4173d79415",
+            hashlib.sha256(identity).hexdigest(),
+        )
+        self.assertEqual({"neutral"}, {row.relationship_profile for row in legacy})
+
+    def test_hybrid_build_preserves_authored_sharp_scenes_and_selects_four_legacy(self) -> None:
+        sharp_by_tier = {
+            tier: {
+                row.semantic_group
+                for row in self.result.enabled
+                if source_tier_for(row.source_kind) == tier and row.tone == "dry_sharp"
+            }
+            for tier in ("authored", "legacy")
+        }
+
+        self.assertEqual(8, len(sharp_by_tier["authored"]))
+        self.assertEqual(4, len(sharp_by_tier["legacy"]))
+        self.assertEqual(12, len(sharp_by_tier["authored"] | sharp_by_tier["legacy"]))
+        self.assertEqual(
+            tuple(sorted(sharp_by_tier["legacy"])),
+            tuple(self.result.partition_manifest["legacy_dry_sharp_scene_ids"]),
         )
 
 

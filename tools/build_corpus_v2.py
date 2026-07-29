@@ -12,6 +12,7 @@ if str(REPOSITORY_ROOT) not in sys.path:
 
 from src.persona_corpus.authored_catalog import load_authored_catalog  # noqa: E402
 from src.persona_corpus.builder import (  # noqa: E402
+    build_hybrid,
     build_v2,
     load_source_mappings,
     write_build_outputs,
@@ -45,6 +46,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
+        "--profile",
+        choices=("authored", "legacy", "hybrid"),
+        default="hybrid",
+        help="Runtime partition profile; release builds use hybrid.",
+    )
+    parser.add_argument(
         "--report-output",
         type=Path,
         help="Explicit pii-review.tsv path for noncanonical output layouts.",
@@ -59,13 +66,30 @@ def main(argv: list[str] | None = None) -> int:
     source = load_legacy(args.input)
     mappings = load_source_mappings(args.mappings)
     authored = load_authored_catalog(args.authored_dir, args.authorship_manifest)
-    result = build_v2(
-        source,
-        mappings,
-        args.seed,
-        pii_policy=args.pii_policy,
-        authored=authored,
-    )
+    if args.profile == "hybrid":
+        result = build_hybrid(
+            source,
+            mappings,
+            args.seed,
+            pii_policy=args.pii_policy,
+            authored=authored,
+        )
+    elif args.profile == "legacy":
+        result = build_v2(
+            source,
+            mappings,
+            args.seed,
+            pii_policy=args.pii_policy,
+            apply_scene_dose=False,
+        )
+    else:
+        result = build_v2(
+            source,
+            mappings,
+            args.seed,
+            pii_policy=args.pii_policy,
+            authored=authored,
+        )
     paths = write_build_outputs(
         result,
         args.output,
@@ -77,6 +101,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"review={len(result.review)}")
     print(f"pii_review={len(result.pii_review)}")
     print(f"authorship_ledger={len(result.authorship_ledger)}")
+    for name, value in result.partition_manifest.items():
+        print(f"partition_{name}={value}")
     print(f"v2_sha256={v2_hash}")
     for name, path in paths.items():
         print(f"{name}={path}")
