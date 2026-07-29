@@ -10,6 +10,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
+from src.persona_corpus.authored_catalog import load_authored_catalog  # noqa: E402
 from src.persona_corpus.builder import (  # noqa: E402
     build_v2,
     load_source_mappings,
@@ -22,7 +23,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Build deterministic, curated Persona Corpus v2 outputs."
     )
-    parser.add_argument("--input", type=Path, required=True)
+    parser.add_argument(
+        "--input",
+        type=Path,
+        default=Path("data/source/persona-corpus.original.tsv"),
+    )
+    parser.add_argument(
+        "--authored-dir",
+        type=Path,
+        default=Path("data/authored/v1"),
+    )
+    parser.add_argument(
+        "--authorship-manifest",
+        type=Path,
+        default=Path("config/persona-authorship-manifest.json"),
+    )
     parser.add_argument(
         "--mappings",
         type=Path,
@@ -43,7 +58,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     source = load_legacy(args.input)
     mappings = load_source_mappings(args.mappings)
-    result = build_v2(source, mappings, args.seed, pii_policy=args.pii_policy)
+    authored = load_authored_catalog(args.authored_dir, args.authorship_manifest)
+    result = build_v2(
+        source,
+        mappings,
+        args.seed,
+        pii_policy=args.pii_policy,
+        authored=authored,
+    )
     paths = write_build_outputs(
         result,
         args.output,
@@ -54,6 +76,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"archive={len(result.archive)}")
     print(f"review={len(result.review)}")
     print(f"pii_review={len(result.pii_review)}")
+    print(f"authorship_ledger={len(result.authorship_ledger)}")
     print(f"v2_sha256={v2_hash}")
     for name, path in paths.items():
         print(f"{name}={path}")

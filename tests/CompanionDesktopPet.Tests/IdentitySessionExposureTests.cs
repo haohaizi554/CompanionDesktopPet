@@ -197,7 +197,7 @@ public sealed class IdentitySessionExposureTests
         string batchId) =>
         Line(id, semanticGroup, text) with
         {
-            SourceKind = "curated_standalone",
-            SourceReference = $"authored:{batchId};variant:{id}"
+            SourceKind = "curated_authored",
+            SourceReference = $"catalog:authored-v1:{batchId};variant:{id}"
         };
 }

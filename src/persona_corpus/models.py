@@ -28,6 +28,7 @@ class CorpusLine:
     weight: float
     requires_reply: bool
     enabled: bool
+    relationship_profile: str
     text: str
     source_kind: str
     source_reference: str

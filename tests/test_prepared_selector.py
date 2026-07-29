@@ -36,6 +36,7 @@ def line(line_id: str, semantic_group: str, **overrides: object) -> CorpusLine:
         "weight": 1.0,
         "requires_reply": False,
         "enabled": True,
+        "relationship_profile": "neutral",
         "text": f"{semantic_group} 的第 {line_id} 条表述。",
         "source_kind": "legacy_surface_variant",
         "source_reference": f"catalog:test;variant:{line_id}",

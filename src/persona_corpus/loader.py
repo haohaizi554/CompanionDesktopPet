@@ -4,6 +4,7 @@ import hashlib
 import math
 from pathlib import Path
 
+from .contract import RELATIONSHIP_PROFILES
 from .models import CorpusLine, LegacyLine
 from .schema import V2_HEADER
 
@@ -119,6 +120,7 @@ def load_v2(path: Path, enabled_only: bool = False) -> list[CorpusLine]:
             "output_mode",
             "trigger",
             "tone",
+            "relationship_profile",
             "text",
             "source_kind",
             "source_reference",
@@ -156,11 +158,17 @@ def load_v2(path: Path, enabled_only: bool = False) -> list[CorpusLine]:
                 path, line_number, "requires_reply", values["requires_reply"]
             ),
             enabled=_boolean(path, line_number, "enabled", values["enabled"]),
+            relationship_profile=values["relationship_profile"],
             text=values["text"],
             source_kind=values["source_kind"],
             source_reference=values["source_reference"],
             rewrite_reason=values["rewrite_reason"],
         )
+        if corpus_line.relationship_profile not in RELATIONSHIP_PROFILES:
+            raise CorpusFormatError(
+                path, line_number,
+                f"unknown relationship_profile {corpus_line.relationship_profile!r}",
+            )
         if not enabled_only or corpus_line.enabled:
             result.append(corpus_line)
     return result

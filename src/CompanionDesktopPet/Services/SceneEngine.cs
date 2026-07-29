@@ -35,7 +35,8 @@ public sealed record SceneDefinition(
     double SociabilityDelta = 0,
     double BoredomDelta = -0.03,
     string? StoryArcId = null,
-    int StoryNode = -1);
+    int StoryNode = -1,
+    string RelationshipProfile = "neutral");
 
 public sealed record SceneContext(
     CompanionEvent Trigger,
@@ -63,7 +64,8 @@ public sealed record SceneHistoryEntry(
     bool? WasSeasoning = null,
     string SurfaceOpening = "",
     string SurfaceEnding = "",
-    string SurfaceTemplate = "");
+    string SurfaceTemplate = "",
+    string RelationshipProfile = "neutral");
 
 public sealed class SceneHistory
 {
@@ -120,7 +122,8 @@ public sealed class SceneHistory
             line.HasSeasoningMarker,
             surface.Opening,
             surface.Ending,
-            surface.Template);
+            surface.Template,
+            line.RelationshipProfile);
         lock (_sync)
         {
             _entries.Add(entry);
@@ -304,6 +307,11 @@ public sealed class SceneHistory
     {
         lock (_sync)
         {
+            if (!MeetsRelationshipProfileQuota(scene))
+            {
+                return false;
+            }
+
             if (scene.CategoryGroup == DialogueCategoryGroup.EasterEgg
                 && CandidateWindowCount(EasterEggRecentWindow,
                     entry => entry.CategoryGroup == DialogueCategoryGroup.EasterEgg) > EasterEggRecentMaximum)
@@ -316,6 +324,23 @@ public sealed class SceneHistory
                        <= DrySharpRecentMaximum
                        && CandidateWindowCount(DrySharpPlaybackWindow, IsDrySharpEntry)
                        <= DrySharpPlaybackMaximum);
+        }
+    }
+
+    public bool MeetsRelationshipProfileQuota(SceneDefinition scene)
+    {
+        lock (_sync)
+        {
+            return scene.RelationshipProfile switch
+            {
+                "warm_friend" => CandidateWindowCount(
+                    20,
+                    entry => entry.RelationshipProfile == "warm_friend") <= 2,
+                "nickname_easter_egg" => CandidateWindowCount(
+                    100,
+                    entry => entry.RelationshipProfile == "nickname_easter_egg") <= 1,
+                _ => true
+            };
         }
     }
 

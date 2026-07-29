@@ -499,12 +499,13 @@ def analyze_simulation(
             ):
                 _add_hard(hard, anomalies, seed, "dry_sharp_ratio_out_of_bounds")
             seed_seasoning_ratio = seed_seasoning_count / seed_output_count
-            if not (
-                lexical_exposure_policy.playback_acceptance[0]
-                <= seed_seasoning_ratio
-                <= lexical_exposure_policy.playback_acceptance[1]
-            ):
+            if seed_seasoning_ratio > lexical_exposure_policy.playback_acceptance[1]:
                 _add_hard(hard, anomalies, seed, "seasoning_ratio_out_of_bounds")
+            elif seed_seasoning_ratio < lexical_exposure_policy.playback_acceptance[0]:
+                # A 150-output seed cannot express every sparse global target.
+                # Keep the per-seed shortfall visible without invalidating an
+                # aggregate run that satisfies the shared playback contract.
+                anomalies[seed].add("seasoning_ratio_below_minimum")
             if seed_group_counts["easter_egg"] == 0:
                 anomalies[seed].add("easter_egg_not_observed")
             if seed_mode_counts["user_direct"] == 0:

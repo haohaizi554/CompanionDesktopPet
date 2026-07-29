@@ -10,8 +10,8 @@ The validator-facing event stream is stored separately with an exact schema and 
 | Schema version | 3 |
 | Days per seed | 30 |
 | Seeds | 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 |
-| Corpus SHA-256 | `3335d72e695528892ddec92076f0f02abacf58fff02ed6bd0aadf67d1cf0cc40` |
-| Scheduler SHA-256 | `6755825b463d92d97db121ca037e100fe770ee789fbc70d0f864bae75ac48a90` |
+| Corpus SHA-256 | `1d887627e6b4a8f303a0151cea8b99726d176b9953a396782e88cde69de5633c` |
+| Scheduler SHA-256 | `318a2e4b92e56b02de950e8fd627fb34279dab4237148328e88cc0720f8a7f03` |
 | Subseed derivation | persona-simulation-v2 |
 | Subseed derivation SHA-256 | `e5f6d36ffb5d4936bccca24cb9c7177a63e02d937118342916bd5eea0a83640d` |
 | Distribution tolerance | 5.00% |
@@ -28,23 +28,23 @@ The validator-facing event stream is stored separately with an exact schema and 
 | 5. Maximum outputs in rolling (now-60m, now] | 1 |
 | Natural late-night maximum in rolling (now-60m, now] | 1 |
 | Natural blocked adjacent groups | daily_care=0, easter_egg=0, emotional_reflection=0, technical=0 |
-| 8. Technical playback ratio | 18.47% |
-| 9. EasterEgg playback ratio | 9.93% |
+| 8. Technical playback ratio | 17.87% |
+| 9. EasterEgg playback ratio | 9.80% |
 | 10. user_direct playback ratio | 0.00% |
-| dry_sharp playback ratio | 4.00% |
+| dry_sharp playback ratio | 2.00% |
 | dry_sharp recent-window violations | 0 |
 | dry_sharp forbidden metadata hits | 0 |
-| seasoning playback ratio | 4.87% |
+| seasoning playback ratio | 0.60% |
 | seasoning recent-window violations | 0 |
 | 11. ID cooldown repeats | 0 |
 | 12. Semantic cooldown repeats | 0 |
-| 13. Adjacent same category_group | 17 |
+| 13. Adjacent same category_group | 54 |
 | 14. Adjacent technical | 0 |
 | 15a. Adjacent daily_care | 0 |
 | 15b. Adjacent emotional_reflection | 0 |
 | 15c. Combined adjacent care (including cross-group pairs) | 49 |
-| 16. Average text length | 27.692 |
-| 19. Seasoning line ratio | 4.87% |
+| 16. Average text length | 23.851 |
+| 19. Seasoning line ratio | 0.60% |
 | 20. Question/reply outputs | 0 |
 | 21. Unmet trigger/context outputs | 0 |
 | Natural hard violations | none |
@@ -64,9 +64,9 @@ The validator-facing event stream is stored separately with an exact schema and 
 
 | Metric | Observed | Target | Acceptance | Enforced |
 | --- | --- | --- | --- | --- |
-| dry_sharp scene inventory | 22/533 (4.13%) | 5.00% | 4.00%–6.00% | yes |
-| dry_sharp row inventory observation | 3878/52132 (7.44%) | observation only | n/a | no |
-| dry_sharp playback | 60/1500 (4.00%) | 3.00% | 2.00%–4.00% | yes |
+| dry_sharp scene inventory | 8/1190 (0.67%) | 0.70% | 0.60%–0.80% | yes |
+| dry_sharp row inventory observation | 200/30000 (0.67%) | observation only | n/a | no |
+| dry_sharp playback | 30/1500 (2.00%) | 1.00% | 0.00%–4.00% | yes |
 
 Bootstrap scene gap: no (minimum 4 scenes).
 Recent playback limit: at most 1 dry_sharp line(s) in the latest 20 outputs.
@@ -75,8 +75,8 @@ Recent playback limit: at most 1 dry_sharp line(s) in the latest 20 outputs.
 
 | Metric | Observed | Acceptance / policy |
 | --- | --- | --- |
-| expanded_runtime inventory observation | 13515/52132 (25.92%) | observation_only |
-| seasoning playback | 4.87% | 3.00%–6.00% |
+| expanded_runtime inventory observation | 18/30000 (0.06%) | observation_only |
+| seasoning playback | 0.60% | 0.50%–1.50% |
 | seasoning recent window | 0 | max 1 in 20 |
 
 ## Scenario and inventory coverage
@@ -133,49 +133,49 @@ Recent playback limit: at most 1 dry_sharp line(s) in the latest 20 outputs.
 
 | category_group | Count | Ratio |
 | --- | --- | --- |
-| technical | 277 | 18.47% |
-| growth | 148 | 9.87% |
-| career | 94 | 6.27% |
-| daily_care | 151 | 10.07% |
-| emotional_reflection | 151 | 10.07% |
-| character_life | 410 | 27.33% |
-| easter_egg | 149 | 9.93% |
-| system_ambient | 120 | 8.00% |
+| technical | 268 | 17.87% |
+| growth | 151 | 10.07% |
+| career | 103 | 6.87% |
+| daily_care | 154 | 10.27% |
+| emotional_reflection | 154 | 10.27% |
+| character_life | 397 | 26.47% |
+| easter_egg | 147 | 9.80% |
+| system_ambient | 126 | 8.40% |
 
 ## 7. output_mode playback
 
 | output_mode | Count | Ratio |
 | --- | --- | --- |
-| self_talk | 1229 | 81.93% |
-| ambient | 151 | 10.07% |
+| self_talk | 1220 | 81.33% |
+| ambient | 154 | 10.27% |
 | user_direct | 0 | 0.00% |
-| system_observe | 120 | 8.00% |
+| system_observe | 126 | 8.40% |
 
 ## Tone playback
 
 | tone | Count | Ratio |
 | --- | --- | --- |
-| calm | 0 | 0.00% |
-| curious | 0 | 0.00% |
-| dry | 459 | 30.60% |
-| dry_sharp | 60 | 4.00% |
-| encouraging | 0 | 0.00% |
-| gentle | 534 | 35.60% |
-| intimate | 0 | 0.00% |
-| nostalgic | 132 | 8.80% |
-| playful | 315 | 21.00% |
-| serious | 0 | 0.00% |
-| sleepy | 0 | 0.00% |
+| calm | 249 | 16.60% |
+| curious | 100 | 6.67% |
+| dry | 296 | 19.73% |
+| dry_sharp | 30 | 2.00% |
+| encouraging | 47 | 3.13% |
+| gentle | 429 | 28.60% |
+| intimate | 22 | 1.47% |
+| nostalgic | 65 | 4.33% |
+| playful | 205 | 13.67% |
+| serious | 37 | 2.47% |
+| sleepy | 20 | 1.33% |
 
 ## 17. Playback text-length distribution
 
 | Length bucket | Ratio |
 | --- | --- |
 | <8 | 0.00% |
-| 8-16 | 5.93% |
-| 17-24 | 24.20% |
-| 25-36 | 65.27% |
-| >36 | 4.60% |
+| 8-16 | 7.33% |
+| 17-24 | 57.73% |
+| 25-36 | 30.40% |
+| >36 | 4.53% |
 
 ## 18. Frequent openings and endings
 
@@ -183,136 +183,136 @@ Recent playback limit: at most 1 dry_sharp line(s) in the latest 20 outputs.
 
 | Opening | Playback count |
 | --- | --- |
-| 讲真 | 52 |
-| 嗯， | 51 |
-| 我看 | 38 |
-| 这事 | 37 |
-| 行啦 | 35 |
-| 先别 | 33 |
-| 慢慢 | 33 |
-| 偶尔 | 31 |
-| 说起 | 30 |
-| 先把 | 27 |
+| 我把 | 21 |
+| 一个 | 15 |
+| 一条 | 11 |
+| 一次 | 11 |
+| 一段 | 11 |
+| 每次 | 11 |
+| 一张 | 9 |
+| 英文 | 9 |
+| 技术 | 8 |
+| 测试 | 8 |
 
 ### Opening width 3
 
 | Opening | Playback count |
 | --- | --- |
-| 讲真的 | 52 |
-| 我看看 | 38 |
-| 行啦， | 35 |
-| 慢慢来 | 33 |
-| 说起来 | 30 |
-| 行吧， | 25 |
-| 偶尔吧 | 24 |
-| 反正啊 | 24 |
-| 我跟你 | 23 |
-| 听我的 | 22 |
+| 雷琳玥 | 6 |
+| 把临时 | 4 |
+| 把喜欢 | 4 |
+| 每次把 | 4 |
+| 给自己 | 4 |
+| 一颗小 | 3 |
+| 临时补 | 3 |
+| 保留一 | 3 |
+| 分支名 | 3 |
+| 可靠的 | 3 |
 
 ### Opening width 4
 
 | Opening | Playback count |
 | --- | --- |
-| 讲真的， | 52 |
-| 慢慢来， | 33 |
-| 说起来， | 30 |
-| 偶尔吧， | 24 |
-| 反正啊， | 24 |
-| 我跟你讲 | 23 |
-| 听我的， | 22 |
-| 你先听我 | 20 |
-| 先别急， | 20 |
-| 我看看， | 20 |
+| 把喜欢的 | 4 |
+| 雷琳玥把 | 4 |
+| 临时补丁 | 3 |
+| 标签不需 | 3 |
+| 看一眼房 | 3 |
+| 维护一份 | 3 |
+| 一块布折 | 2 |
+| 一次只替 | 2 |
+| 一段项目 | 2 |
+| 一颗小心 | 2 |
 
 ### Opening width 5
 
 | Opening | Playback count |
 | --- | --- |
-| 我跟你讲， | 23 |
-| 这事我还挺 | 20 |
-| 说句心里话 | 19 |
-| 先停一下， | 18 |
-| 我看看啊， | 18 |
-| 按自己的节 | 18 |
-| 我一直觉得 | 17 |
-| 换个轻松点 | 17 |
-| 这事能修， | 17 |
-| 先从一小步 | 16 |
+| 临时补丁叠 | 3 |
+| 标签不需要 | 3 |
+| 看一眼房间 | 3 |
+| 维护一份简 | 3 |
+| 一块布折好 | 2 |
+| 一次只替一 | 2 |
+| 一段项目视 | 2 |
+| 一颗小心停 | 2 |
+| 三个快捷键 | 2 |
+| 书签背面写 | 2 |
 
 ### Opening width 6
 
 | Opening | Playback count |
 | --- | --- |
-| 这事我还挺有 | 20 |
-| 说句心里话， | 19 |
-| 按自己的节奏 | 18 |
-| 我一直觉得， | 17 |
-| 换个轻松点的 | 17 |
-| 先从一小步来 | 16 |
-| 今天先啃这一 | 15 |
-| 我突然想起， | 15 |
-| 偷偷告诉你， | 14 |
-| 先把目标放近 | 14 |
+| 临时补丁叠太 | 3 |
+| 标签不需要文 | 3 |
+| 维护一份简洁 | 3 |
+| 一块布折好又 | 2 |
+| 一次只替一个 | 2 |
+| 一段项目视频 | 2 |
+| 一颗小心停在 | 2 |
+| 三个快捷键同 | 2 |
+| 书签背面写着 | 2 |
+| 保留一点试验 | 2 |
 
 ### Ending width 4
 
 | Ending | Playback count |
 | --- | --- |
-| 认真的。 | 31 |
-| 慢慢啃。 | 29 |
-| 轻一点。 | 28 |
-| 挺喜欢。 | 27 |
-| 然会来。 | 27 |
-| 补靠谱。 | 27 |
-| 过就好。 | 27 |
-| 就够了。 | 26 |
-| 不催你。 | 25 |
-| 别人说。 | 24 |
+| 更清楚。 | 11 |
+| 会更稳。 | 6 |
+| 很安静。 | 6 |
+| 很清楚。 | 6 |
+| 的路径。 | 6 |
+| 很利落。 | 5 |
+| 更可靠。 | 5 |
+| 更重要。 | 5 |
+| 的位置。 | 5 |
+| 更从容。 | 4 |
 
 ### Ending width 6
 
 | Ending | Playback count |
 | --- | --- |
-| 我是认真的。 | 31 |
-| ，你慢慢啃。 | 29 |
-| 你脑补靠谱。 | 27 |
-| 心里轻一点。 | 27 |
-| 态自然会来。 | 27 |
-| 慢慢过就好。 | 27 |
-| 我还挺喜欢。 | 27 |
-| 我又不催你。 | 25 |
-| 一点就够了。 | 24 |
-| 也不算见外。 | 24 |
+| 显得很清楚。 | 4 |
+| 会慢慢退后。 | 3 |
+| 张迷宫门票。 | 3 |
+| 更容易对齐。 | 3 |
+| 经很讲道理。 | 3 |
+| 一点呼吸感。 | 2 |
+| 一眼能看清。 | 2 |
+| 不是一回事。 | 2 |
+| 业感的地基。 | 2 |
+| 个自然断点。 | 2 |
 
 ### Ending width 8
 
 | Ending | Playback count |
 | --- | --- |
-| 这句我是认真的。 | 31 |
-| 儿呢，你慢慢啃。 | 29 |
-| 嘛，慢慢过就好。 | 27 |
-| 好像心里轻一点。 | 27 |
-| 志比你脑补靠谱。 | 27 |
-| 感觉我还挺喜欢。 | 27 |
-| ，状态自然会来。 | 27 |
-| 来，我又不催你。 | 25 |
-| 可不太跟别人说。 | 24 |
-| 推进一点就够了。 | 24 |
+| 到一张迷宫门票。 | 3 |
+| 就已经很讲道理。 | 3 |
+| 度会更容易对齐。 | 3 |
+| 一份安静的约定。 | 2 |
+| 一声很轻的和弦。 | 2 |
+| 一排竖起的小窗。 | 2 |
+| 不急着和它较劲。 | 2 |
+| 不用翻考古现场。 | 2 |
+| 么就一眼能看清。 | 2 |
+| 习惯会慢慢显影。 | 2 |
 
 ### Ending width 10
 
 | Ending | Playback count |
 | --- | --- |
-| 在这儿呢，你慢慢啃。 | 29 |
-| 分钟，状态自然会来。 | 27 |
-| 日子嘛，慢慢过就好。 | 27 |
-| 说完好像心里轻一点。 | 27 |
-| 这种感觉我还挺喜欢。 | 27 |
-| ，日志比你脑补靠谱。 | 27 |
-| 慢慢来，我又不催你。 | 25 |
-| 你说这些也不算见外。 | 24 |
-| 复制，写你自己的话。 | 24 |
-| 平时可不太跟别人说。 | 24 |
+| 会收到一张迷宫门票。 | 3 |
+| 出来就已经很讲道理。 | 3 |
+| 际进度会更容易对齐。 | 3 |
+| 一步都可能改变结果。 | 2 |
+| 么时候开始偏离正常。 | 2 |
+| 使用者只能练习读心。 | 2 |
+| 便换了一件外套回来。 | 2 |
+| 像一张带机关的地图。 | 2 |
+| 可以顺手省掉的注脚。 | 2 |
+| 和桌边都会热闹一点。 | 2 |
 
 ## Seasoning marker counts
 
@@ -320,34 +320,34 @@ Recent playback limit: at most 1 dry_sharp line(s) in the latest 20 outputs.
 | --- | --- |
 | 哈？ | 0 |
 | 你认真的？ | 0 |
-| 真的假的 | 10 |
-| 啊推 | 20 |
-| 我靠 | 12 |
-| 我丢 | 18 |
-| 我真的不想多说什么了 | 3 |
+| 真的假的 | 0 |
+| 啊推 | 0 |
+| 我靠 | 0 |
+| 我丢 | 0 |
+| 我真的不想多说什么了 | 0 |
 | 嗯嗯 | 5 |
 | 嘿嘿 | 0 |
 | 笨蛋 | 0 |
 | 小笨蛋 | 0 |
 | 本姑娘 | 0 |
-| 哼 | 0 |
-| 6 | 6 |
-| 666 | 1 |
+| 哼 | 2 |
+| 6 | 2 |
+| 666 | 0 |
 | NB | 0 |
 
 ## 22. Per-seed results and anomalies
 
 | Seed | Attempts | Outputs | None | Technical | Self-talk + ambient | user_direct | EasterEgg | dry_sharp | seasoning | Anomalies |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 0 | 150 | 150 | 0 | 18.67% | 92.00% | 0.00% | 10.00% | 4.00% | 4.67% | user_direct_not_observed |
-| 1 | 150 | 150 | 0 | 18.67% | 92.00% | 0.00% | 10.00% | 4.00% | 5.33% | user_direct_not_observed |
-| 2 | 150 | 150 | 0 | 19.33% | 92.00% | 0.00% | 9.33% | 4.00% | 4.67% | user_direct_not_observed |
-| 3 | 150 | 150 | 0 | 18.00% | 92.00% | 0.00% | 10.00% | 4.00% | 4.67% | user_direct_not_observed |
-| 4 | 150 | 150 | 0 | 18.67% | 92.00% | 0.00% | 10.00% | 4.00% | 5.33% | user_direct_not_observed |
-| 5 | 150 | 150 | 0 | 18.00% | 92.00% | 0.00% | 10.00% | 4.00% | 5.33% | user_direct_not_observed |
-| 6 | 150 | 150 | 0 | 18.67% | 92.00% | 0.00% | 10.00% | 4.00% | 4.67% | user_direct_not_observed |
-| 7 | 150 | 150 | 0 | 18.00% | 92.00% | 0.00% | 10.00% | 4.00% | 4.67% | user_direct_not_observed |
-| 8 | 150 | 150 | 0 | 18.67% | 92.00% | 0.00% | 10.00% | 4.00% | 4.67% | user_direct_not_observed |
-| 9 | 150 | 150 | 0 | 18.00% | 92.00% | 0.00% | 10.00% | 4.00% | 4.67% | user_direct_not_observed |
+| 0 | 150 | 150 | 0 | 17.33% | 91.33% | 0.00% | 10.00% | 2.00% | 0.67% | user_direct_not_observed |
+| 1 | 150 | 150 | 0 | 18.00% | 91.33% | 0.00% | 9.33% | 2.00% | 1.33% | user_direct_not_observed |
+| 2 | 150 | 150 | 0 | 18.00% | 91.33% | 0.00% | 10.00% | 2.00% | 0.67% | user_direct_not_observed |
+| 3 | 150 | 150 | 0 | 18.00% | 92.00% | 0.00% | 10.00% | 2.00% | 0.67% | user_direct_not_observed |
+| 4 | 150 | 150 | 0 | 18.00% | 92.00% | 0.00% | 9.33% | 2.00% | 0.67% | user_direct_not_observed |
+| 5 | 150 | 150 | 0 | 17.33% | 92.00% | 0.00% | 10.00% | 2.00% | 0.00% | seasoning_not_observed, seasoning_ratio_below_minimum, user_direct_not_observed |
+| 6 | 150 | 150 | 0 | 18.00% | 91.33% | 0.00% | 9.33% | 2.00% | 0.00% | seasoning_not_observed, seasoning_ratio_below_minimum, user_direct_not_observed |
+| 7 | 150 | 150 | 0 | 18.00% | 91.33% | 0.00% | 10.00% | 2.00% | 0.67% | user_direct_not_observed |
+| 8 | 150 | 150 | 0 | 18.00% | 91.33% | 0.00% | 10.00% | 2.00% | 0.67% | user_direct_not_observed |
+| 9 | 150 | 150 | 0 | 18.00% | 92.00% | 0.00% | 10.00% | 2.00% | 0.67% | user_direct_not_observed |
 
 `easter_egg_not_observed`, `user_direct_not_observed`, `dry_sharp_not_observed`, and `seasoning_not_observed` are transparent non-hard observations. They are not fabricated into the event stream.

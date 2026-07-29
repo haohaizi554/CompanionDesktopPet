@@ -9,6 +9,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Iterable, Mapping, Sequence, TypeVar
 
+from .authored_catalog import AuthoredCatalog, AuthoredEntry, AuthorshipLedgerRow
 from .content_catalog import CONTENT_CATALOG, CatalogEntry
 from .contract import PERSONA_CONTRACT, category_group_for
 from .editorial import is_exact_identity_easter_egg
@@ -23,6 +24,7 @@ from .privacy import (
 )
 from .schema import (
     ARCHIVE_HEADER,
+    AUTHORED_LEDGER_HEADER,
     PII_REVIEW_HEADER,
     REVIEW_HEADER,
     SURFACE_MANIFEST_HEADER,
@@ -78,7 +80,6 @@ TONE_ALIASES = {
 }
 SOURCE_KIND_ALIASES = {
     "topic_rewrite": "rewritten_topic",
-    "curated_authored": "curated_standalone",
     "legacy_standalone": "preserved_easter_egg",
 }
 LEGACY_SOURCE_KINDS = frozenset(("topic_rewrite", "legacy_standalone"))
@@ -117,6 +118,7 @@ class BuildResult:
     review: tuple[ReviewRow, ...]
     pii_review: tuple[PiiReviewRow, ...]
     surface_manifest: tuple[SurfaceManifestRow, ...]
+    authorship_ledger: tuple[AuthorshipLedgerRow, ...]
     dispositions: Mapping[int, tuple[str, ...]]
 
 
@@ -133,6 +135,38 @@ def _slug(value: str) -> str:
 def catalog_line_id(entry: CatalogEntry) -> str:
     """Return a stable line ID derived only from immutable catalog identity."""
     return f"v2_{_slug(entry.variant_id)}_{_stable_digest(entry.variant_id)}"
+
+def authored_line_id(entry: AuthoredEntry) -> str:
+    """Return a stable runtime ID derived from immutable authored identity."""
+    return f"v2_{_slug(entry.variant_id)}_{_stable_digest(entry.variant_id)}"
+
+
+def _authored_to_corpus(entry: AuthoredEntry) -> CorpusLine:
+    return CorpusLine(
+        id=authored_line_id(entry),
+        category=entry.category,
+        category_group=entry.category_group,
+        topic_id=entry.topic_id,
+        semantic_group=entry.semantic_group,
+        output_mode=entry.output_mode,
+        trigger=entry.trigger,
+        required_context=entry.required_context,
+        tone=entry.tone,
+        interrupt_cost=entry.interrupt_cost,
+        cooldown_hours=entry.cooldown_hours,
+        semantic_cooldown_hours=entry.semantic_cooldown_hours,
+        max_per_day=entry.max_per_day,
+        weight=entry.weight,
+        requires_reply=False,
+        enabled=True,
+        relationship_profile=entry.relationship_profile,
+        text=entry.text,
+        source_kind="curated_authored",
+        source_reference=(
+            f"catalog:authored-v1:{entry.batch_id};variant:{entry.variant_id}"
+        ),
+        rewrite_reason=f"authored-v1:{entry.editorial_role}",
+    )
 
 
 def _looks_like_pii(text: str) -> bool:
@@ -297,6 +331,7 @@ def _catalog_to_corpus(
         weight=entry.weight,
         requires_reply=False,
         enabled=True,
+        relationship_profile="neutral",
         text=entry.text,
         source_kind=(
             "new_ambient"
@@ -374,37 +409,45 @@ def build_v2(
     pii_policy: str = "review",
     *,
     catalog: Sequence[CatalogEntry] | None = None,
+    authored: AuthoredCatalog | None = None,
 ) -> BuildResult:
     """Create a deterministic, curated one-way corpus plus complete dispositions."""
     if pii_policy != "review":
         raise ValueError("pii_policy must be 'review'")
     mapping_by_line = _validate_source_and_mappings(source, mappings)
-    catalog_entries = tuple(CONTENT_CATALOG if catalog is None else catalog)
-    variants = [entry.variant_id for entry in catalog_entries]
-    if len(variants) != len(set(variants)):
-        raise ValueError("content catalog contains duplicate immutable variant IDs")
-    if any(not entry.runtime_topic_id for entry in catalog_entries):
-        raise ValueError("content catalog contains an empty runtime topic ID")
-    if any(not entry.editorial_role for entry in catalog_entries):
-        raise ValueError("content catalog contains an empty editorial role")
+    if authored is not None and catalog is not None:
+        raise ValueError("authored and catalog inputs are mutually exclusive")
+    if authored is not None:
+        enabled = [_authored_to_corpus(entry) for entry in authored.entries]
+        authorship_ledger = tuple(authored.ledger_rows())
+    else:
+        authorship_ledger = ()
+        catalog_entries = tuple(CONTENT_CATALOG if catalog is None else catalog)
+        variants = [entry.variant_id for entry in catalog_entries]
+        if len(variants) != len(set(variants)):
+            raise ValueError("content catalog contains duplicate immutable variant IDs")
+        if any(not entry.runtime_topic_id for entry in catalog_entries):
+            raise ValueError("content catalog contains an empty runtime topic ID")
+        if any(not entry.editorial_role for entry in catalog_entries):
+            raise ValueError("content catalog contains an empty editorial role")
 
-    legacy_roles: dict[tuple[str, str], set[str]] = defaultdict(set)
-    for entry in catalog_entries:
-        legacy = LEGACY_REFERENCE.fullmatch(entry.source_reference)
-        if legacy is None:
-            continue
-        key = (entry.category, entry.runtime_topic_id)
-        if entry.editorial_role in legacy_roles[key]:
-            raise ValueError(
-                f"legacy runtime topic {key!r} reuses editorial role "
-                f"{entry.editorial_role!r}"
-            )
-        legacy_roles[key].add(entry.editorial_role)
+        legacy_roles: dict[tuple[str, str], set[str]] = defaultdict(set)
+        for entry in catalog_entries:
+            legacy = LEGACY_REFERENCE.fullmatch(entry.source_reference)
+            if legacy is None:
+                continue
+            key = (entry.category, entry.runtime_topic_id)
+            if entry.editorial_role in legacy_roles[key]:
+                raise ValueError(
+                    f"legacy runtime topic {key!r} reuses editorial role "
+                    f"{entry.editorial_role!r}"
+                )
+            legacy_roles[key].add(entry.editorial_role)
 
-    enabled: list[CorpusLine] = []
-    for entry in catalog_entries:
-        topic_id, source_reference = _catalog_reference(entry, mapping_by_line)
-        enabled.append(_catalog_to_corpus(entry, topic_id, source_reference))
+        enabled = []
+        for entry in catalog_entries:
+            topic_id, source_reference = _catalog_reference(entry, mapping_by_line)
+            enabled.append(_catalog_to_corpus(entry, topic_id, source_reference))
 
     archive_basis = tuple(
         ArchiveRow(
@@ -418,11 +461,15 @@ def build_v2(
         )
         for line in sorted(source, key=lambda item: item.source_line)
     )
-    prepared_surfaces = prepare_legacy_surface_candidates(archive_basis, enabled)
-    enabled.extend(
-        materialize_legacy_surface_candidates(prepared_surfaces.candidates, enabled)
-    )
-    enabled = list(apply_dry_sharp_scene_dose(enabled))
+    if authored is None:
+        prepared_surfaces = prepare_legacy_surface_candidates(archive_basis, enabled)
+        enabled.extend(
+            materialize_legacy_surface_candidates(prepared_surfaces.candidates, enabled)
+        )
+        enabled = list(apply_dry_sharp_scene_dose(enabled))
+        surface_sources = {row.source_line for row in prepared_surfaces.candidates}
+    else:
+        surface_sources = set()
 
     normalized = [normalize_text(row.text) for row in enabled]
     if len(normalized) != len(set(normalized)):
@@ -435,10 +482,6 @@ def build_v2(
         legacy = re.match(r"legacy:(\d+);", row.source_reference)
         if legacy is not None:
             suggestions_by_source[int(legacy.group(1))].add(row.text)
-
-    surface_sources = {
-        row.source_line for row in prepared_surfaces.candidates
-    }
 
     enabled.sort(
         key=lambda row: (
@@ -516,6 +559,7 @@ def build_v2(
         review=tuple(review),
         pii_review=tuple(pii_review),
         surface_manifest=surface_manifest,
+        authorship_ledger=authorship_ledger,
         dispositions=frozen_dispositions,
     )
 
@@ -562,8 +606,8 @@ def _serialize(header: tuple[str, ...], rows: Iterable[T]) -> bytes:
     lines = ["\t".join(header)]
     for row in rows:
         values: list[str] = []
-        for field in fields(row):
-            value = getattr(row, field.name)
+        for field_name in header:
+            value = getattr(row, field_name)
             if isinstance(value, bool):
                 rendered = "true" if value else "false"
             elif isinstance(value, float):
@@ -571,7 +615,7 @@ def _serialize(header: tuple[str, ...], rows: Iterable[T]) -> bytes:
             else:
                 rendered = str(value)
             if "\t" in rendered or "\r" in rendered or "\n" in rendered:
-                raise ValueError(f"{field.name} contains a TSV-breaking character")
+                raise ValueError(f"{field_name} contains a TSV-breaking character")
             values.append(rendered)
         lines.append("\t".join(values))
     return ("\n".join(lines) + "\n").encode("utf-8")
@@ -595,6 +639,9 @@ def serialize_pii_review(rows: Iterable[PiiReviewRow]) -> bytes:
 
 def serialize_surface_manifest(rows: Iterable[SurfaceManifestRow]) -> bytes:
     return _serialize(SURFACE_MANIFEST_HEADER, rows)
+
+def serialize_authorship_ledger(rows: Iterable[AuthorshipLedgerRow]) -> bytes:
+    return _serialize(AUTHORED_LEDGER_HEADER, rows)
 
 
 def _canonical_output_root(output: Path) -> Path | None:
@@ -640,6 +687,7 @@ def _validated_output_paths(
         "review": output.with_name("persona-corpus-review.tsv"),
         "pii_review": pii_review,
         "surface_manifest": output.with_name("persona-surface-manifest.tsv"),
+        "authorship_ledger": output.with_name("persona-authorship-ledger.tsv"),
     }
     normalized = {path.resolve(strict=False) for path in paths.values()}
     if len(normalized) != len(paths):
@@ -663,6 +711,7 @@ def write_build_outputs(
         "review": serialize_review(result.review),
         "pii_review": serialize_pii_review(result.pii_review),
         "surface_manifest": serialize_surface_manifest(result.surface_manifest),
+        "authorship_ledger": serialize_authorship_ledger(result.authorship_ledger),
     }
     for name, path in paths.items():
         path.write_bytes(payloads[name])

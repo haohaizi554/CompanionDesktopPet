@@ -1,92 +1,46 @@
-# Task 3 — Persona corpus byte fidelity and editorial diversity
+# v1.3.0 authored 语料集成任务面板
 
-Date: 2026-07-23
-Status: implementation complete; final verification evidence is recorded below
+日期：2026-07-29
+状态：源码、语料、文档与预发布门禁已完成，EXE/Release 发布进行中
 
-## Immutable source and newline policy
+## 目标与当前结果
 
-The canonical source is `data/source/persona-corpus.original.tsv`. Its exact byte contract is:
-
-- 7,961,787 bytes
-- 75,375 CRLF sequences and no bare LF
-- SHA-256 `3fd7356845df838c652f7a7668013f2b15b0e91ddfa5d784b2b71a514a2c7534`
-
-The root `.gitattributes` now applies `-text diff` to both the canonical source and `src/CompanionDesktopPet/Assets/persona-corpus.tsv`. This stores the original CRLF bytes without normalization while retaining textual diffs. It applies `text eol=lf` to `data/intermediate/*.tsv`, `data/optimized/*.tsv`, and `reports/*.tsv`, so generated hashes survive clean checkouts.
-
-Before the fix, the worktree source had the canonical hash above but both Git index blobs were normalized to 7,886,412 LF bytes with SHA-256 `9adcba0025d75f416cfd618d0ff1c075e442cafc086d14f71192c0f9af7b00d5`. After `git add --renormalize`, source and asset worktree/index blobs are all 7,961,787 bytes with SHA-256 `3fd7356845df838c652f7a7668013f2b15b0e91ddfa5d784b2b71a514a2c7534`.
-
-The legacy asset remains staged as a separate 75,375-line user change and is intentionally excluded from this task's commit. The canonical source and `.gitattributes` are included.
-
-## Editorial retirement and replacement
-
-The second editorial pass retired 29 generic `.practice` variants while preserving all 63 previously human-adjudicated variants:
-
-| Runtime group | Retired practice variants |
-| --- | ---: |
-| technical | 20 |
-| growth | 6 |
-| career | 3 |
-| Total | 29 |
-
-The seven reviewer-identified pairs above the 0.55 similarity ceiling are included in that retirement set. The retained catalog now has 188 observation/practice pairs; a full-catalog scan reports zero above 0.55 and a maximum ratio of 0.4103. The 63-entry adjudication manifest remains intact and disjoint from the 29-entry retirement manifest.
-
-Exactly 29 independently authored replacements keep the enabled catalog at 800 without padding:
-
-| Category | Authored replacements | New runtime topics |
-| --- | ---: | ---: |
-| CharacterLife | 15 | 5 |
-| DailyCare | 9 | 3 |
-| EmotionalSupport | 5 | 2 |
-| Total | 29 | 10 |
-
-Every replacement is a standalone context-safe sentence, 12-30 Chinese characters long, with a unique `variant_id`, text, runtime topic role, and human-authored rationale. Their semantic cooldown is 168 hours, not lower than the 144-hour ID cooldown.
-
-Retained stable IDs are unchanged because IDs remain derived solely from immutable `variant_id`. Retired IDs are deliberately absent, and newly authored entries receive new IDs.
-
-## Runtime topic cardinalities
-
-| Category group | Topic-size distribution | Minimum | Maximum |
-| --- | --- | ---: | ---: |
-| technical | 20 topics × 1; 155 topics × 2 | 1 | 2 |
-| growth | 6 topics × 1; 22 topics × 2 | 1 | 2 |
-| career | 3 topics × 1; 11 topics × 2 | 1 | 2 |
-| character_life | 13 topics × 3; 15 topics × 5 | 3 | 5 |
-| daily_care | 6 topics × 2; 21 topics × 3 | 2 | 3 |
-| emotional_reflection | 3 topics × 2; 10 topics × 3 | 2 | 3 |
-| easter_egg | 30 topics × 1 | 1 | 1 |
-| system_ambient | 28 topics × 5 | 5 | 5 |
-
-Technical, growth, and career now each contain a meaningful mixture of one- and two-variant topics; singleton shares are 11.43%, 21.43%, and 21.43% respectively.
+- 运行时语料：30,000 条，全部来自 `data/authored/v1/b001-b100.tsv`
+- 来源类型：`curated_authored=30,000`，`legacy_surface_variant=0`
+- 语义场景：1,190 个
+- 关系画像：`neutral=26,165`、`warm_friend=1,550`、`playful_friend=2,185`、`nickname_easter_egg=100`
+- 原始语料审计：75,375 条 disposition；3,265 条 review；1,248 条 PII review
+- 来源追溯：30,000 条 authorship ledger，每条绑定 batch、variant、文本哈希、元数据哈希与根哈希
+- 运行时资源：EXE 项目直接嵌入 `data/optimized/persona-corpus-v2.tsv`
 
 ## Current generated outputs
 
 | File | Data rows | SHA-256 |
 | --- | ---: | --- |
-| `persona-corpus-v2.tsv` | 52,132 | `3335d72e695528892ddec92076f0f02abacf58fff02ed6bd0aadf67d1cf0cc40` |
-| `persona-corpus-archive.tsv` | 75,375 | `b7d9a5f2fd6f4750ea2b688206f77bf45a2b59ca12c09f36281c72efc620721d` |
+| `persona-corpus-v2.tsv` | 30,000 | `1d887627e6b4a8f303a0151cea8b99726d176b9953a396782e88cde69de5633c` |
+| `persona-corpus-archive.tsv` | 75,375 | `a9e78adefbeff30e44f88e7eae1a953a8e76c499f29d58d1ec334eb6f75e03bc` |
 | `persona-corpus-review.tsv` | 3,265 | `a251b1e01003a078d7912f71099e57c5c6830a75195558ea61428105990b866a` |
 | `pii-review.tsv` | 1,248 | `702037759f730759be83fb1c643a8f61382fa1c3f8f2a25e2c0351a177eec6e7` |
-| `persona-surface-manifest.tsv` | 51,326 | `bcf9c97be0e4b1d7b7db11fcb46f44de17ef0ade6cb2e79d69f8af69bdbc637d` |
+| `persona-surface-manifest.tsv` | 0 | `a2353ed6480ec1e75c40add4ae36ed7884724ca88a64b25f8b1c9282f975037c` |
+| `persona-authorship-ledger.tsv` | 30,000 | `31305579ebf55d2d49c3227d7c7664b16e89abd0e9aab3cbbfa11ae3e0cace8d` |
 
-All five generated files contain LF only. The v2 runtime now contains 52,132 unique stable IDs and normalized texts: 806 curated rows plus 51,326 audited legacy surface variants. Those variants are grouped under 533 semantic scenes, so their inventory count does not multiply scene scheduling weight. The bubble-derived surface limit is 42 characters. The resulting 52,132 rows retain the user-requested 50k minimum without restoring a risk line, and the separate manifest binds every surface row to its immutable source text and stable ID inputs.
+## 已完成
 
-The surface safety audit rejected 952 implicit questions, 1,806 reply hooks, 2,640 generic fake-current-context rows, and 1,584 unavailable-state rows. It preserved 192 independent safe low-information EasterEgg lines while the separate 78 privacy and one fake-context EasterEgg sources remain disabled. Stable scene hashing marks 22/533 scenes (4.1276%) and 3,878 rows as `dry_sharp`, always by whole semantic group and only in the contract-allowed groups; row share remains observation-only.
+- [x] 契约版本化：运行时范围、精确行数、语义场景数、legacy 行数、source kind
+- [x] authored loader、manifest 哈希校验与 30,000 条一对一构建
+- [x] v2 TSV 增加 `relationship_profile`，Python/C# 解析和校验同步
+- [x] 场景历史加入关系画像配额：warm_friend 最近 20 次最多 2 次；nickname_easter_egg 最近 100 次最多 1 次
+- [x] C# 全量测试 641/641 通过
+- [x] Python 全量测试 375/375 通过
+- [x] 30 天 × 10 seeds 模拟：1,500/1,500 outputs，0 hard violations
+- [x] 联合 validator：0 hard errors，0 warnings
+- [x] CI 证据合同、发布包装合同与两个 generator `--check` 通过
+- [x] README、发布检查清单、审计文档与哈希注册表更新
+- [x] canonical outputs 重建并登记行数与 SHA-256
 
-## Verification evidence
+## 待完成
 
-- Newline root-cause reproduction: worktree source `3fd735…` versus index/HEAD source `9adcba…` before attributes.
-- Second-wave focused RED: 3 tests produced 5 expected failures (`Ran 3 tests in 3.843s`) for the seven duplicate pairs, missing attributes, and all-three-group absence of singleton topics.
-- Cooldown RED: the new catalog-level test failed on `authored.small_errands.01` because 96 was below 144.
-- Focused GREEN: 6/6 selected regressions passed (`Ran 6 tests in 9.744s`, `OK`).
-- Formal fixed-seed build: `enabled=800`, `archive=75375`, `review=3265`, `pii_review=1248`.
-- Fake-current-context follow-up: the exact-ID regression first failed on the Java and database legacy rewrites, then passed after both lines became timeless standalone guidance; the current scoped run passed the other 57 tests, with only Task 4's concurrently edited normalization expectation outside this commit still failing.
-- Immutable-source audit: `audit_corpus.py` completed over 75,375 lines with canonical SHA-256 `3fd7356845df838c652f7a7668013f2b15b0e91ddfa5d784b2b71a514a2c7534`.
-- Full Python suite: 57/57 tests passed (`Ran 57 tests in 7.161s`, `OK`) with bytecode writes disabled.
-- Python bytecode compilation: 15/15 scoped persona modules, tools, and tests compiled successfully.
-- Two independent temporary-directory rebuilds exited 0; all four hashes matched each other, the formal tracked outputs, and the values above byte-for-byte.
-- Clean Git archive reproduction: temporary index tree `b2c55f5683adfea91269db3f3cb2df41a3d1a030` excluded the separately staged legacy asset and passed 57/57 tests (`Ran 57 tests in 18.073s`). The archived source remained 7,961,787 bytes, 75,375 CRLF records, and SHA-256 `3fd7356845df838c652f7a7668013f2b15b0e91ddfa5d784b2b71a514a2c7534`; all four generated-output hashes matched the formal files.
-- Final scoped checks: `git diff --check` passed with the source-only `whitespace=cr-at-eol` contract; source and legacy asset worktree/index blobs were each 7,961,787 bytes with SHA-256 `3fd7356845df838c652f7a7668013f2b15b0e91ddfa5d784b2b71a514a2c7534`, while the 75,375-line legacy asset remained staged and excluded from this task commit.
-
-## Schema authority
-
-The v2 header remains the fixed 20-column runtime interface. `runtime_topic_id` is serialized into the existing `topic_id` column; `editorial_role` remains immutable catalog metadata and a build-time quality contract. The design specification continues to state the exact Archive and Review header order.
+- [ ] Release 配置构建、单文件 EXE 验证与 SHA-256 登记
+- [ ] 推送 `v1.3.0` 标签并发布中文 Release（标题仅 `v1.3.0`）
+- [ ] 等待 GitHub Actions 全绿
+- [ ] 清理多余工作树

@@ -296,6 +296,7 @@ def _fixture_row(
         weight=1.0,
         requires_reply=False,
         enabled=True,
+        relationship_profile="neutral",
         text=f"adversarial fixture {index}",
         source_kind="editorial",
         source_reference=f"adversarial:{index}",

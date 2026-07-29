@@ -2,13 +2,13 @@
 
 本文说明佳怡桌宠离线角色语料的来源、20 列契约、确定性流水线、运行时选择规则与发布边界。所有命令均从仓库根目录运行；流水线只使用 Python 标准库，不调用网络、模型 API 或数据库。
 
-> 版本口径：2026-07-22 文档中的“约 800 条”和 Easter egg `<=2%` 是历史初版目标，已被 2026-07-24 persona contract 与 expanded-runtime 方案取代。当前已集成 52,132 条运行时文案，其中包含 806 条 curated core 与 51,326 条安全 legacy surfaces；按唯一 `semantic_group` 聚合后为 533 个语义场景。这些是当前文件统计，也是发布必须保持的精确常量。
+> 版本口径：v1.3.0 当前运行时精确为 30,000 条 `curated_authored`、0 条 legacy surface、1,190 个唯一 `semantic_group`。100 个 authored 批次、authorship manifest、逐行 ledger、21 列 runtime schema 与关系画像配额共同构成发布契约；806/51,326/52,132/533 是 v1.2.1 历史基线。
 
 ## 1. 为什么 75,375 条源数据行不是 75,375 条独立内容
 
 不可变源证据位于 `src/CompanionDesktopPet/Assets/persona-corpus.tsv`，共 75,375 条无表头物理数据行。基线审计发现大量共享开头、主题句和结尾：例如多个技术分类各有 3,900 行，相同长结尾各重复 3,600 次，且有 455,894 对有界近重复候选。这些行主要是前缀 × 主题 × 后缀的笛卡尔组合，不等于 75,375 个独立写作意图。
 
-curated core 不在构建时或运行时重新拼接片段，而是提供 806 条能独立播放的完整句子。当前 expanded runtime 在 core 之外集成 51,326 条通过安全筛选、保持原文并有精确 lineage/manifest 的 legacy surfaces，因此启用总数是 `806 + 51,326 = 52,132`；原始 75,375 条数据行仍逐一保存在 archive、review 和来源映射中，不因进入运行时而被改写或删除。
+authored runtime 不在构建时或运行时拼接片段。`data/authored/v1/b001-b100.tsv` 每批 300 条，每条都是可独立播放的完整句子；builder 一对一生成 30,000 条 `curated_authored`。原始 75,375 条 legacy 数据逐一保存在 archive、review 和来源映射中，但不再物化为运行时 surface。
 
 ## 2. 不可变源与 SHA-256 门禁
 
@@ -30,7 +30,7 @@ if ($source.Hash -ne $copy.Hash) { throw 'Immutable source hash mismatch.' }
 
 `source_line` 是冻结 source SHA 下从 1 开始计数的物理数据行号；源文件没有表头，因此 `source_line=1` 就是第 1 条源数据。行号只有与对应的冻结 source SHA（即 lineage epoch）一起才构成完整身份，不能脱离该 SHA 单独解释。
 
-源文件发生任何字节变化——包括内容修改、插入、删除、重排、编码或换行变化——都必须开启新的 lineage epoch，并重新生成全部派生产物、重新复核、重新审批。只要冻结 source SHA 不变，就不得重编号当前 51,326 个已批准 surface ID，也不得改写它们的 `source_line` 绑定；输出文件排序变化不构成重编号理由。
+任一 authored TSV 字节变化都必须重建 `persona-authorship-manifest.json`、30,000 行 ledger、runtime TSV、模拟和审计报告。variant ID 是稳定身份；批次文本摘要、元数据摘要和 manifest 根哈希必须同步变化。legacy source SHA 继续冻结，只用于 archive/review 的审计 lineage。
 
 ### 2.2 发布拓扑与当前集成状态
 
@@ -38,14 +38,14 @@ if ($source.Hash -ne $copy.Hash) { throw 'Immutable source hash mismatch.' }
 | --- | ---: | --- |
 | immutable source | 75,375 条无表头物理数据行 | 已验证，双副本 SHA-256 相同 |
 | archive | 75,375 条 disposition 记录 | 已集成，当前计数精确匹配 |
-| curated core | 806 条 | 已验证 |
-| safe legacy surfaces | 51,326 条 | 已由 `persona-surface-manifest.tsv` 精确绑定并集成 |
-| expanded runtime | 52,132 条 | 已集成，精确等于 core + surfaces |
-| semantic scenes | 533 个 | 已按唯一 `semantic_group` 聚合 |
+| authored runtime | 30,000 条 | 当前发布运行时，`source_kind=curated_authored` |
+| legacy runtime surfaces | 0 条 | `persona-surface-manifest.tsv` 仅保留表头 |
+| semantic scenes | 1,190 个 | 已按唯一 `semantic_group` 聚合 |
+| authorship ledger | 30,000 条 | 逐行绑定 batch、variant、摘要和根哈希 |
 
-这里的 52,132、51,326 和 533 既是当前集成文件的精确统计，也是发布验收值，不是范围；任一计数不符都阻止发布。发布哈希仍必须从目标提交上的隔离可复现重建与模拟重放取得，见本文末尾和 [发布与清理清单](docs/release/2026-07-25-expanded-runtime-release-checklist.md)。
+这里的 30,000、0、1,190 和 30,000 ledger 是当前精确发布验收值；任一计数不符都阻止发布。发布哈希必须从目标提交上的隔离重建与模拟重放取得。
 
-## 3. v2 的 20 个字段
+## 3. v2 的 21 个字段
 
 字段顺序是协议的一部分，不能增删或换序。
 
@@ -67,10 +67,11 @@ if ($source.Hash -ne $copy.Hash) { throw 'Immutable source hash mismatch.' }
 | 14 | `weight` | 通过硬过滤后的相对选择权重 |
 | 15 | `requires_reply` | 是否要求用户回应；启用行必须为 `false` |
 | 16 | `enabled` | 是否能进入运行时；桌宠只加载 `true` |
-| 17 | `text` | 不含制表符/真实换行的完整独立句子 |
-| 18 | `source_kind` | 原始、改写或策划创作等来源类型 |
-| 19 | `source_reference` | 原始行、主题和变体的可审计引用 |
-| 20 | `rewrite_reason` | 改写或新增原因 |
+| 17 | `relationship_profile` | `neutral`、`warm_friend`、`playful_friend` 或 `nickname_easter_egg` |
+| 18 | `text` | 不含制表符/真实换行的完整独立句子 |
+| 19 | `source_kind` | 当前运行时必须为 `curated_authored` |
+| 20 | `source_reference` | `catalog:authored-v1:<batch>;variant:<variant_id>` |
+| 21 | `rewrite_reason` | authored editorial role |
 
 ## 4. 基线审计
 
@@ -98,12 +99,14 @@ python tools/extract_corpus_structure.py `
 python tools/build_corpus_v2.py `
   --input src/CompanionDesktopPet/Assets/persona-corpus.tsv `
   --mappings data/intermediate/source-line-map.tsv `
+  --authored-dir data/authored/v1 `
+  --authorship-manifest config/persona-authorship-manifest.json `
   --output data/optimized/persona-corpus-v2.tsv `
   --seed 20260722 `
   --pii-policy review
 ```
 
-expanded builder 同时生成 v2、archive、review、`reports/pii-review.tsv` 与 `data/optimized/persona-surface-manifest.tsv`。同一不可变源、映射、contract、editorial manifest、构建代码和种子必须产生全部五个字节一致的输出；发布验证应在隔离临时目录重建后逐一比较哈希，不能只在原位覆盖 v2 再比较单个文件。
+authored builder 同时生成 v2、archive、review、`reports/pii-review.tsv`、空 surface manifest 与 30,000 行 authorship ledger。相同 authored batches、manifest、contract、构建代码和种子必须产生全部六个字节一致的输出。
 
 ## 7. 严格校验
 
@@ -115,7 +118,7 @@ python tools/validate_corpus_v2.py `
   --simulation reports/simulation-events.json
 ```
 
-合格输出必须是 `Validation: 0 hard errors`。扩展运行时只允许一条描述原始库存结构的 `surface_inventory_observation` warning；任何其他 warning 都阻断发布。白名单只允许精确匹配并附理由，不能用宽泛正则掩盖新问题。
+v1.3.0 合格输出必须精确为 `Validation: 0 hard errors, 0 warnings`。白名单只允许精确匹配并附理由，不能用宽泛正则掩盖新问题。
 
 ## 8. 30 天、多种子模拟
 
@@ -130,7 +133,7 @@ python tools/simulate_persona.py `
 
 `--seeds 10` 精确定义为种子 `0..9`。模拟必须为零硬约束违规，事件 JSON 和 Markdown 报告在相同输入下字节一致。
 
-最终 expanded runtime 的播放暴露率门禁是：Easter egg 8%–12%、seasoning 3%–6%、dry-sharp 2%–4%。三者都是模拟播放次数占比，不是 TSV 行数占比；身份 marker 不算 seasoning。dry-sharp 另有按场景计算的 inventory 规则，不能拿行变体占比替代。任何旧报告中的 `<=2%` Easter 结论均已过期，必须用最终语料和当前 contract 重新生成报告。
+最终 authored runtime 的播放暴露率门禁是：Easter egg 8%–12%、seasoning 0.5%–1.5%、dry-sharp 0%–4%。三者都是模拟播放次数占比，不是 TSV 行数占比；dry-sharp 另有 0.6%–0.8% 的场景库存门禁。
 
 ## 9. 选择器验证与调用界面
 
@@ -170,7 +173,7 @@ python -m unittest tests.test_selector -v
 
 ## 16. WPF 集成
 
-`CompanionDesktopPet.csproj` 只把当前 `data/optimized/persona-corpus-v2.tsv` 以逻辑名 `CompanionDesktopPet.Assets.persona-corpus-v2.tsv` 嵌入应用。旧的 `src/CompanionDesktopPet/Assets/persona-corpus.tsv` 仅是不可变源证据，不重新嵌入运行时。WPF 按字段名解析精确表头，加载已集成的 806 core 与 51,326 条 manifest 批准安全 surfaces，并把场景/变体选择、语义冷却、每日上限、组配额、seasoning/dry 暴露和打扰成本交给离线运行时选择器。
+`CompanionDesktopPet.csproj` 只把当前 `data/optimized/persona-corpus-v2.tsv` 以逻辑名 `CompanionDesktopPet.Assets.persona-corpus-v2.tsv` 嵌入应用。WPF 严格解析 21 列表头，加载 30,000 条 authored 行，并把场景/变体选择、语义冷却、每日上限、组配额、关系画像配额、seasoning/dry 暴露和打扰成本交给离线运行时选择器。
 
 ## 17. 完整测试门禁
 
@@ -202,7 +205,7 @@ dotnet test CompanionDesktopPet.sln -c Release --no-restore
 
 任何失败都阻止交付；.NET 门禁还必须记录实际执行的非零测试数，禁止把 VSTest 跳过但退出 0 当作通过。
 
-此外，最终门禁必须断言 806 core、51,326 surfaces、52,132 runtime rows、533 scenes 和 75,375 archive dispositions；模拟报告必须从最终输入重新生成，不能复用旧 contract 下的结果。
+此外，最终门禁必须断言 30,000 authored runtime rows、0 legacy surfaces、1,190 scenes、30,000 ledger 和 75,375 archive dispositions；模拟报告必须从最终输入重新生成，不能复用旧 contract 下的结果。
 
 ## 18. 单文件发布与隔离烟测
 
@@ -241,19 +244,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
 
 ## 确定性重建哈希门禁
 
-发布前必须在仓库内的隔离临时目录以固定 seed `20260722` 重建，并逐字节比较 v2、archive、review、PII review 与 surface manifest；不要原位覆盖 canonical 数据来“证明”可复现。完整命令见 [发布与清理清单](docs/release/2026-07-25-expanded-runtime-release-checklist.md)。
+发布前必须在隔离临时目录重建并逐字节比较 v2、archive、review、PII review、空 surface manifest 与 authorship ledger；不要原位覆盖 canonical 数据来“证明”可复现。
 
 | 发布对象 | SHA-256 |
 | --- | --- |
 | `src/CompanionDesktopPet/Assets/persona-corpus.tsv` | `3fd7356845df838c652f7a7668013f2b15b0e91ddfa5d784b2b71a514a2c7534` |
 | `data/source/persona-corpus.original.tsv` | `3fd7356845df838c652f7a7668013f2b15b0e91ddfa5d784b2b71a514a2c7534` |
-| expanded `data/optimized/persona-corpus-v2.tsv` | `3335d72e695528892ddec92076f0f02abacf58fff02ed6bd0aadf67d1cf0cc40` |
-| `data/optimized/persona-corpus-archive.tsv` | `b7d9a5f2fd6f4750ea2b688206f77bf45a2b59ca12c09f36281c72efc620721d` |
+| expanded `data/optimized/persona-corpus-v2.tsv` | `1d887627e6b4a8f303a0151cea8b99726d176b9953a396782e88cde69de5633c` |
+| `data/optimized/persona-corpus-archive.tsv` | `a9e78adefbeff30e44f88e7eae1a953a8e76c499f29d58d1ec334eb6f75e03bc` |
 | `data/optimized/persona-corpus-review.tsv` | `a251b1e01003a078d7912f71099e57c5c6830a75195558ea61428105990b866a` |
 | `reports/pii-review.tsv` | `702037759f730759be83fb1c643a8f61382fa1c3f8f2a25e2c0351a177eec6e7` |
-| `data/optimized/persona-surface-manifest.tsv` | `bcf9c97be0e4b1d7b7db11fcb46f44de17ef0ade6cb2e79d69f8af69bdbc637d` |
-| `reports/simulation-report.md` | `643a5ec7820fdcbe18778d2f526862846493f02871b3849a4dc561e4638f8592` |
-| `reports/simulation-events.json` | `b4edc82d3217963c01af43074e1231b6e7d9d2cc81afa08c5ab0fd19a1c67c62` |
+| `data/optimized/persona-surface-manifest.tsv` | `a2353ed6480ec1e75c40add4ae36ed7884724ca88a64b25f8b1c9282f975037c` |
+| `config/persona-authorship-manifest.json` | `4742a984077ce044adf8f059ee46dd36bfd7f4a0248c3422060bd366027cc4b6` |
+| `data/optimized/persona-authorship-ledger.tsv` | `31305579ebf55d2d49c3227d7c7664b16e89abd0e9aab3cbbfa11ae3e0cace8d` |
+| `reports/simulation-report.md` | `c55beb9155042acf326deef7a6b57f85913704d35dd9c02c4ccc5036df10eb3e` |
+| `reports/simulation-events.json` | `4e4b66d7eeac6dd01dd70e117e97b67a75f52ff2cf1c21f6fa34920e0e105493` |
 | 当前 `v1.2.1` 的 `outputs/CompanionDesktopPet/佳怡桌宠.exe` | `7d5343c01e1ed89ef15e3d9595f6c9fb1ec24f8275db15628a5b541ad5c1ff03` |
 | 历史 `v1.0.0` 的 `outputs/CompanionDesktopPet/佳怡桌宠.exe` | `b79bf57a94d63387b6d8db288e53f64b06af32a3aa4881e7c069634839442a82` |
 

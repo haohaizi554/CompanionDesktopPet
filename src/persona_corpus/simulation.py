@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
 from .builder import serialize_v2
+from .contract import RELEASE_INVENTORY
 from .history import SelectionHistory
 from .identity_session import IdentitySessionExposure
 from .lexical import contains_seasoning_marker
@@ -92,10 +93,11 @@ class SimulationError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class EditorialReportSummary:
-    general_rewrite_examples: int
+    authored_runtime_rows: int
+    authored_trace_examples: int
     disabled_examples: int
-    tone_fix_examples: int
-    fake_context_examples: int
+    relationship_profile_examples: int
+    authored_batch_count: int
     manual_review_items: int
 
 
@@ -607,6 +609,150 @@ def _rewrite_evidence(
         seen_topics.add(topic)
     return exact, tone, fake
 
+_AUTHORED_REFERENCE = re.compile(
+    r"^catalog:authored-v1:(b\d{3});variant:(authored\.[a-z0-9._-]+)$"
+)
+
+
+def _render_authored_runtime_report(
+    *,
+    corpus: Sequence[CorpusLine],
+    archive: Sequence[Mapping[str, str]],
+    review: Sequence[Mapping[str, str]],
+) -> tuple[str, int, int, int, int, int]:
+    enabled = sorted((row for row in corpus if row.enabled), key=lambda row: row.id)
+    expected_rows = RELEASE_INVENTORY["expanded_runtime_rows"]
+    if len(enabled) != expected_rows:
+        raise SimulationError(
+            f"authored report needs {expected_rows} runtime rows; found {len(enabled)}"
+        )
+    if any(row.source_kind != "curated_authored" for row in enabled):
+        raise SimulationError("authored report found a non-curated_authored runtime row")
+
+    parsed: list[tuple[str, str, CorpusLine]] = []
+    batch_counts: Counter[str] = Counter()
+    for row in enabled:
+        match = _AUTHORED_REFERENCE.fullmatch(row.source_reference)
+        if match is None:
+            raise SimulationError(
+                f"authored report found invalid source_reference {row.source_reference!r}"
+            )
+        batch_id, variant_id = match.groups()
+        parsed.append((batch_id, variant_id, row))
+        batch_counts[batch_id] += 1
+    if len(batch_counts) != 100 or set(batch_counts.values()) != {300}:
+        raise SimulationError(
+            "authored report needs exactly 100 batches with 300 runtime rows each"
+        )
+
+    trace_samples: list[tuple[str, str, CorpusLine]] = []
+    sampled_batches: set[str] = set()
+    for item in sorted(parsed, key=lambda value: (value[0], value[1])):
+        if item[0] in sampled_batches:
+            continue
+        sampled_batches.add(item[0])
+        trace_samples.append(item)
+    relationship_examples = [
+        item for item in parsed if item[2].relationship_profile != "neutral"
+    ][:20]
+    disabled = _diverse_archive_examples(archive, 20)
+    if len(trace_samples) < 50:
+        raise SimulationError(
+            f"authored report needs 50 traceable batch examples; found {len(trace_samples)}"
+        )
+    if len(relationship_examples) < 20:
+        raise SimulationError(
+            "authored report needs 20 non-neutral relationship-profile examples"
+        )
+    if len(disabled) < 20:
+        raise SimulationError(
+            f"authored report needs 20 disabled legacy examples; found {len(disabled)}"
+        )
+
+    group_counts = Counter(row.category_group for row in enabled)
+    profile_counts = Counter(row.relationship_profile for row in enabled)
+    reviewed = Counter(row["category"] for row in review)
+    lines = [
+        "# Persona Corpus Authored Runtime Summary",
+        "",
+        "The runtime contains only hash-bound authored-v1 rows. Legacy source rows remain in the archive and review artifacts; none are materialized as runtime surfaces.",
+        "",
+        "## Runtime inventory",
+        "",
+    ]
+    lines.extend(
+        _markdown_table(
+            ("Metric", "Value"),
+            (
+                ("Enabled authored runtime rows", len(enabled)),
+                ("Authored batches", len(batch_counts)),
+                ("Rows per batch", 300),
+                ("Legacy runtime surfaces", 0),
+            ),
+        )
+    )
+    lines.extend(["", "## Category-group distribution", ""])
+    lines.extend(
+        _markdown_table(
+            ("Category group", "Runtime rows"),
+            sorted(group_counts.items()),
+        )
+    )
+    lines.extend(["", "## Relationship-profile distribution", ""])
+    lines.extend(
+        _markdown_table(
+            ("Relationship profile", "Runtime rows"),
+            sorted(profile_counts.items()),
+        )
+    )
+    lines.extend(["", "## 50 hash-bound authored lineage examples", ""])
+    lines.extend(
+        _markdown_table(
+            ("Batch", "Variant", "v2 id", "source_reference", "Text"),
+            (
+                (batch, variant, row.id, row.source_reference, row.text)
+                for batch, variant, row in trace_samples[:50]
+            ),
+        )
+    )
+    lines.extend(["", "## 20 non-neutral relationship-profile examples", ""])
+    lines.extend(
+        _markdown_table(
+            ("Batch", "Variant", "Profile", "Text"),
+            (
+                (batch, variant, row.relationship_profile, row.text)
+                for batch, variant, row in relationship_examples
+            ),
+        )
+    )
+    lines.extend(["", "## 20 archived legacy examples", ""])
+    lines.extend(
+        _markdown_table(
+            ("source_line", "Category", "Disabled reason", "Original"),
+            (
+                (
+                    row["source_line"],
+                    row["category"],
+                    row["archive_reason"],
+                    row["original_text"],
+                )
+                for row in disabled[:20]
+            ),
+        )
+    )
+    lines.extend(["", "## Review queue by category", ""])
+    lines.extend(
+        _markdown_table(("Category", "Review rows"), sorted(reviewed.items()))
+    )
+    return (
+        _final_markdown(lines),
+        len(enabled),
+        50,
+        20,
+        20,
+        len(batch_counts),
+    )
+
 
 def _render_rewrite_report(
     *,
@@ -866,7 +1012,14 @@ def write_editorial_reports(
         pii=pii,
         simulation_report=simulation_report,
     )
-    rewrite, general_count, disabled_count, tone_count, fake_count = _render_rewrite_report(
+    (
+        rewrite,
+        authored_runtime_rows,
+        authored_trace_examples,
+        disabled_examples,
+        relationship_profile_examples,
+        authored_batch_count,
+    ) = _render_authored_runtime_report(
         corpus=corpus,
         archive=archive,
         review=review,
@@ -876,10 +1029,11 @@ def write_editorial_reports(
     _write_lf(Path(rewrite_summary_path), rewrite)
     _write_lf(Path(manual_review_path), manual)
     return EditorialReportSummary(
-        general_rewrite_examples=general_count,
-        disabled_examples=disabled_count,
-        tone_fix_examples=tone_count,
-        fake_context_examples=fake_count,
+        authored_runtime_rows=authored_runtime_rows,
+        authored_trace_examples=authored_trace_examples,
+        disabled_examples=disabled_examples,
+        relationship_profile_examples=relationship_profile_examples,
+        authored_batch_count=authored_batch_count,
         manual_review_items=len(review) + len(pii),
     )
 

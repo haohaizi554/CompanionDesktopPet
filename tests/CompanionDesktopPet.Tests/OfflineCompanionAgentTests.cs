@@ -501,7 +501,7 @@ public sealed class OfflineCompanionAgentTests
         var endingRepeatRatio = RecentSurfaceRepeatRatio(playback, entry => entry.SurfaceEnding);
         var templateRepeatRatio = RecentSurfaceRepeatRatio(playback, entry => entry.SurfaceTemplate);
 
-        Assert.True(run.UsedDeepFallback);
+        Assert.False(run.UsedDeepFallback);
         Assert.InRange(
             seasoningRatio,
             PersonaContractGenerated.SeasoningPlaybackMinimum,

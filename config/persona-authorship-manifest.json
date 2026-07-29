@@ -66,12 +66,12 @@
     "b009": {
       "metadata_sha256": "e4cd32e62e12576d7f37b695173b80ab4d8527211a0f970370bfdd0c3d352920",
       "row_count": 300,
-      "text_sha256": "d821004a7fc9dfa8d319f09ae74953ee1820d6daf7d3fdfed2fea3ba04aa27bf"
+      "text_sha256": "6c7846fa7cdd0bee2dc2389229b4796f4a013c3156ee92c37b72ca7eecfd39cc"
     },
     "b010": {
       "metadata_sha256": "a05d731b8d0e263dc1d7b9c80c2ff3d13d0dbd9842877fc78dc59a2601670204",
       "row_count": 300,
-      "text_sha256": "381ac45ee01bb97d1f63aa08e7c8b77ffc102b8d7038d869c0489691370123e2"
+      "text_sha256": "1e8de032bbf58f143fd3cfe74a03db65e1995ca421f34ca69bebaa47e1d5d130"
     },
     "b011": {
       "metadata_sha256": "01246ca4e17a4ea7556e61ddef7fa81c56c1fe10d947ed14ed0fa910f484204e",
@@ -86,7 +86,7 @@
     "b013": {
       "metadata_sha256": "f850aa2de264eaa33942bcb730898fa649590bd96c7d4292415321565b31950a",
       "row_count": 300,
-      "text_sha256": "f8f236c068786f1b29e63cc5e8b276c09869e67fe02560a2341b9677dab6a70b"
+      "text_sha256": "b0b3ed23b3d582550d792c8b6101024db2959bccdc499d6ebf9151eec52b7f0c"
     },
     "b014": {
       "metadata_sha256": "6d5ae59c75cc9446883406752511d7d96332000198f371133a6b09734c1feeac",
@@ -525,7 +525,7 @@
     }
   },
   "format": "persona-authorship-manifest-v1",
-  "root_sha256": "50e889c47dd0499843cd99c1e6f3c9a54c39e91f14338b2adbbc4e5945323474",
+  "root_sha256": "db24cbde01993848d7793c9fef45d61e4b523c0b9bb3cf2cc59d263eac970e10",
   "rows_per_batch": 300,
   "schema_version": 1,
   "total_rows": 30000

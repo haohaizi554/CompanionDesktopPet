@@ -191,6 +191,7 @@ _SCENE_SCHEDULING_FIELDS = (
     "cooldown_hours",
     "semantic_cooldown_hours",
     "max_per_day",
+    "relationship_profile",
     "weight",
     "requires_reply",
     "enabled",

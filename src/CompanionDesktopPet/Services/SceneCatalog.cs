@@ -129,6 +129,7 @@ public static class SceneCatalog
                               || line.MaxPerDay != first.MaxPerDay
                               || line.InterruptionCost != first.InterruptionCost
                               || line.Weight != first.Weight
+                              || line.RelationshipProfile != first.RelationshipProfile
                               || line.Tone != first.Tone
                               || line.RequiresReply != first.RequiresReply
                               || line.Enabled != first.Enabled))
@@ -164,6 +165,7 @@ public static class SceneCatalog
             SemanticCooldown: first.SemanticCooldown,
             MaxPerDay: first.MaxPerDay,
             Weight: first.Weight,
+            RelationshipProfile: first.RelationshipProfile,
             EnergyDelta: -0.012,
             SociabilityDelta: expression == SceneExpression.Direct ? -0.025 : 0.005,
             BoredomDelta: -0.04,

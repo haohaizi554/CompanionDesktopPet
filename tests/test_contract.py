@@ -352,7 +352,7 @@ class PersonaContractFileTests(unittest.TestCase):
             "persona-dry-sharp-scene-v1", dry_sharp["scene_hash_namespace"]
         )
         self.assertEqual(0.07, dry_sharp["scene_hash_threshold"])
-        self.assertEqual([0.04, 0.06], dry_sharp["scene_inventory_acceptance"])
+        self.assertEqual([0.006, 0.008], dry_sharp["scene_inventory_acceptance"])
         self.assertEqual(
             "expanded_runtime", dry_sharp["scene_inventory_enforcement_profile"]
         )
@@ -364,7 +364,7 @@ class PersonaContractFileTests(unittest.TestCase):
         seasoning = contract["lexical_exposure"]["seasoning"]
         privacy = contract["privacy"]
 
-        self.assertEqual([0.03, 0.06], seasoning["playback_acceptance"])
+        self.assertEqual([0.005, 0.015], seasoning["playback_acceptance"])
         self.assertEqual(20, seasoning["recent_window"])
         self.assertEqual(1, seasoning["recent_max"])
         self.assertEqual(

@@ -166,6 +166,7 @@ def valid_line(**overrides: object) -> CorpusLine:
         "weight": 1.0,
         "requires_reply": False,
         "enabled": True,
+        "relationship_profile": "neutral",
         "text": "窗边的风慢慢绕过书页，房间也安静下来。",
         "source_kind": "curated_standalone",
         "source_reference": "catalog:test-fixture;variant:fixture.window.01",
@@ -324,6 +325,16 @@ def clean_simulation() -> tuple[list[CorpusLine], dict[str, object], dict[str, o
 
 
 class ValidationContractTests(unittest.TestCase):
+    def test_enabled_legacy_surface_is_a_hard_validation_error(self) -> None:
+        row = valid_line(
+            source_kind="legacy_surface_variant",
+            source_reference="legacy:1;topic:fixture.window;variant:surface_1_0123456789ab",
+        )
+
+        report = validate_corpus([row], valid_config(), {"exceptions": []})
+
+        self.assertIn("enabled_legacy_surface", issue_codes(report))
+
     def test_category_group_contract_applies_to_enabled_and_disabled_rows(self) -> None:
         rows = [
             valid_line(id="enabled", category="Career", category_group="technical"),
@@ -371,6 +382,26 @@ class ValidationContractTests(unittest.TestCase):
         self.assertIn("tone", issue.message)
         self.assertIn("requires_reply", issue.message)
         self.assertIn("enabled", issue.message)
+
+    def test_relationship_profile_is_controlled_and_part_of_semantic_metadata(self) -> None:
+        first = valid_line(
+            id="profile-neutral",
+            semantic_group="shared.profile.scene",
+            relationship_profile="neutral",
+        )
+        second = valid_line(
+            id="profile-warm",
+            semantic_group="shared.profile.scene",
+            relationship_profile="warm_friend",
+            text="窗边留了一小块安静的位置，适合慢慢整理今天的想法。",
+        )
+        invalid = valid_line(id="profile-invalid", relationship_profile="exclusive")
+
+        report = validate_corpus([first, second, invalid], valid_config(), {"exceptions": []})
+
+        self.assertIn("invalid_relationship_profile", issue_codes(report))
+        mismatch = next(issue for issue in report.errors if issue.code == "semantic_group_inconsistent")
+        self.assertIn("relationship_profile", mismatch.message)
 
     def test_semantic_group_may_span_lineage_topics(self) -> None:
         first = valid_line(
@@ -745,6 +776,7 @@ class ValidationContractTests(unittest.TestCase):
         self.assertEqual(set(), pii_ids)
 
     def test_identity_pii_requires_an_exact_editorial_adjudication(self) -> None:
+
         from src.persona_corpus.editorial import EDITORIAL_MANIFEST
 
         item = next(
@@ -800,6 +832,33 @@ class ValidationContractTests(unittest.TestCase):
             ),
         )
 
+    def test_authored_identity_requires_the_contract_batch_and_lineage(self) -> None:
+        allowed = valid_line(
+            id="authored-identity",
+            category="EasterEgg",
+            category_group="easter_egg",
+            output_mode="self_talk",
+            text="小玥把报错栈折成一小段线索。",
+            source_kind="curated_authored",
+            source_reference="catalog:authored-v1:b084;variant:authored.b084.fixture.0001",
+            relationship_profile="warm_friend",
+        )
+        wrong_batch = replace(
+            allowed,
+            id="authored-identity-wrong-batch",
+            source_reference="catalog:authored-v1:b001;variant:authored.b001.fixture.0001",
+        )
+
+        allowed_report = validate_corpus(
+            [allowed], valid_config(), bound_allowlist([allowed])
+        )
+        wrong_report = validate_corpus(
+            [wrong_batch], valid_config(), bound_allowlist([wrong_batch])
+        )
+
+        self.assertNotIn("pii_enabled", issue_codes(allowed_report))
+        self.assertIn("pii_enabled", issue_codes(wrong_report))
+
     def test_dry_sharp_tone_obeys_placement_contract(self) -> None:
         allowed = valid_line(tone="dry_sharp")
         forbidden_group = valid_line(
@@ -844,22 +903,22 @@ class ValidationContractTests(unittest.TestCase):
             valid_line(
                 id=f"scene-{index}",
                 semantic_group=f"fixture.scene.{index}",
-                tone="dry_sharp" if index < 22 else "calm",
+                tone="dry_sharp" if index < 4 else "calm",
             )
             for index in range(500)
         ]
-        expanded = rows + rows[:22] * 2300
+        expanded = rows + rows[:4] * 7_400
         passing = Sink()
 
         validate_dry_sharp_contract(expanded, passing)
 
         self.assertNotIn("dry_sharp_scene_inventory_ratio", passing.codes)
         row_ratio = sum(row.tone == "dry_sharp" for row in expanded) / len(expanded)
-        self.assertGreater(row_ratio, 0.40)
+        self.assertGreater(row_ratio, 0.90)
 
         failing = Sink()
         failing_rows = [
-            replace(row, tone="calm") if index >= 19 else row
+            replace(row, tone="calm") if index >= 2 else row
             for index, row in enumerate(rows)
         ]
         validate_dry_sharp_contract(failing_rows * 100, failing)

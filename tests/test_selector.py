@@ -55,6 +55,7 @@ def corpus_line(**overrides: object) -> CorpusLine:
         "weight": 1.0,
         "requires_reply": False,
         "enabled": True,
+        "relationship_profile": "neutral",
         "text": "早饭的热气很适合慢慢醒神。",
         "source_kind": "catalog",
         "source_reference": "catalog:test",

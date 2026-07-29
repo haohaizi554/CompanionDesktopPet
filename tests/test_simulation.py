@@ -442,6 +442,18 @@ class SimulationIntegrationTests(unittest.TestCase):
 
     def test_per_seed_anomalies_disclose_zero_frequency_groups_without_making_them_hard(self) -> None:
         self.assertEqual([], self.report.hard_violations)
+        seasoning_missing = {
+            seed
+            for seed, metrics in self.report.per_seed.items()
+            if metrics.seasoning_ratio == 0
+        }
+        self.assertEqual({5, 6}, seasoning_missing)
+        for seed in seasoning_missing:
+            self.assertIn(
+                "seasoning_ratio_below_minimum",
+                self.report.per_seed_anomalies[seed],
+            )
+            self.assertIn("seasoning_not_observed", self.report.per_seed_anomalies[seed])
         if self.report.easter_egg_ratio == 0:
             self.assertTrue(
                 all(
@@ -1219,7 +1231,8 @@ class SimulationUnitTests(unittest.TestCase):
 
         def report_for(seasoning_outputs: int):
             attempts = []
-            for index in range(100):
+            sample_count = 200
+            for index in range(sample_count):
                 attempt = self._constraint_attempt(
                     when=start + timedelta(minutes=61 * index),
                     row_index=380 + index,
@@ -1250,8 +1263,11 @@ class SimulationUnitTests(unittest.TestCase):
                 adversarial_result=base.adversarial_result,
             )
 
-        exact = report_for(round(policy.playback_acceptance[0] * 100))
-        above = report_for(round(policy.playback_acceptance[1] * 100) + 1)
+        sample_count = 200
+        exact = report_for(round(policy.playback_acceptance[0] * sample_count))
+        above = report_for(
+            round(policy.playback_acceptance[1] * sample_count) + 1
+        )
 
         self.assertAlmostEqual(policy.playback_acceptance[0], exact.seasoning_ratio)
         self.assertNotIn(
@@ -1361,10 +1377,11 @@ class SimulationUnitTests(unittest.TestCase):
                 rewrite_summary_path=output / "corpus-rewrite-summary.md",
                 manual_review_path=output / "corpus-manual-review.md",
             )
-            self.assertGreaterEqual(summary.general_rewrite_examples, 50)
+            self.assertEqual(30_000, summary.authored_runtime_rows)
+            self.assertGreaterEqual(summary.authored_trace_examples, 50)
             self.assertGreaterEqual(summary.disabled_examples, 20)
-            self.assertGreaterEqual(summary.tone_fix_examples, 20)
-            self.assertGreaterEqual(summary.fake_context_examples, 20)
+            self.assertGreaterEqual(summary.relationship_profile_examples, 20)
+            self.assertEqual(100, summary.authored_batch_count)
             expected_manual_review_items = tsv_data_rows(REVIEW_PATH) + tsv_data_rows(PII_PATH)
             self.assertGreater(expected_manual_review_items, 0)
             self.assertEqual(expected_manual_review_items, summary.manual_review_items)
@@ -1378,8 +1395,9 @@ class SimulationUnitTests(unittest.TestCase):
                 self.assertNotIn(b"\r", payload)
                 self.assertNotIn(b"TODO: generated report placeholder", payload)
             rewrite = (output / "corpus-rewrite-summary.md").read_text(encoding="utf-8")
-            self.assertIn("source_line", rewrite)
-            self.assertIn("topic-level rewritten outcome", rewrite)
+            self.assertIn("Persona Corpus Authored Runtime Summary", rewrite)
+            self.assertIn("catalog:authored-v1:", rewrite)
+            self.assertNotIn("original-to-rewrite", rewrite)
 
     def test_editorial_tsv_error_names_path_and_one_based_line(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

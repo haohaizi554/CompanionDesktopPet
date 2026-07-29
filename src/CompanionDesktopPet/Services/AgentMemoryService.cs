@@ -228,6 +228,7 @@ public sealed class AgentMemoryService
         && Enum.IsDefined(entry.CategoryGroup)
         && Enum.IsDefined(entry.OutputMode)
         && Enum.IsDefined(entry.DialogueTrigger)
+        && PersonaContractGenerated.ControlledRelationshipProfiles.Contains(entry.RelationshipProfile)
         && entry.InterruptionCost is >= 0 and <= 5;
 
     private static bool IsValidHistory(
@@ -248,6 +249,8 @@ public sealed class AgentMemoryService
                && entry.CategoryGroup == line.CategoryGroup
                && entry.OutputMode == line.OutputMode
                && entry.DialogueTrigger == line.Trigger
+               && (entry.RelationshipProfile == "neutral"
+                   || entry.RelationshipProfile == line.RelationshipProfile)
                && entry.InterruptionCost == line.InterruptionCost;
     }
 

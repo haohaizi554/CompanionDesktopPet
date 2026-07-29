@@ -710,6 +710,7 @@ def load_persona_contract(path: Path = DEFAULT_CONTRACT_PATH) -> PersonaContract
         "semantic_cooldown_hours",
         "max_per_day",
         "interrupt_cost",
+        "relationship_profile",
         "weight",
         "requires_reply",
         "enabled",
@@ -755,6 +756,7 @@ CATEGORY_GROUP_BY_CATEGORY = PERSONA_CONTRACT.categories
 OUTPUT_MODES = PERSONA_CONTRACT.output_modes
 TONES = PERSONA_CONTRACT.tones
 SOURCE_KINDS = PERSONA_CONTRACT.source_kinds
+RELATIONSHIP_PROFILES = PERSONA_CONTRACT.relationship_profiles
 ALLOWED_CONTEXT_TOKENS = PERSONA_CONTRACT.context_tokens
 MVP_TRIGGERS = PERSONA_CONTRACT.mvp_triggers
 FUTURE_TRIGGERS = PERSONA_CONTRACT.future_triggers

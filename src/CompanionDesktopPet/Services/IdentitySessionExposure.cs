@@ -90,13 +90,13 @@ internal sealed class IdentitySessionExposure
         IReadOnlyList<string> markerClasses)
     {
         if (markerClasses.Count == 0
-            || line.SourceKind != "curated_standalone"
-            || !line.SourceReference.StartsWith("authored:", StringComparison.Ordinal))
+            || line.SourceKind != "curated_authored"
+            || !line.SourceReference.StartsWith("catalog:authored-v1:", StringComparison.Ordinal))
         {
             return false;
         }
 
-        var batchStart = "authored:".Length;
+        var batchStart = "catalog:authored-v1:".Length;
         var batchEnd = line.SourceReference.IndexOf(';', batchStart);
         var batchId = batchEnd >= 0
             ? line.SourceReference[batchStart..batchEnd]

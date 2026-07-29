@@ -92,10 +92,14 @@ jobs:
           $evidence = Join-Path $env:GITHUB_WORKSPACE 'ci-evidence'
           New-Item -ItemType Directory -Path $evidence -Force | Out-Null
 
-          $trackedSimulation = 'reports/simulation-events.json'
-          & git ls-files --error-unmatch -- $trackedSimulation | Out-Null
-          if ($LASTEXITCODE -ne 0) {
-            throw "$trackedSimulation must be committed."
+          $trackedEvidence = @(
+            'reports/simulation-events.json'
+            'config/persona-authorship-manifest.json'
+            'data/optimized/persona-authorship-ledger.tsv'
+          )
+          foreach ($path in $trackedEvidence) {
+            & git ls-files --error-unmatch -- $path | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "$path must be committed." }
           }
 
           $tzdataVersion = & python -c "import importlib.metadata as metadata; print(metadata.version('tzdata'))"
@@ -110,7 +114,9 @@ jobs:
             "Python=$(& python --version 2>&1)"
             "Tzdata=$tzdataVersion"
             "DotNetSdk=$(& dotnet --version 2>&1)"
-            "SimulationEventsSHA256=$((Get-FileHash -LiteralPath $trackedSimulation -Algorithm SHA256).Hash.ToLowerInvariant())"
+            "SimulationEventsSHA256=$((Get-FileHash -LiteralPath 'reports/simulation-events.json' -Algorithm SHA256).Hash.ToLowerInvariant())"
+            "AuthorshipManifestSHA256=$((Get-FileHash -LiteralPath 'config/persona-authorship-manifest.json' -Algorithm SHA256).Hash.ToLowerInvariant())"
+            "AuthorshipLedgerSHA256=$((Get-FileHash -LiteralPath 'data/optimized/persona-authorship-ledger.tsv' -Algorithm SHA256).Hash.ToLowerInvariant())"
           ) | Set-Content -LiteralPath (Join-Path $evidence 'environment.txt') -Encoding utf8
           & dotnet --info 2>&1 | Set-Content -LiteralPath (Join-Path $evidence 'dotnet-info.txt') -Encoding utf8
 
@@ -192,6 +198,32 @@ jobs:
             throw "Persona contract generator check failed with exit code $exitCode."
           }
 
+      - name: Check generated scheduler and authored manifest
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & python tools/generate_persona_scheduler.py --check
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Generated scheduler is stale.'
+          }
+
+          $manifestCheck = Join-Path $env:RUNNER_TEMP 'persona-authorship-manifest.json'
+          & python tools/build_authorship_manifest.py `
+            --authored-dir data/authored/v1 `
+            --output $manifestCheck
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Unable to rebuild the authored source manifest.'
+          }
+          $expectedManifest = (Get-FileHash `
+            -LiteralPath 'config/persona-authorship-manifest.json' `
+            -Algorithm SHA256).Hash
+          $actualManifest = (Get-FileHash `
+            -LiteralPath $manifestCheck `
+            -Algorithm SHA256).Hash
+          if ($actualManifest -cne $expectedManifest) {
+            throw 'Authored source manifest is stale.'
+          }
+          Write-Output 'PASS: scheduler and authored source manifest are current.'
+
       - name: Validate corpus against committed simulation events
         run: |
           $ErrorActionPreference = 'Stop'
@@ -208,19 +240,12 @@ jobs:
           }
 
           $summary = @($output | Where-Object { $_ -match '^Validation:' }) | Select-Object -First 1
-          if ($null -eq $summary -or $summary -notmatch '^Validation: 0 hard errors, (?<Count>[0-9]+) warnings$') {
-            throw "Validator did not report the required zero-hard-error summary: $summary"
+          if ($summary -cne 'Validation: 0 hard errors, 0 warnings') {
+            throw "Validator did not report the required zero-error, zero-warning summary: $summary"
           }
-          $warningCount = [int]$Matches['Count']
           $warningLines = @($output | Where-Object { $_ -match '^WARNING ' })
-          if ($warningCount -ne $warningLines.Count) {
-            throw 'Validator warning summary does not match its warning details.'
-          }
-          $unexpectedWarnings = @($warningLines | Where-Object {
-            $_ -notmatch '^WARNING surface_inventory_observation:'
-          })
-          if ($unexpectedWarnings.Count -ne 0 -or $warningLines.Count -gt 1) {
-            throw "Validator emitted unexpected warnings: $($warningLines -join ' | ')"
+          if ($warningLines.Count -ne 0) {
+            throw "Validator emitted warnings: $($warningLines -join ' | ')"
           }
 
       - name: Run full Python test suite
@@ -841,6 +866,7 @@ jobs:
           $unsignedClaim = '构建门禁已执行 Get-AuthenticodeSignature，并确认当前 EXE 状态为 NotSigned、无签名证书和时间戳证书'
           $requiredChineseHeadings = @(
             '## 发布亮点'
+            '## 验证结果'
             '## 下载与运行'
             '## 完整性验证'
             '## 离线、单 EXE 与签名说明'
@@ -880,9 +906,19 @@ jobs:
 
           ## 发布亮点
 
-          - 这是从已验证的 main 提交构建的正式 Windows x64 版本。
-          - 发布前已完成质量门禁、单文件边界检查、真实 WPF 隔离烟测与 SHA-256 校验。
-          - 桌宠、中文角色语料与本地状态均保持离线运行，不依赖网络、数据库或在线模型。
+          - 运行时语料已替换为 100 个 authored 批次，每批 300 条，共 30,000 条 `curated_authored`；`legacy_surface_variant` 为 0 条。
+          - 30,000 条语料按唯一 `semantic_group` 聚合为 1,190 个场景；v2 元数据从 20 列扩展到 21 列，新增 `relationship_profile`。
+          - 关系画像精确分布为：`neutral` 26,165 条、`warm_friend` 1,550 条、`playful_friend` 2,185 条、`nickname_easter_egg` 100 条。
+          - 新增逐行 authorship ledger；manifest、ledger、运行时 TSV 与归档 TSV 均由发布门禁登记并复核 SHA-256。
+          - 运行时对 `warm_friend` 实施最近 20 次最多 2 次、对 `nickname_easter_egg` 实施最近 100 次最多 1 次的暴露上限。
+
+          ## 验证结果
+
+          - Python：375 项测试全部通过。
+          - .NET Release：641 项测试全部通过。
+          - 正式模拟：30 天 × 10 个固定 seeds，产生 1,500/1,500 次输出，0 个 hard violations。
+          - 联合语料校验：0 hard errors、0 warnings。
+          - 发布构建继续执行干净 self-contained single-file publish、单文件边界检查、真实 WPF 隔离烟测与 SHA-256 校验。
 
           ## 下载与运行
 

@@ -94,7 +94,8 @@ public sealed record DialogueLine(
     string Text,
     string SourceKind,
     string SourceReference,
-    string RewriteReason)
+    string RewriteReason,
+    string RelationshipProfile = "neutral")
 {
     private string _text = Text;
     private bool? _hasSeasoningMarker;
@@ -134,13 +135,14 @@ public static class PersonaCorpus
     public const int MaximumRuntimeRows = PersonaContractGenerated.ExpandedRuntimeMaximumRows;
     public const int ExpectedRuntimeRows = PersonaContractGenerated.ExpandedRuntimeRows;
     public const int ExpectedLegacySurfaceRows = PersonaContractGenerated.LegacySurfaceRows;
+    public const int ExpectedAuthoredRuntimeRows = PersonaContractGenerated.ExpectedAuthoredRuntimeRows;
 
     public static IReadOnlyList<string> V2Header { get; } =
     [
         "id", "category", "category_group", "topic_id", "semantic_group",
         "output_mode", "trigger", "required_context", "tone", "interrupt_cost",
         "cooldown_hours", "semantic_cooldown_hours", "max_per_day", "weight",
-        "requires_reply", "enabled", "text", "source_kind", "source_reference",
+        "requires_reply", "enabled", "relationship_profile", "text", "source_kind", "source_reference",
         "rewrite_reason"
     ];
 
@@ -197,6 +199,14 @@ public static class PersonaCorpus
                 $"Enabled v2 persona corpus must contain exactly {ExpectedLegacySurfaceRows} legacy surface rows, found {legacySurfaceRows}.");
         }
 
+        var authoredRows = all.Count(line => line.SourceKind == "curated_authored");
+        if (authoredRows != ExpectedAuthoredRuntimeRows)
+        {
+            throw new InvalidDataException(
+                $"Enabled v2 persona corpus must contain exactly {ExpectedAuthoredRuntimeRows} authored rows, found {authoredRows}.");
+        }
+
+
         return new CorpusSnapshot(
             all,
             all.Where(line => line.CategoryGroup != DialogueCategoryGroup.EasterEgg).ToArray(),
@@ -210,7 +220,7 @@ public static class PersonaCorpus
         var header = normalizedHeader.Split('\t');
         if (!header.SequenceEqual(V2Header, StringComparer.Ordinal))
         {
-            throw new InvalidDataException("Persona v2 corpus does not use the exact 20-column header.");
+            throw new InvalidDataException("Persona v2 corpus does not use the exact 21-column header.");
         }
 
         var columns = header.Select((name, index) => (name, index))
@@ -307,6 +317,11 @@ public static class PersonaCorpus
             var weight = ParsePositiveDouble(Value("weight"), "weight", lineNumber);
             var requiresReply = ParseBoolean(Value("requires_reply"), "requires_reply", lineNumber);
             var text = Required(Value("text"), "text", lineNumber);
+            var relationshipProfile = Share(ParseControlled(
+                Value("relationship_profile"),
+                "relationship_profile",
+                PersonaContractGenerated.ControlledRelationshipProfiles,
+                lineNumber));
             var sourceKind = Share(ParseControlled(
                 Value("source_kind"), "source_kind", PersonaContractGenerated.ControlledSourceKinds, lineNumber));
             var sourceReference = Required(Value("source_reference"), "source_reference", lineNumber);
@@ -422,7 +437,8 @@ public static class PersonaCorpus
                 text,
                 sourceKind,
                 sourceReference,
-                rewriteReason));
+                rewriteReason,
+                relationshipProfile));
         }
 
         return lines.ToArray();
@@ -623,8 +639,8 @@ public static class PersonaCorpus
         string sourceReference,
         int lineNumber)
     {
-        if (sourceKind != "curated_standalone"
-            || !sourceReference.StartsWith("authored:", StringComparison.Ordinal)
+        if (sourceKind != "curated_authored"
+            || !sourceReference.StartsWith("catalog:authored-v1:", StringComparison.Ordinal)
             || !PersonaContractGenerated.AuthoredIdentity.AllowMarkersInAnyCategory
             || text.Contains('?')
             || text.Contains('\uFF1F')

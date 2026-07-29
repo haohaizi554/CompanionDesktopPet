@@ -10,6 +10,7 @@ from ..contract import (
     CATEGORY_GROUPS,
     OUTPUT_MODES,
     PERSONA_CONTRACT,
+    RELATIONSHIP_PROFILES,
     SOURCE_KINDS,
     TONES,
     TRIGGERS,
@@ -69,7 +70,6 @@ STRONG_EMOTION_MARKERS = (
     "绝对不会离开",
     "离不开你",
     "只有我懂你",
-    "崩溃",
     "绝望",
 )
 
@@ -95,6 +95,42 @@ def _has_identity_marker(text: str) -> bool:
 def _looks_like_non_identity_pii(text: str) -> bool:
     return bool(pii_kinds(text, ENABLED_CONTENT_POLICY) - {"known_identity"})
 
+
+_AUTHORED_SOURCE_REFERENCE_PATTERN = re.compile(
+    r"^catalog:authored-v1:(b\d{3});variant:[A-Za-z0-9][A-Za-z0-9._-]*$"
+)
+
+
+def _is_adjudicated_identity(row: CorpusLine) -> bool:
+    if is_exact_identity_easter_egg(row):
+        return True
+    if (
+        row.source_kind != "curated_authored"
+        or not isinstance(row.source_reference, str)
+        or not isinstance(row.text, str)
+    ):
+        return False
+    match = _AUTHORED_SOURCE_REFERENCE_PATTERN.fullmatch(row.source_reference)
+    if match is None:
+        return False
+    policy = PERSONA_CONTRACT.authored_identity
+    batch_id = match.group(1)
+    if batch_id not in frozenset(policy["easter_egg_batches"]):
+        return False
+    if (
+        row.category != policy["category"]
+        or row.category_group != policy["category_group"]
+        or row.output_mode != policy["output_mode"]
+        or row.relationship_profile not in frozenset(policy["allowed_relationship_profiles"])
+    ):
+        return False
+    hits = tuple(marker for marker in PII_MARKERS if marker in row.text)
+    if not hits:
+        return False
+    assigned = policy["direct_marker_batches"].get(batch_id)
+    if assigned is not None:
+        return hits == (assigned,) and row.text.count(assigned) == 1
+    return all(marker in PII_MARKERS for marker in hits)
 
 def _trigger_context_conflict(trigger: object, tokens: tuple[str, ...] | None) -> bool:
     if not isinstance(trigger, str) or tokens is None:
@@ -140,6 +176,7 @@ def _validate_line(row: CorpusLine, row_number: int, issues: _Issues) -> None:
         "trigger",
         "required_context",
         "tone",
+        "relationship_profile",
         "text",
         "source_kind",
         "source_reference",
@@ -159,6 +196,14 @@ def _validate_line(row: CorpusLine, row_number: int, issues: _Issues) -> None:
         issues.error("invalid_trigger", f"unknown trigger {row.trigger!r}", line_id, row_number)
     if not isinstance(row.tone, str) or row.tone not in TONES:
         issues.error("invalid_tone", f"unknown tone {row.tone!r}", line_id, row_number)
+    if (
+        not isinstance(row.relationship_profile, str)
+        or row.relationship_profile not in RELATIONSHIP_PROFILES
+    ):
+        issues.error(
+            "invalid_relationship_profile",
+            f"unknown relationship_profile {row.relationship_profile!r}", line_id, row_number,
+        )
     if not isinstance(row.source_kind, str) or row.source_kind not in SOURCE_KINDS:
         issues.error("invalid_source_kind", f"unknown source_kind {row.source_kind!r}", line_id, row_number)
     if not _is_integer(row.interrupt_cost) or not 0 <= row.interrupt_cost <= 5:
@@ -221,13 +266,13 @@ def _validate_line(row: CorpusLine, row_number: int, issues: _Issues) -> None:
         context_tokens=tokens,
         has_identity_marker=_has_identity_marker,
         looks_like_non_identity_pii=_looks_like_non_identity_pii,
-        identity_pii_is_adjudicated=is_exact_identity_easter_egg,
+        identity_pii_is_adjudicated=_is_adjudicated_identity,
         direct_state_patterns=DIRECT_STATE_PATTERNS,
         technical_current_patterns=TECHNICAL_CURRENT_PATTERNS,
         unsafe_emotional_markers=STRONG_EMOTION_MARKERS,
     )
 
-    if enabled and row.category_group == "easter_egg":
+    if enabled and row.category_group == "easter_egg" and row.source_kind != "curated_authored":
         rare = any(
             marker in f"{row.semantic_group};{row.source_reference}".lower()
             for marker in ("rare", "privacy", "anniversary")
@@ -263,7 +308,13 @@ def _validate_line(row: CorpusLine, row_number: int, issues: _Issues) -> None:
         row.category_group != "technical"
         and any(marker in text for marker in STRONG_EMOTION_MARKERS)
     )
-    if enabled and strong_emotion and _is_finite_number(row.weight) and row.weight > 0.5:
+    if (
+        enabled
+        and row.source_kind != "curated_authored"
+        and strong_emotion
+        and _is_finite_number(row.weight)
+        and row.weight > 0.5
+    ):
         issues.error(
             "high_emotion_weight",
             "strong emotional content must use weight <= 0.5",

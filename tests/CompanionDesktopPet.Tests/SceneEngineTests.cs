@@ -176,6 +176,47 @@ public sealed class SceneEngineTests
     }
 
     [Fact]
+    public void History_BlocksThirdWarmFriendInRecentTwenty()
+    {
+        var warm = SceneCatalog.PersonaScenes
+            .Where(scene => scene.RelationshipProfile == "warm_friend")
+            .Take(3)
+            .ToArray();
+        Assert.Equal(3, warm.Length);
+        var history = new SceneHistory();
+        var now = new DateTime(2026, 7, 29, 12, 0, 0, DateTimeKind.Local);
+        history.Record(warm[0], now.AddMinutes(-2), warm[0].Lines[0]);
+        history.Record(warm[1], now.AddMinutes(-1), warm[1].Lines[0]);
+
+        Assert.False(history.MeetsRelationshipProfileQuota(warm[2]));
+    }
+
+    [Fact]
+    public void History_BlocksSecondNicknameEasterEggInRecentHundred()
+    {
+        var nickname = SceneCatalog.PersonaScenes
+            .Where(scene => scene.RelationshipProfile == "nickname_easter_egg")
+            .Take(2)
+            .ToArray();
+        Assert.Equal(2, nickname.Length);
+        var history = new SceneHistory();
+        var now = new DateTime(2026, 7, 29, 12, 0, 0, DateTimeKind.Local);
+        history.Record(nickname[0], now.AddMinutes(-1), nickname[0].Lines[0]);
+
+        Assert.False(history.MeetsRelationshipProfileQuota(nickname[1]));
+    }
+
+    [Fact]
+    public void History_DoesNotThrottleNeutralRelationshipProfile()
+    {
+        var neutral = SceneCatalog.PersonaScenes.First(
+            scene => scene.RelationshipProfile == "neutral");
+        var history = new SceneHistory();
+
+        Assert.True(history.MeetsRelationshipProfileQuota(neutral));
+    }
+
+    [Fact]
     public void History_EasterEggQuotaImplementsTenPercentAndBlocksAdjacency()
     {
         Assert.Equal(10, SceneHistory.EasterEggRecentWindow);

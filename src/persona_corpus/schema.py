@@ -20,6 +20,7 @@ V2_HEADER = (
     "weight",
     "requires_reply",
     "enabled",
+    "relationship_profile",
     "text",
     "source_kind",
     "source_reference",

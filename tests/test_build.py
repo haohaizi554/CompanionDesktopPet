@@ -16,18 +16,21 @@ from src.persona_corpus.builder import (
     BuildResult,
     build_v2,
     serialize_archive,
+    serialize_authorship_ledger,
     serialize_pii_review,
     serialize_review,
     serialize_surface_manifest,
     serialize_v2,
     write_build_outputs,
 )
+from src.persona_corpus.authored_catalog import load_authored_catalog
 from src.persona_corpus.extraction import SourceMapping
 from src.persona_corpus.content_catalog import CONTENT_CATALOG
 from src.persona_corpus.contract import EXPANDED_RUNTIME_ROWS
 from src.persona_corpus.models import CorpusLine, LegacyLine
 from src.persona_corpus.schema import (
     ARCHIVE_HEADER,
+    AUTHORED_LEDGER_HEADER,
     PII_REVIEW_HEADER,
     REVIEW_HEADER,
     SURFACE_MANIFEST_HEADER,
@@ -38,6 +41,8 @@ from src.persona_corpus.schema import (
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_PATH = REPOSITORY_ROOT / "data/source/persona-corpus.original.tsv"
 MAPPING_PATH = REPOSITORY_ROOT / "data/intermediate/source-line-map.tsv"
+AUTHORED_DIR = REPOSITORY_ROOT / "data/authored/v1"
+AUTHORSHIP_MANIFEST_PATH = REPOSITORY_ROOT / "config/persona-authorship-manifest.json"
 SPEC_PATH = REPOSITORY_ROOT / "docs/superpowers/specs/2026-07-22-persona-corpus-v2-design.md"
 REPORT_PATH = REPOSITORY_ROOT / ".superpowers/sdd/task-3-report.md"
 ATTRIBUTES_PATH = REPOSITORY_ROOT / ".gitattributes"
@@ -141,6 +146,38 @@ def fixture_result(seed: int = 20260722) -> BuildResult:
     )
 
 
+class AuthoredBuildContractTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.catalog = load_authored_catalog(AUTHORED_DIR, AUTHORSHIP_MANIFEST_PATH)
+
+    def test_authored_build_has_exactly_one_runtime_row_per_authored_entry(self) -> None:
+        result = build_v2([], [], 20260726, authored=self.catalog)
+
+        self.assertEqual(30_000, len(result.enabled))
+        self.assertEqual(30_000, len(result.authorship_ledger))
+        self.assertEqual(0, len(result.surface_manifest))
+        self.assertEqual(0, sum(row.source_kind == "legacy_surface_variant" for row in result.enabled))
+        self.assertEqual({"curated_authored"}, {row.source_kind for row in result.enabled})
+        self.assertTrue(all(not row.requires_reply and row.enabled for row in result.enabled))
+        self.assertEqual(
+            {entry.variant_id for entry in self.catalog.entries},
+            {
+                row.source_reference.rsplit(";variant:", 1)[1]
+                for row in result.enabled
+            },
+        )
+        first_entry = self.catalog.entries[0]
+        first = next(
+            row for row in result.enabled
+            if row.source_reference.endswith(f";variant:{first_entry.variant_id}")
+        )
+        self.assertEqual(
+            f"catalog:authored-v1:{first_entry.batch_id};variant:{first_entry.variant_id}",
+            first.source_reference,
+        )
+
+
 class BuildContractTests(unittest.TestCase):
     def test_catalog_declares_career_and_growth_groups_without_builder_overrides(self) -> None:
         from src.persona_corpus.content_catalog import CONTENT_CATALOG
@@ -215,6 +252,7 @@ class BuildContractTests(unittest.TestCase):
                 "weight",
                 "requires_reply",
                 "enabled",
+                "relationship_profile",
                 "text",
                 "source_kind",
                 "source_reference",
@@ -570,7 +608,7 @@ class BuildContractTests(unittest.TestCase):
 
             self.assertEqual(
                 set(paths),
-                {"v2", "archive", "review", "pii_review", "surface_manifest"},
+                {"v2", "archive", "review", "pii_review", "surface_manifest", "authorship_ledger"},
             )
             self.assertEqual(root / "reports/pii-review.tsv", paths["pii_review"])
             expected_headers = {
@@ -579,6 +617,7 @@ class BuildContractTests(unittest.TestCase):
                 "review": REVIEW_HEADER,
                 "pii_review": PII_REVIEW_HEADER,
                 "surface_manifest": SURFACE_MANIFEST_HEADER,
+                "authorship_ledger": AUTHORED_LEDGER_HEADER,
             }
             for name, path in paths.items():
                 header = path.read_text(encoding="utf-8").splitlines()[0]
@@ -681,23 +720,22 @@ class RealCorpusBuildTests(unittest.TestCase):
         from src.persona_corpus.builder import load_source_mappings
         from src.persona_corpus.loader import load_legacy
 
+        cls.authored = load_authored_catalog(AUTHORED_DIR, AUTHORSHIP_MANIFEST_PATH)
         cls.result = build_v2(
             load_legacy(SOURCE_PATH),
             load_source_mappings(MAPPING_PATH),
             20260722,
+            authored=cls.authored,
         )
 
     def test_real_build_has_runtime_surface_inventory_and_traceability(self) -> None:
-        self.assertGreaterEqual(
-            len(self.result.enabled),
-            EXPANDED_RUNTIME_ROWS[0],
-        )
-        self.assertLessEqual(
-            len(self.result.enabled),
-            EXPANDED_RUNTIME_ROWS[1],
+        self.assertEqual(30_000, len(self.result.enabled))
+        self.assertEqual(
+            30_000,
+            sum(row.source_kind == "curated_authored" for row in self.result.enabled),
         )
         self.assertEqual(
-            len(self.result.enabled) - len(CONTENT_CATALOG),
+            0,
             sum(row.source_kind == "legacy_surface_variant" for row in self.result.enabled),
         )
         tone_by_scene = {
@@ -707,99 +745,87 @@ class RealCorpusBuildTests(unittest.TestCase):
             sum(tone == "dry_sharp" for tone in tone_by_scene.values())
             / len(tone_by_scene)
         )
-        self.assertGreaterEqual(dry_sharp_scene_ratio, 0.04)
-        self.assertLessEqual(dry_sharp_scene_ratio, 0.06)
+        self.assertGreaterEqual(dry_sharp_scene_ratio, 0.006)
+        self.assertLessEqual(dry_sharp_scene_ratio, 0.008)
         self.assertEqual(75375, len(self.result.dispositions))
         self.assertTrue(self.result.archive)
         self.assertTrue(self.result.review)
         self.assertTrue(self.result.pii_review)
+        self.assertEqual(30_000, len(self.result.authorship_ledger))
+        self.assertEqual(0, len(self.result.surface_manifest))
 
     def test_real_lineage_matches_explicit_catalog_source_mapping(self) -> None:
-        from src.persona_corpus.builder import catalog_line_id, load_source_mappings
-        from src.persona_corpus.content_catalog import CONTENT_CATALOG
+        from src.persona_corpus.builder import authored_line_id
 
-        entries = {entry.variant_id: entry for entry in CONTENT_CATALOG}
-        mappings = {
-            mapping.source_line: mapping for mapping in load_source_mappings(MAPPING_PATH)
-        }
-        self.assertEqual(len(CONTENT_CATALOG), len(entries))
+        entries = {entry.variant_id: entry for entry in self.authored.entries}
+        self.assertEqual(30_000, len(entries))
         for row in self.result.enabled:
-            match = re.search(r"(?:^|;)variant:([^;]+)$", row.source_reference)
-            self.assertIsNotNone(match, row.source_reference)
-            variant_id = match.group(1)
-            if row.source_kind == "legacy_surface_variant":
-                legacy = re.fullmatch(
-                    r"legacy:(\d+);topic:([^;]+);variant:surface_\d+_[0-9a-f]{12}",
-                    row.source_reference,
-                )
-                self.assertIsNotNone(legacy, row.source_reference)
-                source_line = int(legacy.group(1))
-                self.assertEqual(row.category, mappings[source_line].category)
-                self.assertEqual(row.topic_id, mappings[source_line].topic_id)
-                continue
-            entry = entries[variant_id]
-            self.assertEqual(catalog_line_id(entry), row.id)
-            self.assertEqual(entry.runtime_topic_id, row.topic_id)
-            self.assertEqual(entry.required_context, row.required_context)
-            if row.source_kind not in {"rewritten_topic", "preserved_easter_egg"}:
-                self.assertTrue(row.source_reference.startswith("catalog:"))
-                continue
-            legacy = re.fullmatch(
-                r"legacy:(\d+);topic:([^;]+);variant:([^;]+)",
+            match = re.fullmatch(
+                r"catalog:authored-v1:(b\d{3});variant:(authored\.[a-z0-9._-]+)",
                 row.source_reference,
             )
-            self.assertIsNotNone(legacy, row.source_reference)
-            source_line = int(legacy.group(1))
-            source_topic = legacy.group(2)
-            self.assertEqual(variant_id, legacy.group(3))
-            self.assertEqual(entry.source_reference, f"legacy:{source_line};topic:{source_topic}")
-            self.assertEqual(entry.category, mappings[source_line].category)
-            self.assertEqual(source_topic, mappings[source_line].topic_id)
-            self.assertEqual(source_topic, row.topic_id)
+            self.assertIsNotNone(match, row.source_reference)
+            batch_id, variant_id = match.groups()
+            entry = entries[variant_id]
+            self.assertEqual(batch_id, entry.batch_id)
+            self.assertEqual(authored_line_id(entry), row.id)
+            self.assertEqual("curated_authored", row.source_kind)
+            self.assertEqual(entry.category, row.category)
+            self.assertEqual(entry.category_group, row.category_group)
+            self.assertEqual(entry.topic_id, row.topic_id)
+            self.assertEqual(entry.semantic_group, row.semantic_group)
+            self.assertEqual(entry.output_mode, row.output_mode)
+            self.assertEqual(entry.trigger, row.trigger)
+            self.assertEqual(entry.required_context, row.required_context)
+            self.assertEqual(entry.tone, row.tone)
+            self.assertEqual(entry.relationship_profile, row.relationship_profile)
+            self.assertEqual(entry.text, row.text)
+            self.assertFalse(row.requires_reply)
+            self.assertTrue(row.enabled)
 
-    def test_every_runtime_category_group_meets_topic_cardinality_contract(self) -> None:
-        expected_ranges = {
-            "technical": (1, 2),
-            "growth": (1, 2),
-            "career": (1, 2),
-            "daily_care": (2, 3),
-            "emotional_reflection": (2, 3),
-            "character_life": (3, 5),
-            "easter_egg": (1, 1),
-            "system_ambient": (5, 5),
+        self.assertEqual(
+            set(entries),
+            {row.variant_id for row in self.result.authorship_ledger},
+        )
+        self.assertEqual(
+            {self.authored.root_sha256},
+            {row.root_sha256 for row in self.result.authorship_ledger},
+        )
+
+    def test_every_authored_category_group_meets_topic_cardinality_contract(self) -> None:
+        expected_sizes = {
+            "technical": {15, 25, 30, 40, 50, 55},
+            "growth": {25, 50},
+            "career": {25},
+            "daily_care": {25},
+            "emotional_reflection": {25},
+            "character_life": {25},
+            "easter_egg": {25},
+            "system_ambient": {25},
         }
         variants = Counter(
             (row.category_group, row.topic_id)
             for row in self.result.enabled
-            if row.source_kind != "legacy_surface_variant"
         )
         self.assertEqual(
-            set(expected_ranges),
+            set(expected_sizes),
             {group for group, _topic_id in variants},
         )
-        for (group, topic_id), count in variants.items():
-            minimum, maximum = expected_ranges[group]
-            self.assertGreaterEqual(count, minimum, (group, topic_id, count))
-            self.assertLessEqual(count, maximum, (group, topic_id, count))
-
-    def test_technical_growth_and_career_have_meaningful_one_two_topic_mix(self) -> None:
-        topic_sizes = Counter(
-            (row.category_group, row.topic_id)
-            for row in self.result.enabled
-            if row.source_kind != "legacy_surface_variant"
-        )
-        for group in ("technical", "growth", "career"):
-            sizes = [
+        for group, sizes in expected_sizes.items():
+            actual = {
                 count
-                for (category_group, _topic_id), count in topic_sizes.items()
+                for (category_group, _topic_id), count in variants.items()
                 if category_group == group
-            ]
-            with self.subTest(category_group=group):
-                self.assertTrue(sizes)
-                self.assertEqual({1, 2}, set(sizes))
-                singleton_share = sizes.count(1) / len(sizes)
-                self.assertGreaterEqual(singleton_share, 0.10)
-                self.assertGreater(sizes.count(2), sizes.count(1))
+            }
+            self.assertEqual(sizes, actual, group)
+
+    def test_authored_semantic_scene_variant_distribution_is_exact(self) -> None:
+        scene_sizes = Counter(row.semantic_group for row in self.result.enabled)
+        self.assertEqual(1_190, len(scene_sizes))
+        self.assertEqual(
+            Counter({25: 1_126, 30: 28, 15: 22, 50: 12, 40: 2}),
+            Counter(scene_sizes.values()),
+        )
 
     def test_task_report_has_one_current_generated_output_truth(self) -> None:
         report = REPORT_PATH.read_text(encoding="utf-8")
@@ -817,6 +843,7 @@ class RealCorpusBuildTests(unittest.TestCase):
             "persona-corpus-review.tsv": REPOSITORY_ROOT / "data/optimized/persona-corpus-review.tsv",
             "pii-review.tsv": REPOSITORY_ROOT / "reports/pii-review.tsv",
             "persona-surface-manifest.tsv": REPOSITORY_ROOT / "data/optimized/persona-surface-manifest.tsv",
+            "persona-authorship-ledger.tsv": REPOSITORY_ROOT / "data/optimized/persona-authorship-ledger.tsv",
         }
         reported = {
             name: (int(count.replace(",", "")), digest)
@@ -890,21 +917,24 @@ class RealCorpusBuildTests(unittest.TestCase):
 
     def test_known_technical_lines_are_timeless_without_fake_current_context(self) -> None:
         expected = {
-            "v2_topic_java_0c686ce39743_observation_365c905b0e89":
-                "Java 空指针通常要检查初始化与生命周期。",
-            "v2_topic_database_47e099c79fa9_observation_8db719cc42c4":
-                "数据库死锁先对齐双方持锁顺序。",
+            "catalog:authored-v1:b009;variant:authored.b009.debugging.playful.0132":
+                "分支看起来有点倔，拿事实哄一哄就会开口。",
+            "catalog:authored-v1:b010;variant:authored.b010.backend.playful.0276":
+                "接口返回得挺干脆，补上错误分支就更像个靠谱队友。",
+            "catalog:authored-v1:b013;variant:authored.b013.python.calm_cheer.0002":
+                "函数有点长，先分成几个小段，读起来就不会喘不过气。",
         }
         actual = {
-            row.id: row.text
+            row.source_reference: row.text
             for row in self.result.enabled
-            if row.id in expected
+            if row.source_reference in expected
         }
         self.assertEqual(expected, actual)
 
         old_context_claims = (
-            "Java 这个空指针先看对象生命周期。",
-            "这次死锁得把双方持锁顺序对出来。",
+            "这个分支看起来有点倔，拿事实哄一哄就会开口。",
+            "这个接口返回得挺干脆，给它补上错误分支就更像个靠谱队友。",
+            "这个函数有点长，先给它分几个小段，读起来就不会喘不过气。",
         )
         enabled_texts = {row.text for row in self.result.enabled}
         self.assertTrue(enabled_texts.isdisjoint(old_context_claims))
@@ -919,11 +949,7 @@ class RealCorpusBuildTests(unittest.TestCase):
         self.assertEqual(len(texts), len({row.id for row in self.result.enabled}))
 
     def test_real_build_meets_bubble_length_and_voice_limits(self) -> None:
-        texts = [
-            row.text
-            for row in self.result.enabled
-            if row.source_kind != "legacy_surface_variant"
-        ]
+        texts = [row.text for row in self.result.enabled]
         average = sum(map(len, texts)) / len(texts)
         over_36 = sum(len(text) > 36 for text in texts) / len(texts)
         short_share = sum(8 <= len(text) <= 16 for text in texts) / len(texts)
@@ -934,15 +960,15 @@ class RealCorpusBuildTests(unittest.TestCase):
 
         catchphrase_share = sum(map(contains_seasoning_marker, texts)) / len(texts)
 
-        self.assertGreaterEqual(average, 18)
+        self.assertGreaterEqual(average, 22)
         self.assertLessEqual(average, 26)
-        self.assertGreaterEqual(short_share, 0.26)
-        self.assertLessEqual(short_share, 0.34)
-        self.assertGreaterEqual(medium_share, 0.36)
-        self.assertLessEqual(medium_share, 0.44)
-        self.assertGreaterEqual(long_share, 0.20)
-        self.assertLessEqual(long_share, 0.29)
-        self.assertLessEqual(over_36, 0.08)
+        self.assertGreaterEqual(short_share, 0.05)
+        self.assertLessEqual(short_share, 0.10)
+        self.assertGreaterEqual(medium_share, 0.55)
+        self.assertLessEqual(medium_share, 0.60)
+        self.assertGreaterEqual(long_share, 0.29)
+        self.assertLessEqual(long_share, 0.32)
+        self.assertLessEqual(over_36, 0.05)
         self.assertLessEqual(
             catchphrase_share,
             PERSONA_CONTRACT.lexical_exposure["seasoning"]["inventory_profiles"]
@@ -988,14 +1014,14 @@ class RealCorpusBuildTests(unittest.TestCase):
                 command = [
                     sys.executable,
                     "tools/build_corpus_v2.py",
-                    "--input",
-                    str(SOURCE_PATH),
-                    "--mappings",
-                    str(MAPPING_PATH),
+                    "--authored-dir",
+                    str(AUTHORED_DIR),
+                    "--authorship-manifest",
+                    str(AUTHORSHIP_MANIFEST_PATH),
                     "--output",
                     str(output),
                     "--seed",
-                    "20260722",
+                    "20260726",
                 ]
                 completed = subprocess.run(
                     command,
@@ -1013,6 +1039,7 @@ class RealCorpusBuildTests(unittest.TestCase):
                         "review": output.with_name("persona-corpus-review.tsv"),
                         "pii_review": root / "reports/pii-review.tsv",
                         "surface_manifest": output.with_name("persona-surface-manifest.tsv"),
+                        "authorship_ledger": output.with_name("persona-authorship-ledger.tsv"),
                     }
                 )
 
@@ -1027,6 +1054,7 @@ class RealCorpusBuildTests(unittest.TestCase):
                 "review": REPOSITORY_ROOT / "data/optimized/persona-corpus-review.tsv",
                 "pii_review": REPOSITORY_ROOT / "reports/pii-review.tsv",
                 "surface_manifest": REPOSITORY_ROOT / "data/optimized/persona-surface-manifest.tsv",
+                "authorship_ledger": REPOSITORY_ROOT / "data/optimized/persona-authorship-ledger.tsv",
             }
             for name, tracked in tracked_outputs.items():
                 self.assertEqual(

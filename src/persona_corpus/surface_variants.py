@@ -399,6 +399,7 @@ def materialize_legacy_surface_candidates(
                 weight=policy.weight,
                 requires_reply=False,
                 enabled=True,
+                relationship_profile="neutral",
                 text=candidate.text,
                 source_kind=LEGACY_SURFACE_SOURCE_KIND,
                 source_reference=candidate.source_reference,

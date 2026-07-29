@@ -61,7 +61,6 @@ def _cartesian_grid_issues(rows: Sequence[CorpusLine], issues: _Issues) -> None:
     for row in rows:
         if (
             row.enabled is True
-            and row.source_kind != "legacy_surface_variant"
             and isinstance(row.text, str)
         ):
             by_topic[(str(row.category), str(row.topic_id))].append(row)
@@ -197,6 +196,12 @@ def _surface_inventory_issues(rows: Sequence[CorpusLine], issues: _Issues) -> No
 
 
 def _distribution_issues(rows: Sequence[CorpusLine], issues: _Issues) -> None:
+    enabled_rows = [
+        row
+        for row in rows
+        if row.enabled is True and row.source_kind != "legacy_surface_variant"
+    ]
+    authored_only = bool(enabled_rows) and all(row.source_kind == "curated_authored" for row in enabled_rows)
     texts = [
         row.text
         for row in rows
@@ -226,16 +231,27 @@ def _distribution_issues(rows: Sequence[CorpusLine], issues: _Issues) -> None:
             "25-36": sum(25 <= len(text) <= 36 for text in texts) / count,
             ">36": sum(len(text) > 36 for text in texts) / count,
         }
-        if not (
-            18 <= average <= 26
-            and 0.25 <= shares["8-16"] <= 0.35
-            and 0.35 <= shares["17-24"] <= 0.45
-            and 0.20 <= shares["25-36"] <= 0.30
-            and shares[">36"] <= 0.08
-        ):
+        distribution_matches = (
+            (
+                22 <= average <= 26
+                and 0.05 <= shares["8-16"] <= 0.10
+                and 0.55 <= shares["17-24"] <= 0.60
+                and 0.29 <= shares["25-36"] <= 0.32
+                and shares[">36"] <= 0.05
+            )
+            if authored_only
+            else (
+                18 <= average <= 26
+                and 0.25 <= shares["8-16"] <= 0.35
+                and 0.35 <= shares["17-24"] <= 0.45
+                and 0.20 <= shares["25-36"] <= 0.30
+                and shares[">36"] <= 0.08
+            )
+        )
+        if not distribution_matches:
             issues.error(
                 "length_distribution",
-                "enabled length distribution must meet average 18-26 and the 8-16/17-24/25-36/>36 targets; "
+                "enabled length distribution must meet its source-profile average and bucket targets; "
                 f"observed average={average:.3f}, shares={shares}",
             )
 

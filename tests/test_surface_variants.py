@@ -9,7 +9,7 @@ from pathlib import Path
 from src.persona_corpus.loader import load_v2
 from src.persona_corpus.models import CorpusLine
 from src.persona_corpus.normalization import normalize_text
-from src.persona_corpus.schema import ArchiveRow
+from src.persona_corpus.schema import ArchiveRow, SURFACE_MANIFEST_HEADER
 from src.persona_corpus.surface_variants import (
     apply_dry_sharp_scene_dose,
     legacy_surface_line_id,
@@ -93,6 +93,7 @@ def corpus_row(
         weight=0.1,
         requires_reply=False,
         enabled=True,
+        relationship_profile="neutral",
         text=text,
         source_kind="preserved_easter_egg",
         source_reference=source_reference,
@@ -278,158 +279,24 @@ class LegacySurfaceCandidateTests(unittest.TestCase):
 class RealLegacySurfaceCandidateTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.existing = [
-            row
-            for row in load_v2(V2_PATH)
-            if row.source_kind != "legacy_surface_variant"
-        ]
-        cls.prepared = prepare_legacy_surface_candidates(load_archive(), cls.existing)
-        cls.materialized = materialize_legacy_surface_candidates(
-            cls.prepared.candidates, cls.existing
-        )
-        cls.undosed = [*cls.existing, *cls.materialized]
-        cls.dosed = apply_dry_sharp_scene_dose(cls.undosed)
+        cls.runtime = load_v2(V2_PATH)
+        cls.surface_manifest = V2_PATH.with_name("persona-surface-manifest.tsv")
 
-    def test_exact_audited_candidate_counts(self) -> None:
-        self.assertEqual(51_134, self.prepared.cartesian_count)
-        self.assertEqual(192, self.prepared.easter_egg_count)
-        self.assertEqual(51_326, len(self.prepared.candidates))
-        self.assertEqual(52_132, len(self.existing) + len(self.prepared.candidates))
+    def test_canonical_runtime_contains_only_authored_rows(self) -> None:
+        self.assertEqual(30_000, len(self.runtime))
+        self.assertEqual({"curated_authored"}, {row.source_kind for row in self.runtime})
+        self.assertFalse(any(row.source_kind == "legacy_surface_variant" for row in self.runtime))
 
-    def test_safety_audit_reports_overlapping_marker_hits_and_first_dispositions(self) -> None:
-        self.assertEqual(
-            {
-                "direct_state": 208,
-                "implicit_question": 952,
-                "reply_hook": 1_822,
-                "technical_current_object": 2_640,
-                "unavailable_state": 1_872,
-            },
-            {
-                name: count
-                for name, count in self.prepared.safety_marker_counts.items()
-                if count
-            },
-        )
-        self.assertEqual(952, self.prepared.rejection_counts["implicit_question"])
-        self.assertEqual(1_806, self.prepared.rejection_counts["reply_hook"])
-        self.assertEqual(2_640, self.prepared.rejection_counts["fake_context"])
-        self.assertEqual(1_584, self.prepared.rejection_counts["unavailable_state"])
+    def test_canonical_surface_manifest_is_header_only_audit_output(self) -> None:
+        lines = self.surface_manifest.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(1, len(lines))
+        self.assertEqual("\t".join(SURFACE_MANIFEST_HEADER), lines[0])
 
-    def test_candidates_have_unique_stable_ids_text_and_complete_lineage(self) -> None:
-        ids = [row.id for row in self.prepared.candidates]
-        texts = [row.normalized_text for row in self.prepared.candidates]
-        existing_texts = {normalize_text(row.text) for row in self.existing}
-
-        self.assertEqual(len(ids), len(set(ids)))
-        self.assertEqual(len(texts), len(set(texts)))
-        self.assertTrue(all(texts))
-        self.assertTrue(
-            all(
-                re.fullmatch(
-                    rf"legacy:{row.source_line};topic:{re.escape(row.topic_id)};"
-                    rf"variant:surface_{row.source_line}_[0-9a-f]{{12}}",
-                    row.source_reference,
-                )
-                for row in self.prepared.candidates
-            )
-        )
-        self.assertTrue(
-            all(row.source_kind == "legacy_surface_variant" for row in self.prepared.candidates)
-        )
-        self.assertTrue(set(texts).isdisjoint(existing_texts))
-
-    def test_all_excluded_privacy_and_fake_context_easter_rows_stay_out(self) -> None:
-        enabled_sources = {row.source_line for row in self.prepared.candidates}
+    def test_legacy_archive_remains_complete_and_disabled_from_runtime(self) -> None:
         archive = load_archive()
-        unsafe_eggs = {
-            row.source_line
-            for row in archive
-            if row.category == "EasterEgg"
-            and row.archive_reason in {"privacy_risk", "fake_context"}
-        }
-
-        self.assertEqual(79, len(unsafe_eggs))
-        self.assertTrue(enabled_sources.isdisjoint(unsafe_eggs))
-
-    def test_materialized_inventory_has_consistent_scene_metadata(self) -> None:
-        combined = [*self.existing, *self.materialized]
-        metadata: dict[str, tuple[object, ...]] = {}
-        for row in combined:
-            signature = tuple(getattr(row, field) for field in SCHEDULING_FIELDS)
-            self.assertEqual(
-                signature,
-                metadata.setdefault(row.semantic_group, signature),
-                row.semantic_group,
-            )
-
-        self.assertEqual(52_132, len(combined))
-        self.assertEqual(533, len(metadata))
-        self.assertEqual(len(combined), len({row.id for row in combined}))
-        self.assertEqual(
-            len(combined),
-            len({normalize_text(row.text) for row in combined}),
-        )
-
-    def test_dry_sharp_inventory_is_scene_atomic_deterministic_and_in_contract(self) -> None:
-        dry = [row for row in self.dosed if row.tone == "dry_sharp"]
-        tone_by_scene: dict[str, set[str]] = {}
-        for row in self.dosed:
-            tone_by_scene.setdefault(row.semantic_group, set()).add(row.tone)
-
-        dry_scenes = sum(tones == {"dry_sharp"} for tones in tone_by_scene.values())
-        scene_ratio = dry_scenes / len(tone_by_scene)
-        self.assertGreaterEqual(scene_ratio, 0.04)
-        self.assertLessEqual(scene_ratio, 0.06)
-        self.assertGreater(len(dry) / len(self.dosed), 0)
-        self.assertTrue(all(len(tones) == 1 for tones in tone_by_scene.values()))
-        self.assertTrue(
-            all(
-                row.category_group in {"technical", "growth", "career"}
-                and row.trigger not in {"late_night", "holiday", "anniversary"}
-                and row.required_context == "none"
-                for row in dry
-            )
-        )
-        reversed_result = apply_dry_sharp_scene_dose(
-            list(reversed(self.undosed))
-        )
-        self.assertEqual(
-            {row.id: row.tone for row in self.dosed},
-            {row.id: row.tone for row in reversed_result},
-        )
-
-    def test_dry_sharp_scene_set_is_invariant_when_a_neutral_scene_gains_variants(self) -> None:
-        original_groups = {row.semantic_group for row in self.undosed}
-        original_dry = {
-            row.semantic_group for row in self.dosed if row.tone == "dry_sharp"
-        }
-        template = next(
-            row
-            for row in self.undosed
-            if row.tone == "dry"
-            and row.category_group in {"technical", "growth", "career"}
-            and row.semantic_group not in original_dry
-        )
-        expanded = [
-            *self.undosed,
-            *[
-                replace(
-                    template,
-                    id=f"{template.id}.expanded.{index}",
-                    text=f"{template.text} variant-{index}",
-                )
-                for index in range(3_000)
-            ],
-        ]
-
-        expanded_dry = {
-            row.semantic_group
-            for row in apply_dry_sharp_scene_dose(expanded)
-            if row.tone == "dry_sharp" and row.semantic_group in original_groups
-        }
-
-        self.assertEqual(original_dry, expanded_dry)
+        self.assertEqual(75_375, len(archive))
+        enabled_text = {normalize_text(row.text) for row in self.runtime}
+        self.assertTrue(all(normalize_text(row.original_text) not in enabled_text for row in archive))
 
 
 if __name__ == "__main__":

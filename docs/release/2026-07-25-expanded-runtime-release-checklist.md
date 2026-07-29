@@ -1,36 +1,36 @@
-# Expanded Runtime 发布与清理清单
+# v1.3.0 Authored Runtime 发布与清理清单
 
-日期：2026-07-25（`v1.2.1` 证据更新：2026-07-29）
-状态：`v1.2.1` 的最终测试、单 EXE、哈希、8 项资产、具体中文 GitHub Release 与代理回下载复验均已完成
+日期：2026-07-29
+状态：`v1.3.0` 语料、模拟和 validator 已通过；单 EXE、标签、GitHub Release 与代理回下载复验待本清单后续登记
 
-本文是已集成 52,132 条 expanded runtime 的发布门禁。它不授权修改不可变 source；当前语料计数已重新核对。文档保留 `v1.0.0`、`v1.1.0` 历史实证与 `v1.2.1` 新鲜实证；v1.2.1 从固定且已推送的最终 `main` 提交重新构建，没有沿用旧版二进制、测试数字或哈希。release tag 指向产出 EXE 的 source commit，标签后的 documentation commit 只登记已完成的外部证据。
+本文的当前门禁是 30,000 条 authored runtime。v1.0.0、v1.1.0、v1.2.1 的证据继续作为历史记录保留，但不得当作 v1.3.0 的测试、二进制或哈希证据。release tag 必须指向实际产出 EXE 的 source commit。
 
 ## 1. 精确验收常量
 
 | 项目 | 必须精确等于 | 定义 |
 | --- | ---: | --- |
-| curated core | 806 | 非 `legacy_surface_variant` 的启用行 |
-| safe legacy surfaces | 51,326 | `source_kind=legacy_surface_variant` 且存在精确 surface-manifest 绑定的启用行 |
-| expanded runtime | 52,132 | core + safe surfaces |
-| semantic scenes | 533 | expanded runtime 中唯一 `semantic_group` 数 |
+| authored runtime | 30,000 | `source_kind=curated_authored` 的全部启用行 |
+| legacy runtime surfaces | 0 | `source_kind=legacy_surface_variant` 的启用行 |
+| semantic scenes | 1,190 | runtime 中唯一 `semantic_group` 数 |
+| authorship ledger | 30,000 | 每条 authored source 的 hash-bound lineage |
 | immutable source | 75,375 | 原始 TSV 无表头物理数据行数 |
 | archive dispositions | 75,375 | expanded build 的 archive 数据记录数 |
 
-当前文件已重新计数为 806 core、51,326 safe legacy surfaces、52,132 runtime、533 个唯一 `semantic_group`、75,375 条 source 与 75,375 条 archive。它们既是现物统计也是精确发布常量；任何后续差异都阻止发布。
+当前文件已重新计数为 30,000 authored runtime、0 legacy surfaces、1,190 个唯一 `semantic_group`、30,000 条 ledger、75,375 条 source 与 75,375 条 archive。任何差异都阻止发布。
 
 ## 2. 运行时选择与暴露门禁
 
 - 调度必须 scene-first：先按 `semantic_group` 过滤、评分并选择场景，再在所选场景内选变体。变体数量不得增加场景权重，点击兜底也不得先全局挑行再倒推场景。
-- Easter egg 播放率必须为 8%–12%；seasoning 播放率必须为 3%–6%；dry-sharp 播放率必须为 2%–4%。它们是模拟播放率，不是库存行占比。
+- Easter egg 播放率必须为 8%–12%；seasoning 播放率必须为 0.5%–1.5%；dry-sharp 播放率必须为 0%–4%。它们是模拟播放率，不是库存行占比。
 - seasoning 使用 contract 的 NFKC/casefold 与 token-boundary 规则，identity markers 明确排除在 seasoning 之外；最近 20 次最多暴露 1 次 seasoning。
-- dry-sharp 的场景资格由稳定 scene hash 决定；它不得用于 care、emotional、Easter egg、late-night、holiday 或 anniversary 场景。contract 中 4%–6% 的 dry-sharp scene inventory 与 2%–4% 的 playback acceptance 是两个不同门禁。
-- surface 变体须在场景内遵守近期 opener/ending/template 冲突约束；只有该场景的所有合格 surface 都冲突时才允许进入明确测试过的 fallback。
+- dry-sharp 的场景资格由稳定 scene hash 决定；contract 中 0.6%–0.8% 的 dry-sharp scene inventory 与 0%–4% 的 playback acceptance 是两个不同门禁。
+- `warm_friend` 最近 20 次最多 2 次；`nickname_easter_egg` 最近 100 次最多 1 次。关系画像配额必须在评分前过滤。
 
 ## 3. 身份与隐私边界
 
-- `config/persona-editorial-manifest.json` 是身份彩蛋的 exact allowlist。批准必须同时匹配稳定 ID、variant、来源、允许的 identity marker、文本 SHA-256、category/group、cooldown、`max_per_day` 与 weight。
-- `data/optimized/persona-surface-manifest.tsv` 是安全 legacy surface 的逐行证据，必须绑定 line ID、variant、source line、category/group/topic、source reference、原始文本摘要和 source 摘要；缺失、额外或重复记录全部是硬失败。
-- `source_line` 是冻结 source SHA 下从 1 开始的物理数据行号。source 的任何字节变化、插入、删除或重排都开启新的 lineage epoch，必须重新生成、复核和审批全部派生产物；冻结 SHA 不变时不得重编号当前 51,326 个 surface ID。
+- authored 身份彩蛋只允许来自 b083–b092，且必须匹配受控 category、editorial role、关系画像、marker 和 source-reference 语法。
+- `config/persona-authorship-manifest.json` 绑定 100 批的文本/元数据摘要；`persona-authorship-ledger.tsv` 逐行绑定 batch、variant、摘要、review status、关系画像与根哈希。
+- `persona-surface-manifest.tsv` 必须为 0 数据行；任何 legacy runtime surface 或额外 manifest 记录都是硬失败。
 - 问句/回复钩子、未批准身份、非身份 PII、不可用上下文、面向用户的当前状态断言、控制字符、过度命令式文本和规范化重复不得进入运行时。
 - archive/source/review 只提供审计证据，不自动构成运行时许可。不得用宽泛 marker 扫描或 EXE 原始字节搜索代替 manifest 审批。
 - 自动台词四个精确随机间隔窗口为：本地时间 `06:00–17:59:59` 使用 `5–15` 分钟，`18:00–22:59:59` 使用 `10–20` 分钟，`23:00–05:59:59` 使用 `30–60` 分钟；明确全屏时覆盖时段并使用 `60–120` 分钟。上下界均可取到。
@@ -39,7 +39,7 @@
 
 ## 4. 异步预热与 fallback
 
-- 窗口先显示；记忆、52k 语料和 533-scene catalog 在后台预热，不能阻塞 Dispatcher/UI 线程。
+- 窗口先显示；记忆、30,000 条语料和 1,190-scene catalog 在后台预热，不能阻塞 Dispatcher/UI 线程。
 - 预热期间 startup/click 必须立即返回固定、本地、短小的 fallback；自动事件可以静默，不得伪造完整语料已就绪。
 - 瞬态失败按 1、5、30 秒退避重试；取消正常结束，结构、格式、contract 或 privacy 错误视为永久失败并保持 fallback。
 - smoke readiness 必须等到完整 runtime 已就绪且真正的非-fallback 启动回复完成渲染。fallback 来源、超时、强杀或非零退出都判失败。
@@ -61,6 +61,8 @@ New-Item -ItemType Directory -Path $reproDir | Out-Null
 python tools/build_corpus_v2.py `
   --input data/source/persona-corpus.original.tsv `
   --mappings data/intermediate/source-line-map.tsv `
+  --authored-dir data/authored/v1 `
+  --authorship-manifest config/persona-authorship-manifest.json `
   --output (Join-Path $reproDir 'persona-corpus-v2.tsv') `
   --report-output (Join-Path $reproDir 'pii-review.tsv') `
   --seed 20260722 `
@@ -71,7 +73,8 @@ $pairs = @(
   @('data\optimized\persona-corpus-archive.tsv', 'persona-corpus-archive.tsv'),
   @('data\optimized\persona-corpus-review.tsv', 'persona-corpus-review.tsv'),
   @('reports\pii-review.tsv', 'pii-review.tsv'),
-  @('data\optimized\persona-surface-manifest.tsv', 'persona-surface-manifest.tsv')
+  @('data\optimized\persona-surface-manifest.tsv', 'persona-surface-manifest.tsv'),
+  @('data\optimized\persona-authorship-ledger.tsv', 'persona-authorship-ledger.tsv')
 )
 foreach ($pair in $pairs) {
   $canonical = Join-Path $repoRoot $pair[0]
@@ -101,22 +104,24 @@ with (root / 'data/optimized/persona-corpus-archive.tsv').open(
 ) as stream:
     archive = list(csv.DictReader(stream, delimiter='\t'))
 
+authored = sum(row['source_kind'] == 'curated_authored' for row in runtime)
 surfaces = sum(row['source_kind'] == 'legacy_surface_variant' for row in runtime)
-core = len(runtime) - surfaces
 scenes = len({row['semantic_group'] for row in runtime})
+ledger = list(csv.DictReader((root / 'data/optimized/persona-authorship-ledger.tsv').open(encoding='utf-8', newline=''), delimiter='\t'))
 source_lines = sum(
     1 for _ in (root / 'data/source/persona-corpus.original.tsv').open(
         encoding='utf-8-sig', newline=''
     )
 )
 
-assert core == 806, core
-assert surfaces == 51_326, surfaces
-assert len(runtime) == 52_132, len(runtime)
-assert scenes == 533, scenes
+assert authored == 30_000, authored
+assert surfaces == 0, surfaces
+assert len(runtime) == 30_000, len(runtime)
+assert scenes == 1_190, scenes
+assert len(ledger) == 30_000, len(ledger)
 assert source_lines == 75_375, source_lines
 assert len(archive) == 75_375, len(archive)
-print('PASS: corpus counts 806 + 51,326 = 52,132; 533 scenes; 75,375 source/archive')
+print('PASS: 30,000 authored runtime; 0 legacy surfaces; 1,190 scenes; 30,000 ledger; 75,375 source/archive')
 '@ | python -
 ```
 
@@ -151,7 +156,7 @@ if (($isTestProject | Out-String).Trim() -ne 'true') {
 dotnet test CompanionDesktopPet.sln -c Release --no-restore
 ```
 
-`simulation-events.json` 必须使用 schema v3，并为每次尝试记录精确的 `seed/day_index/slot_index`，同时绑定 corpus SHA-256、scheduler config SHA-256、subseed derivation version 与 derivation SHA-256。校验器必须按规范时间、上下文、subseed 和逐 seed 历史重新执行选择器并比对精确 `selected_id`；任一绑定字段、坐标、上下文、顺序或选择结果漂移都必须产生硬错误。校验器必须为 `0 hard errors`，并且 warning 只能精确等于一条 `surface_inventory_observation`，其他 warning 一律阻断发布。
+`simulation-events.json` 必须为每次尝试记录精确的 `seed/day_index/slot_index`，并绑定 corpus、scheduler 与 subseed derivation。校验器必须重新执行选择器并比对精确 `selected_id`。v1.3.0 的发布结果必须为 `0 hard errors / 0 warnings`。
 
 ### 6.1 `v1.0.0` 历史验证记录（不得作为 v1.1.0 的新鲜证据）
 
@@ -229,18 +234,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
 | 发布对象 | SHA-256 |
 | --- | --- |
 | immutable source / byte copy | `3fd7356845df838c652f7a7668013f2b15b0e91ddfa5d784b2b71a514a2c7534` |
-| expanded runtime v2 | `3335d72e695528892ddec92076f0f02abacf58fff02ed6bd0aadf67d1cf0cc40` |
-| archive | `b7d9a5f2fd6f4750ea2b688206f77bf45a2b59ca12c09f36281c72efc620721d` |
+| expanded runtime v2 | `1d887627e6b4a8f303a0151cea8b99726d176b9953a396782e88cde69de5633c` |
+| archive | `a9e78adefbeff30e44f88e7eae1a953a8e76c499f29d58d1ec334eb6f75e03bc` |
 | review | `a251b1e01003a078d7912f71099e57c5c6830a75195558ea61428105990b866a` |
 | PII review | `702037759f730759be83fb1c643a8f61382fa1c3f8f2a25e2c0351a177eec6e7` |
-| surface manifest | `bcf9c97be0e4b1d7b7db11fcb46f44de17ef0ade6cb2e79d69f8af69bdbc637d` |
-| persona contract | `1a86605c48c486f19a9a9c3c10d4144c1307dad1a710eb7c991a9e8de66c4ed2` |
-| scheduler raw bytes | `389403ac1716292d7269d1771f2ffc49aa980ffabf4d14fbd38ae7aa1fb68188` |
-| scheduler semantic binding | `6755825b463d92d97db121ca037e100fe770ee789fbc70d0f864bae75ac48a90` |
+| surface manifest | `a2353ed6480ec1e75c40add4ae36ed7884724ca88a64b25f8b1c9282f975037c` |
+| authorship manifest | `4742a984077ce044adf8f059ee46dd36bfd7f4a0248c3422060bd366027cc4b6` |
+| authorship ledger | `31305579ebf55d2d49c3227d7c7664b16e89abd0e9aab3cbbfa11ae3e0cace8d` |
+| persona contract | `d6728014c23ba2c423b274c1ba2e1e3941a4a3ab9fc59c56e6f1fe7ff82380c3` |
+| scheduler raw bytes | `b1b88032d774911f0bf523fb5678eac79f848abc58538136207c19ad8c36883f` |
+| scheduler semantic binding | `318a2e4b92e56b02de950e8fd627fb34279dab4237148328e88cc0720f8a7f03` |
 | editorial manifest | `ce03fcbe4bb4de0f61ab81e29075ed80eb30bfe921bb1499e5514a1a3c5ad7b5` |
 | subseed derivation v2 | `e5f6d36ffb5d4936bccca24cb9c7177a63e02d937118342916bd5eea0a83640d` |
-| simulation report | `643a5ec7820fdcbe18778d2f526862846493f02871b3849a4dc561e4638f8592` |
-| validator-facing simulation events | `b4edc82d3217963c01af43074e1231b6e7d9d2cc81afa08c5ab0fd19a1c67c62` |
+| simulation report | `c55beb9155042acf326deef7a6b57f85913704d35dd9c02c4ccc5036df10eb3e` |
+| validator-facing simulation events | `4e4b66d7eeac6dd01dd70e117e97b67a75f52ff2cf1c21f6fa34920e0e105493` |
+| current `v1.3.0` `佳怡桌宠.exe` | `TBD` |
 | current `v1.2.1` `佳怡桌宠.exe` | `7d5343c01e1ed89ef15e3d9595f6c9fb1ec24f8275db15628a5b541ad5c1ff03` |
 | historical `v1.0.0` `佳怡桌宠.exe` | `b79bf57a94d63387b6d8db288e53f64b06af32a3aa4881e7c069634839442a82` |
 
@@ -323,8 +331,8 @@ git status --short
 
 ## 9. 已关闭审计项与发布结论
 
-- 已关闭：surface manifest 为 51,326 行，expanded v2 为 52,132 行，唯一 `semantic_group` 精确为 533；五份隔离重建产物与 canonical SHA-256 全部一致。
-- 已关闭：simulation 已用当前 scheduler semantic binding 重放，1,500/1,500 attempts 有输出；Easter egg 9.93%、seasoning 4.87%、dry-sharp 4.00%，natural/adversarial/combined hard violations 全为零，dawn 与四季、nullable signals 均覆盖。
-- 已关闭：scene-first fallback、identity exact set、surface/runtime 一一绑定、旧 seasoning/dry 历史迁移均有自动化测试；900-click retained-memory 门槛已收紧为 256 MiB，不通过缩减 runtime 规避。
+- 已关闭：30,000 authored runtime、0 legacy surface、1,190 scenes、30,000 ledger 与 75,375 archive 已精确验证并登记 SHA-256。
+- 已关闭：simulation 为 1,500/1,500 outputs、0 hard violations；联合 validator 为 0 hard errors / 0 warnings。
+- 已关闭：scene-first、关系画像配额、authored identity exact policy、runtime/ledger 一一绑定均有 Python 与 C# 自动化测试。
 - 已关闭（v1.0.0 历史基线）：标签流水线的 Python 311/311 与 .NET Release 392/392 均为实际非零执行结果，不是仅凭进程退出码推断；CI 依赖闭包固定版本、wheel SHA-256 与完整传递依赖。
 - 已关闭（v1.2.1 当前 Release）：`outputs/CompanionDesktopPet/佳怡桌宠.exe` 已替换为从不可变 Release 代理回下载并复核的正式 EXE；built-from、SDK、ProductVersion、字节数、SHA-256、签名状态、两个 smoke、ZIP 清单、8 项资产与具体中文 Release 均已在第 7.3 节登记。v1.0.0/v1.1.0 证据作为独立历史基线保留。

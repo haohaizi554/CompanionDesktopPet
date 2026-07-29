@@ -13,17 +13,12 @@ from src.persona_corpus.loader import (
     load_v2,
     sha256_file,
 )
+from src.persona_corpus.schema import V2_HEADER as V2_COLUMNS
 from src.persona_corpus.models import CorpusLine, LegacyLine
 from src.persona_corpus.normalization import audit_legacy, normalize_text
 
 
-V2_HEADER = (
-    "id\tcategory\tcategory_group\ttopic_id\tsemantic_group\toutput_mode\t"
-    "trigger\trequired_context\ttone\tinterrupt_cost\tcooldown_hours\t"
-    "semantic_cooldown_hours\tmax_per_day\tweight\trequires_reply\tenabled\t"
-    "text\tsource_kind\tsource_reference\trewrite_reason"
-)
-
+V2_HEADER = "\t".join(V2_COLUMNS)
 
 class CorpusTestCase(unittest.TestCase):
     def setUp(self) -> None:
@@ -85,11 +80,11 @@ class LoaderTests(CorpusTestCase):
     def test_v2_loader_parses_exact_schema_and_enabled_filter(self) -> None:
         enabled = (
             "line-1\tLife\tcharacter_life\treading\treading-window\tself_talk\t"
-            "idle\tany\twarm\t1\t2.5\t8\t3\t1.25\tfalse\ttrue\t"
+            "idle\tany\twarm\t1\t2.5\t8\t3\t1.25\tfalse\ttrue\tneutral\t"
             "玥玥把书翻到下一页。\trewrite\tlegacy:1\tstandalone"
         )
         disabled = enabled.replace("line-1", "line-2", 1).replace(
-            "\ttrue\t玥玥", "\tfalse\t玥玥", 1
+            "\ttrue\tneutral\t", "\tfalse\tneutral\t", 1
         )
         path = self.write_fixture(f"{V2_HEADER}\n{enabled}\n{disabled}\n")
 
@@ -113,7 +108,7 @@ class LoaderTests(CorpusTestCase):
     def test_v2_loader_reports_bad_typed_value_line(self) -> None:
         row = (
             "line-1\tLife\tcharacter_life\treading\treading-window\tself_talk\t"
-            "idle\tany\twarm\texpensive\t2.5\t8\t3\t1.25\tfalse\ttrue\t"
+            "idle\tany\twarm\texpensive\t2.5\t8\t3\t1.25\tfalse\ttrue\tneutral\t"
             "玥玥把书翻到下一页。\trewrite\tlegacy:1\tstandalone"
         )
         path = self.write_fixture(f"{V2_HEADER}\n{row}\n")
@@ -124,7 +119,7 @@ class LoaderTests(CorpusTestCase):
     def test_v2_rejects_valid_quoted_multiline_on_physical_line(self) -> None:
         row = (
             "line-1\tLife\tcharacter_life\treading\treading-window\tself_talk\t"
-            "idle\tany\twarm\t1\t2.5\t8\t3\t1.25\tfalse\ttrue\tstandalone text\t"
+            "idle\tany\twarm\t1\t2.5\t8\t3\t1.25\tfalse\ttrue\tneutral\tstandalone text\t"
             "rewrite\tlegacy:1\t\"first\ncontinued\""
         )
         path = self.write_fixture(f"{V2_HEADER}\n{row}\n")

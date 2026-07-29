@@ -126,10 +126,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Events SHA-256: {hashlib.sha256(events_json).hexdigest()}")
     print(
         "Editorial evidence: "
-        f"rewrites={editorial.general_rewrite_examples}, "
+        f"authored_runtime={editorial.authored_runtime_rows}, "
+        f"authored_traces={editorial.authored_trace_examples}, "
         f"disabled={editorial.disabled_examples}, "
-        f"tone={editorial.tone_fix_examples}, "
-        f"fake_context={editorial.fake_context_examples}, "
+        f"relationship_profiles={editorial.relationship_profile_examples}, "
+        f"batches={editorial.authored_batch_count}, "
         f"manual={editorial.manual_review_items}"
     )
     return 1 if report.hard_violations else 0

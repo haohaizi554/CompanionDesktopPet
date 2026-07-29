@@ -108,16 +108,16 @@ public sealed class TemporalDialogueServiceTests
     [Fact]
     public void GetContextualLines_AddsFestivalSpecificCandidatesWithoutDroppingTimeCandidates()
     {
-        var regularEveningCount = TemporalDialogueService
+        var regularEveningLines = TemporalDialogueService
             .GetContextualLines(new DateTime(2026, 7, 22, 20, 0, 0))
-            .Count;
+;
         var festivalLines = TemporalDialogueService
             .GetContextualLines(new DateTime(2026, 10, 24, 20, 0, 0));
         var enabledText = PersonaCorpus.All
             .Select(item => item.Text)
             .ToHashSet(StringComparer.Ordinal);
 
-        Assert.True(festivalLines.Count > regularEveningCount);
+        Assert.All(regularEveningLines, line => Assert.Contains(line, festivalLines));
         Assert.All(festivalLines, line => Assert.Contains(line, enabledText));
     }
 
@@ -167,7 +167,7 @@ public sealed class TemporalDialogueServiceTests
     [Theory]
     [InlineData(4)]
     [InlineData(5)]
-    public void GetContextualLines_AtDawnIncludesDawnRowsAndExcludesLateNightRows(int hour)
+    public void GetContextualLines_AtDawnUsesContextAgnosticAuthoredRowsWhenNoDawnInventoryExists(int hour)
     {
         var lines = TemporalDialogueService.GetContextualLines(new DateTime(2026, 7, 22, hour, 30, 0));
         var dawnText = PersonaCorpus.All
@@ -179,9 +179,11 @@ public sealed class TemporalDialogueServiceTests
             .Where(line => line.RequiredContext.Contains("time:late_night"))
             .Select(line => line.Text)
             .ToHashSet(StringComparer.Ordinal);
-
-        Assert.Contains(lines, dawnText.Contains);
-        Assert.DoesNotContain(lines, lateNightText.Contains);
+        var enabledText = PersonaCorpus.All.Select(line => line.Text).ToHashSet(StringComparer.Ordinal);
+        Assert.Empty(dawnText);
+        Assert.Empty(lateNightText);
+        Assert.NotEmpty(lines);
+        Assert.All(lines, line => Assert.Contains(line, enabledText));
     }
 
     [Fact]

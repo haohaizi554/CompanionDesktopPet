@@ -261,17 +261,17 @@
     "scene_hash_namespace": "persona-dry-sharp-scene-v1",
     "scene_assignment_field": "semantic_group",
     "scene_hash_threshold": 0.07,
-    "scene_inventory_target": 0.05,
+    "scene_inventory_target": 0.007,
     "scene_inventory_acceptance": [
-      0.04,
-      0.06
+      0.006,
+      0.008
     ],
     "scene_inventory_enforcement_profile": "expanded_runtime",
     "bootstrap_minimum_scenes": 4,
     "row_inventory_policy": "observation_only",
-    "playback_target": 0.03,
+    "playback_target": 0.01,
     "playback_acceptance": [
-      0.02,
+      0.0,
       0.04
     ],
     "recent_window": 20,
@@ -326,8 +326,8 @@
         }
       },
       "playback_acceptance": [
-        0.03,
-        0.06
+        0.005,
+        0.015
       ],
       "recent_window": 20,
       "recent_max": 1
@@ -386,6 +386,7 @@
       "semantic_cooldown_hours",
       "max_per_day",
       "interrupt_cost",
+      "relationship_profile",
       "weight",
       "requires_reply",
       "enabled"

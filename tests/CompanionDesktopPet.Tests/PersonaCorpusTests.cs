@@ -30,8 +30,8 @@ public sealed class PersonaCorpusTests
     {
         Assert.Equal(29, PersonaCorpus.EditorialIdentityEasterEggIds.Count);
         Assert.Equal(0.07, PersonaContractGenerated.DrySharpSceneHashThreshold, 8);
-        Assert.Equal(0.04, PersonaContractGenerated.DrySharpSceneInventoryMinimum, 8);
-        Assert.Equal(0.06, PersonaContractGenerated.DrySharpSceneInventoryMaximum, 8);
+        Assert.Equal(0.006, PersonaContractGenerated.DrySharpSceneInventoryMinimum, 8);
+        Assert.Equal(0.008, PersonaContractGenerated.DrySharpSceneInventoryMaximum, 8);
         Assert.Equal("expanded_runtime", PersonaContractGenerated.DrySharpSceneInventoryEnforcementProfile);
         Assert.Equal("observation_only", PersonaContractGenerated.DrySharpRowInventoryPolicy);
         Assert.Equal(0.10, PersonaContractGenerated.SeasoningCuratedCoreInventoryMaximum, 8);
@@ -152,13 +152,13 @@ public sealed class PersonaCorpusTests
     }
 
     [Fact]
-    public void Corpus_TechnicalInventoryIsNotUsedAsTheRuntimeWeight()
+    public void Corpus_AuthoredTechnicalInventoryMatchesTheContractWeight()
     {
         var technicalShare = PersonaCorpus.All.Count(line =>
                 line.CategoryGroup == DialogueCategoryGroup.Technical)
             / (double)PersonaCorpus.All.Count;
 
-        Assert.True(technicalShare > 0.40, $"Technical inventory share: {technicalShare:P2}");
+        Assert.Equal(0.18, technicalShare, 6);
         Assert.Equal(0.18, DialogueForest.CategoryGroupWeights[DialogueCategoryGroup.Technical], 6);
     }
 
@@ -211,6 +211,7 @@ public sealed class PersonaCorpusTests
     [InlineData("output_mode", "999")]
     [InlineData("trigger", "999")]
     [InlineData("tone", "sarcastic")]
+    [InlineData("relationship_profile", "exclusive")]
     [InlineData("source_kind", "generated")]
     [InlineData("source_kind", "archived_question")]
     [InlineData("source_kind", "manual_review")]
@@ -280,29 +281,23 @@ public sealed class PersonaCorpusTests
         var fullName = "\u96f7\u7433\u73a5";
         var nickname = "\u5c0f\u73a5";
         var repeatedNickname = "\u73a5\u73a5";
+        var shortNickname = "\u73a5\u4ed4";
         var identityLines = PersonaCorpus.All
             .Where(line => line.Text.Contains(fullName, StringComparison.Ordinal)
                            || line.Text.Contains(nickname, StringComparison.Ordinal)
-                           || line.Text.Contains(repeatedNickname, StringComparison.Ordinal))
+                           || line.Text.Contains(repeatedNickname, StringComparison.Ordinal)
+                           || line.Text.Contains(shortNickname, StringComparison.Ordinal))
             .ToArray();
 
-        Assert.Equal(29, PersonaCorpus.EditorialIdentityEasterEggIds.Count);
-        Assert.Equal(29, identityLines.Length);
-        Assert.True(
-            identityLines.Select(line => line.Id).ToHashSet(StringComparer.Ordinal)
-                .SetEquals(PersonaCorpus.EditorialIdentityEasterEggIds));
-        Assert.All(identityLines, line =>
-            Assert.Contains(line.Id, PersonaCorpus.EditorialIdentityEasterEggIds));
-        Assert.Single(identityLines, line => line.Text.Contains(fullName, StringComparison.Ordinal));
-        Assert.Single(identityLines, line => line.Text.Contains(nickname, StringComparison.Ordinal));
+        Assert.Equal(1_260, identityLines.Length);
+        Assert.DoesNotContain(identityLines, line => PersonaCorpus.EditorialIdentityEasterEggIds.Contains(line.Id));
         Assert.All(identityLines, line =>
         {
-            Assert.Equal(DialogueCategory.EasterEgg, line.Category);
-            Assert.Equal(DialogueCategoryGroup.EasterEgg, line.CategoryGroup);
-            Assert.Equal(720, line.CooldownHours);
-            Assert.Equal(1, line.MaxPerDay);
-            Assert.Equal(0.1, line.Weight, 8);
+            Assert.Equal("curated_authored", line.SourceKind);
+            Assert.StartsWith("catalog:authored-v1:", line.SourceReference, StringComparison.Ordinal);
+            Assert.Contains(line.RelationshipProfile, PersonaContractGenerated.ControlledRelationshipProfiles);
         });
+        Assert.Equal(100, identityLines.Count(line => line.RelationshipProfile == "nickname_easter_egg"));
         var forbidden = new[]
         {
             "\u6e56\u5357", "\u957f\u6c99", "\u5e7f\u4e1c", "\u6708\u85aa",
@@ -392,8 +387,8 @@ public sealed class PersonaCorpusTests
             new UTF8Encoding(false, true),
             ("id", "v2_authored_identity_python_001"),
             ("text", "\u5c0f\u73a5\u628a\u62a5\u9519\u6808\u6298\u6210\u4e86\u4e00\u5c0f\u6bb5\u7ebf\u7d22\u3002"),
-            ("source_kind", "curated_standalone"),
-            ("source_reference", "authored:b084;variant:authored_identity_python_001"));
+            ("source_kind", "curated_authored"),
+            ("source_reference", "catalog:authored-v1:b084;variant:authored_identity_python_001"));
 
         var line = Assert.Single(PersonaCorpus.Load(stream));
 
@@ -409,8 +404,8 @@ public sealed class PersonaCorpusTests
             new UTF8Encoding(false, true),
             ("id", "v2_authored_identity_python_002"),
             ("text", "\u5c0f\u73a5\u628a 13800138000 \u4ece\u7b14\u8bb0\u91cc\u5212\u6389\u4e86\u3002"),
-            ("source_kind", "curated_standalone"),
-            ("source_reference", "authored:b084;variant:authored_identity_python_002"));
+            ("source_kind", "curated_authored"),
+            ("source_reference", "catalog:authored-v1:b084;variant:authored_identity_python_002"));
 
         Assert.Throws<InvalidDataException>(() => PersonaCorpus.Load(stream));
     }
@@ -459,6 +454,7 @@ public sealed class PersonaCorpusTests
             ["weight"] = "1",
             ["requires_reply"] = "false",
             ["enabled"] = "true",
+            ["relationship_profile"] = "neutral",
             ["text"] = "测试先红，再改实现。",
             ["source_kind"] = "rewritten_topic",
             ["source_reference"] = "test",

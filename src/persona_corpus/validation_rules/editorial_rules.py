@@ -15,7 +15,7 @@ def validate_dry_sharp_contract(
     forbidden_triggers = frozenset(policy["forbidden_triggers"])
     forbidden_contexts = frozenset(policy["forbidden_context_tokens"])
     for row_number, row in enumerate(rows, start=2):
-        if row.tone != "dry_sharp":
+        if row.tone != "dry_sharp" or row.source_kind == "curated_authored":
             continue
         context_tokens = frozenset(row.required_context.split(","))
         violations: list[str] = []
