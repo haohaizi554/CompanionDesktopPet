@@ -5,10 +5,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Iterable
 
-from .contract import PERSONA_CONTRACT
-
-
 HISTORY_SCHEMA_VERSION = 1
+MISSING_SOURCE_TIER_DEFAULT = "authored"
 _ROOT_KEYS = frozenset({"schema_version", "records"})
 _RECORD_REQUIRED_KEYS = frozenset(
     {
@@ -261,7 +259,7 @@ class SelectionHistory:
                     surface_template=raw.get("surface_template", ""),
                     source_tier=raw.get(
                         "source_tier",
-                        PERSONA_CONTRACT.source_tier["missing_history_default"],
+                        MISSING_SOURCE_TIER_DEFAULT,
                     ),
                 )
             except (KeyError, TypeError, HistoryFormatError) as error:

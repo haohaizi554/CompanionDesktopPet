@@ -21,6 +21,7 @@ CONFIG_SCHEMAS = {
     "persona-scheduler.json": "./schemas/persona-scheduler.schema.json",
     "persona-authorship-manifest.json": "./schemas/persona-authorship-manifest.schema.json",
     "persona-editorial-manifest.json": "./schemas/persona-editorial-manifest.schema.json",
+    "persona-legacy-identity-manifest-v1.2.1.json": "./schemas/persona-legacy-identity-manifest.schema.json",
     "persona-review-allowlist.json": "./schemas/persona-review-allowlist.schema.json",
 }
 JSON_SCHEMA_DRAFT = "https://json-schema.org/draft/2020-12/schema"
