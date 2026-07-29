@@ -234,13 +234,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
 | review | `a251b1e01003a078d7912f71099e57c5c6830a75195558ea61428105990b866a` |
 | PII review | `702037759f730759be83fb1c643a8f61382fa1c3f8f2a25e2c0351a177eec6e7` |
 | surface manifest | `bcf9c97be0e4b1d7b7db11fcb46f44de17ef0ade6cb2e79d69f8af69bdbc637d` |
-| persona contract | `69713a14c57ef27a5a78977929fa9b6c09c590379f54248ca543a8ecf4fffcfb` |
-| scheduler raw bytes | `f91acdf46a447a9e4f56b8286043c20dd4c3c67291a4720df540ba90cec9acbc` |
-| scheduler semantic binding | `d0b3cc794a2ee748714e6b69ec8bf2c8b14ea5e149998c13c6d70f150242e401` |
+| persona contract | `1a86605c48c486f19a9a9c3c10d4144c1307dad1a710eb7c991a9e8de66c4ed2` |
+| scheduler raw bytes | `389403ac1716292d7269d1771f2ffc49aa980ffabf4d14fbd38ae7aa1fb68188` |
+| scheduler semantic binding | `6755825b463d92d97db121ca037e100fe770ee789fbc70d0f864bae75ac48a90` |
 | editorial manifest | `ce03fcbe4bb4de0f61ab81e29075ed80eb30bfe921bb1499e5514a1a3c5ad7b5` |
 | subseed derivation v2 | `e5f6d36ffb5d4936bccca24cb9c7177a63e02d937118342916bd5eea0a83640d` |
-| simulation report | `b66e5c9ba704ff3d050fb7d41f4cb6fa553acfbb1790010a3129c3f6cbcafcb9` |
-| validator-facing simulation events | `017e1bf3c20559bd046a1d86c0f0a3788220d0262f82792e9288651c81f42d80` |
+| simulation report | `643a5ec7820fdcbe18778d2f526862846493f02871b3849a4dc561e4638f8592` |
+| validator-facing simulation events | `b4edc82d3217963c01af43074e1231b6e7d9d2cc81afa08c5ab0fd19a1c67c62` |
 | historical `v1.0.0` `佳怡桌宠.exe` | `b79bf57a94d63387b6d8db288e53f64b06af32a3aa4881e7c069634839442a82` |
 
 ### 7.1 `v1.0.0` 正式发布实证
