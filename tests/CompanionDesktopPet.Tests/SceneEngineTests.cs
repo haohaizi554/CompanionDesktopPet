@@ -329,7 +329,7 @@ public sealed class SceneEngineTests
     }
 
     [Fact]
-    public void History_SeasoningQuotaFiltersTheSurfaceVariantAndReleasesAtWindowBoundary()
+    public void History_SeasoningQuotaFiltersTheSurfaceVariantAndReleasesAtBothWindowBoundaries()
     {
         var basis = PersonaCorpus.All.First(line => line.CategoryGroup == DialogueCategoryGroup.CharacterLife);
         var spicy = basis with { Id = basis.Id + ".spicy", Text = "哈？这行先收一收。" };
@@ -372,22 +372,20 @@ public sealed class SceneEngineTests
 
         Assert.Equal([neutral.Id], history.EligibleLines(scene, now).Select(line => line.Id));
 
-        history.Restore([
-            .. entries,
-            new SceneHistoryEntry(
-                "neutral-boundary",
-                "neutral.boundary",
-                now.AddMinutes(-1),
-                "neutral boundary",
-                "neutral-boundary-line",
-                basis.Category,
-                basis.CategoryGroup,
-                basis.OutputMode,
-                basis.Trigger,
-                basis.InterruptionCost,
-                DateOnly.FromDateTime(now),
-                WasSeasoning: false)
-        ]);
+        entries.AddRange(Enumerable.Range(0, 81).Select(index => new SceneHistoryEntry(
+            $"neutral-boundary-{index}",
+            $"neutral.boundary.{index}",
+            now.AddMinutes(-81 + index),
+            $"neutral boundary {index}",
+            $"neutral-boundary-line-{index}",
+            basis.Category,
+            basis.CategoryGroup,
+            basis.OutputMode,
+            basis.Trigger,
+            basis.InterruptionCost,
+            DateOnly.FromDateTime(now),
+            WasSeasoning: false)));
+        history.Restore(entries);
         Assert.Contains(spicy, history.EligibleLines(scene, now));
     }
 

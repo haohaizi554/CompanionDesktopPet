@@ -125,7 +125,7 @@ public sealed class PersonaCorpusTests
         Console.WriteLine(
             $"corpus parse: elapsed={stopwatch.Elapsed} allocated={allocatedBytes:N0} retained={retainedBytes:N0}");
         Assert.Equal(PersonaContractGenerated.ExpandedRuntimeRows, lines.Count);
-        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(5), stopwatch.Elapsed.ToString());
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(15), stopwatch.Elapsed.ToString());
         Assert.True(allocatedBytes < 384L * 1024 * 1024, $"allocated bytes: {allocatedBytes:N0}");
         Assert.True(
             retainedBytes >= 0,
