@@ -1,34 +1,36 @@
-# Persona Corpus Authored Runtime Summary
+# Persona Corpus Hybrid Runtime Summary
 
-The runtime contains only hash-bound authored-v1 rows. Legacy source rows remain in the archive and review artifacts; none are materialized as runtime surfaces.
+The runtime combines hash-bound authored-v1 rows with the exact audited v1.2.1 legacy runtime. Inventory and lineage are reported separately by source partition.
 
 ## Runtime inventory
 
 | Metric | Value |
 | --- | --- |
+| Enabled runtime rows | 82132 |
 | Enabled authored runtime rows | 30000 |
+| Legacy curated runtime rows | 806 |
+| Legacy runtime surfaces | 51326 |
 | Authored batches | 100 |
 | Rows per batch | 300 |
-| Legacy runtime surfaces | 0 |
 
 ## Category-group distribution
 
 | Category group | Runtime rows |
 | --- | --- |
-| career | 2100 |
-| character_life | 8100 |
-| daily_care | 3000 |
-| easter_egg | 3000 |
-| emotional_reflection | 3000 |
-| growth | 3000 |
-| system_ambient | 2400 |
-| technical | 5400 |
+| career | 4765 |
+| character_life | 12204 |
+| daily_care | 3779 |
+| easter_egg | 3224 |
+| emotional_reflection | 4972 |
+| growth | 8251 |
+| system_ambient | 2540 |
+| technical | 42397 |
 
 ## Relationship-profile distribution
 
 | Relationship profile | Runtime rows |
 | --- | --- |
-| neutral | 26165 |
+| neutral | 78297 |
 | nickname_easter_egg | 100 |
 | playful_friend | 2185 |
 | warm_friend | 1550 |
