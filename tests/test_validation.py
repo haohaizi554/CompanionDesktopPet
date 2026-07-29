@@ -1416,6 +1416,13 @@ class SimulationGateTests(unittest.TestCase):
         self.assertFalse(forbidden_select.called)
         self.assertIn("simulation_replay_limit", issue_codes(report))
 
+    def test_release_replay_limit_covers_exactly_thirty_days_by_one_hundred_seeds(self) -> None:
+        from src.persona_corpus.validation_rules.simulation_rules import (
+            MAX_CANONICAL_REPLAY_ATTEMPTS,
+        )
+
+        self.assertEqual(30 * 100 * 5, MAX_CANONICAL_REPLAY_ATTEMPTS)
+
     def test_exact_replay_rejects_same_scene_surface_substitution(self) -> None:
         rows, config, simulation = clean_simulation()
         rows_by_id = {row.id: row for row in rows}

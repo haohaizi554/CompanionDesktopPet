@@ -65,7 +65,10 @@ SIMULATION_EVENTS = frozenset({"tick", "app_start", "day_changed"})
 SIMULATION_DAYPARTS = frozenset(
     {"morning", "noon", "afternoon", "evening", "late_night"}
 )
-MAX_CANONICAL_REPLAY_ATTEMPTS = 3_000
+# Release evidence covers 30 days x 100 fixed seeds x 5 canonical slots.
+# Keep the ceiling exact so malformed coordinates cannot turn validation into
+# unbounded scheduler work.
+MAX_CANONICAL_REPLAY_ATTEMPTS = 15_000
 
 
 @dataclass(frozen=True, slots=True)
