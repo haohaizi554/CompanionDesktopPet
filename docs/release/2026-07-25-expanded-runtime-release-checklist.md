@@ -1,7 +1,7 @@
 # v1.3.0 Authored Runtime 发布与清理清单
 
 日期：2026-07-29
-状态：`v1.3.0` 语料、模拟、validator、单 EXE、标签、GitHub Release 与代理回下载复验均已完成；仅剩最终工作树清理
+状态：`v1.3.0` 语料、模拟、validator、单 EXE、标签、GitHub Release、代理回下载复验与最终工作树清理均已完成
 
 本文的当前门禁是 30,000 条 authored runtime。v1.0.0、v1.1.0、v1.2.1 的证据继续作为历史记录保留，但不得当作 v1.3.0 的测试、二进制或哈希证据。release tag 必须指向实际产出 EXE 的 source commit。
 
@@ -351,6 +351,8 @@ git status --short
 ```
 
 最终 `git status --short` 只允许预期的源代码、数据、报告、文档和交付 EXE 变化；`bin/`、`obj/`、`publish/`、`outputs/verify/`、`__pycache__/`、临时报告、额外 EXE 或 sidecar 都是清理/审阅信号，不能盲目纳入提交。
+
+2026-07-29 最终清理已执行 `git worktree prune`；`git worktree list --porcelain` 与 `D:\desktop` 目录核对均只剩 `D:\desktop\CompanionDesktopPet`，仓库状态干净，无额外 `CompanionDesktopPet-*` 工作树目录。
 
 ## 9. 已关闭审计项与发布结论
 

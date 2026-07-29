@@ -1,7 +1,7 @@
 # v1.3.0 authored 语料集成任务面板
 
 日期：2026-07-29
-状态：源码、语料、文档、正式 EXE、GitHub Release 与线上 CI 已完成；仅剩最终工作树清理
+状态：全部完成；源码、语料、文档、正式 EXE、GitHub Release、线上 CI 与工作树清理均已验收
 
 ## 目标与当前结果
 
@@ -49,6 +49,6 @@
 - [x] 推送 annotated `v1.3.0` 标签并发布具体中文 Release，标题仅 `v1.3.0`
 - [x] GitHub Actions main/tag 流水线全绿，8 项资产代理回下载复验
 
-## 待完成
+## 收尾
 
-- [ ] 清理多余工作树
+- [x] 执行 `git worktree prune` 并核对注册表与 `D:\desktop`：仅保留当前 `D:\desktop\CompanionDesktopPet`，无多余 `CompanionDesktopPet-*` 工作树目录
