@@ -1,17 +1,19 @@
-# v1.3.0 Authored Runtime 发布与清理清单
+# v1.4.0 Hybrid Runtime 发布与清理清单
 
-日期：2026-07-29
-状态：`v1.3.0` 语料、模拟、validator、单 EXE、标签、GitHub Release、代理回下载复验与最终工作树清理均已完成
+日期：2026-07-30
+状态：`v1.4.0` 语料、100-seed 模拟与发布文档已完成；单 EXE、标签、GitHub Release、代理回下载复验与最终工作树清理按本清单后续步骤执行并登记
 
-本文的当前门禁是 30,000 条 authored runtime。v1.0.0、v1.1.0、v1.2.1 的证据继续作为历史记录保留，但不得当作 v1.3.0 的测试、二进制或哈希证据。release tag 必须指向实际产出 EXE 的 source commit。
+本文的当前门禁是 30,000 条 authored 与 v1.2.1 的 52,132 条 legacy 合并后的 82,132 条 hybrid runtime。v1.0.0、v1.1.0、v1.2.1、v1.3.0 的证据继续作为历史记录保留，但不得当作 v1.4.0 的测试、二进制或哈希证据。release tag 必须指向实际产出 EXE 的 source commit。
 
 ## 1. 精确验收常量
 
 | 项目 | 必须精确等于 | 定义 |
 | --- | ---: | --- |
 | authored runtime | 30,000 | `source_kind=curated_authored` 的全部启用行 |
-| legacy runtime surfaces | 0 | `source_kind=legacy_surface_variant` 的启用行 |
-| semantic scenes | 1,190 | runtime 中唯一 `semantic_group` 数 |
+| legacy curated runtime | 806 | v1.2.1 清单绑定的非 surface 启用行 |
+| legacy runtime surfaces | 51,326 | `source_kind=legacy_surface_variant` 的启用行 |
+| combined runtime | 82,132 | authored 与 legacy 的稳定 ID 并集 |
+| semantic scenes | 1,723 | runtime 中唯一 `semantic_group` 数 |
 | authorship ledger | 30,000 | 每条 authored source 的 hash-bound lineage |
 | immutable source | 75,375 | 原始 TSV 无表头物理数据行数 |
 | archive dispositions | 75,375 | expanded build 的 archive 数据记录数 |
@@ -106,6 +108,7 @@ with (root / 'data/optimized/persona-corpus-archive.tsv').open(
 
 authored = sum(row['source_kind'] == 'curated_authored' for row in runtime)
 surfaces = sum(row['source_kind'] == 'legacy_surface_variant' for row in runtime)
+legacy_curated = len(runtime) - authored - surfaces
 scenes = len({row['semantic_group'] for row in runtime})
 ledger = list(csv.DictReader((root / 'data/optimized/persona-authorship-ledger.tsv').open(encoding='utf-8', newline=''), delimiter='\t'))
 source_lines = sum(
@@ -115,13 +118,14 @@ source_lines = sum(
 )
 
 assert authored == 30_000, authored
-assert surfaces == 0, surfaces
-assert len(runtime) == 30_000, len(runtime)
-assert scenes == 1_190, scenes
+assert legacy_curated == 806, legacy_curated
+assert surfaces == 51_326, surfaces
+assert len(runtime) == 82_132, len(runtime)
+assert scenes == 1_723, scenes
 assert len(ledger) == 30_000, len(ledger)
 assert source_lines == 75_375, source_lines
 assert len(archive) == 75_375, len(archive)
-print('PASS: 30,000 authored runtime; 0 legacy surfaces; 1,190 scenes; 30,000 ledger; 75,375 source/archive')
+print('PASS: 30,000 authored; 806 legacy curated; 51,326 legacy surfaces; 82,132 runtime; 1,723 scenes')
 '@ | python -
 ```
 
@@ -134,7 +138,7 @@ python tools/simulate_persona.py `
   --corpus data/optimized/persona-corpus-v2.tsv `
   --config config/persona-scheduler.json `
   --days 30 `
-  --seeds 10 `
+  --seeds 100 `
   --report reports/simulation-report.md `
   --events-json reports/simulation-events.json
 
@@ -234,20 +238,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
 | 发布对象 | SHA-256 |
 | --- | --- |
 | immutable source / byte copy | `3fd7356845df838c652f7a7668013f2b15b0e91ddfa5d784b2b71a514a2c7534` |
-| expanded runtime v2 | `1d887627e6b4a8f303a0151cea8b99726d176b9953a396782e88cde69de5633c` |
-| archive | `a9e78adefbeff30e44f88e7eae1a953a8e76c499f29d58d1ec334eb6f75e03bc` |
+| expanded runtime v2 | `339358c524785db30badf420a3bdc2b89c7753486e907ff1a5216f68ca5d7ece` |
+| archive | `b7d9a5f2fd6f4750ea2b688206f77bf45a2b59ca12c09f36281c72efc620721d` |
 | review | `a251b1e01003a078d7912f71099e57c5c6830a75195558ea61428105990b866a` |
 | PII review | `702037759f730759be83fb1c643a8f61382fa1c3f8f2a25e2c0351a177eec6e7` |
-| surface manifest | `a2353ed6480ec1e75c40add4ae36ed7884724ca88a64b25f8b1c9282f975037c` |
+| surface manifest | `bcf9c97be0e4b1d7b7db11fcb46f44de17ef0ade6cb2e79d69f8af69bdbc637d` |
 | authorship manifest | `4742a984077ce044adf8f059ee46dd36bfd7f4a0248c3422060bd366027cc4b6` |
 | authorship ledger | `31305579ebf55d2d49c3227d7c7664b16e89abd0e9aab3cbbfa11ae3e0cace8d` |
-| persona contract | `d6728014c23ba2c423b274c1ba2e1e3941a4a3ab9fc59c56e6f1fe7ff82380c3` |
-| scheduler raw bytes | `b1b88032d774911f0bf523fb5678eac79f848abc58538136207c19ad8c36883f` |
-| scheduler semantic binding | `318a2e4b92e56b02de950e8fd627fb34279dab4237148328e88cc0720f8a7f03` |
+| persona contract | `8ed829357d2692f044185614244a59d00fec3909e1a5f41e78fcd47958ad356c` |
+| scheduler raw bytes | `d90826d9ffba57f83e0e3a04bd38f8f27e80b5fe95e31737bbbd4e4959de0ebb` |
+| scheduler semantic binding | `eedc8979fb239a915789af4ff62d55b31a2aeabde3f196dabd7355e73f666f2a` |
 | editorial manifest | `ce03fcbe4bb4de0f61ab81e29075ed80eb30bfe921bb1499e5514a1a3c5ad7b5` |
 | subseed derivation v2 | `e5f6d36ffb5d4936bccca24cb9c7177a63e02d937118342916bd5eea0a83640d` |
-| simulation report | `c55beb9155042acf326deef7a6b57f85913704d35dd9c02c4ccc5036df10eb3e` |
-| validator-facing simulation events | `4e4b66d7eeac6dd01dd70e117e97b67a75f52ff2cf1c21f6fa34920e0e105493` |
+| simulation report | `2fceb9aecd6817dedf4c3690938c0c1656c97eeff4af8558f300791091597952` |
+| validator-facing simulation events | `84c05704368bc5a18946342e2f6d5cef113ebc345aa9ac7f3b8037f45b6a8fd2` |
 | current `v1.3.0` `佳怡桌宠.exe` | `9d20f5a546d10c65ac5b65558dbcc722f96ceef5e63fb89484dcb69bc420d5e6` |
 | current `v1.2.1` `佳怡桌宠.exe` | `7d5343c01e1ed89ef15e3d9595f6c9fb1ec24f8275db15628a5b541ad5c1ff03` |
 | historical `v1.0.0` `佳怡桌宠.exe` | `b79bf57a94d63387b6d8db288e53f64b06af32a3aa4881e7c069634839442a82` |

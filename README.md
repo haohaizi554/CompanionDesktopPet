@@ -6,7 +6,7 @@
 
 全屏探测只读取台前 HWND 及其有效性、可见/最小化状态和窗口样式，DWM 的 cloaked 状态与扩展边框几何，以及相交显示器的完整边界。它不读取窗口标题、进程名称或进程内容，不读取键鼠输入、剪贴板、用户文件、屏幕像素或网络数据。该探测只改变自动台词频率，不理解屏幕内容或用户正在做什么。
 
-> v1.3.0 当前集成 30,000 条逐条 authored 的运行时文案，全部来自 `data/authored/v1/b001-b100.tsv`，并由 authorship manifest 与 30,000 行 ledger 绑定来源哈希；按唯一 `semantic_group` 聚合为 1,190 个语义场景。运行时不再物化 legacy surface（精确为 0 行）。原始 75,375 条 legacy 数据仍作为不可变 archive/review 审计证据，不会进入运行时。
+> v1.4.0 将 30,000 条逐条 authored 文案与 v1.2.1 已审计的 52,132 条 legacy 运行时合并为 82,132 条统一运行库，共 1,723 个语义场景。调度器先执行全部安全门禁，再以最近 100 次播放为窗口把 legacy 暴露稳定在约 30%；库存更大不会让 legacy 主导人格。
 
 左键点击会显示爱心、按点击位置向相反方向轻轻倾斜，并给出一句回复。点击回复有长期运行兜底：即使冷却历史逐渐累积，或从旧版容易陷入静默的本地记忆恢复，后续点击也不会永久失声。桌宠保留自然单次/偶发双次眨眼，启动后会显示一次本地“嗨♡”，也可从右键面板选择 `打个招呼♡`；这些都是纯本地 UI 动作，不由语料驱动。
 
@@ -54,13 +54,14 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run
 ## 已验证能力
 
 - 冻结并校验 75,375 条无表头不可变源物理数据行及其字节副本；它们只用于审计、复核和来源映射。
-- 历史 v1.2.1 curated core 精确为 806 条完整、可独立播放的启用语料；v1.3.0 运行时不再区分 core 与 legacy surface。
-- v1.3.0 的 100 个 authored 批次各 300 条，合计 30,000 条；manifest 绑定每批文本与元数据摘要，ledger 逐行绑定 variant、关系画像与根哈希。
-- 当前运行时精确为 30,000 条 `curated_authored`，0 条 `legacy_surface_variant`，按唯一 `semantic_group` 聚合为 1,190 个场景。
+- legacy 分区保留 v1.2.1 的 806 条 curated 内容与 51,326 条 hash-bound surface，合计 52,132 条；authored 分区仍为 100 个批次、每批 300 条。
+- 100 个 authored 批次各 300 条，合计 30,000 条；manifest 绑定每批文本与元数据摘要，ledger 逐行绑定 variant、关系画像与根哈希。
+- 当前运行时精确为 82,132 条：30,000 条 authored 加 52,132 条 legacy，按唯一 `semantic_group` 聚合为 1,723 个场景。
+- 来源档位由 `source_kind` 派生；最近 100 次播放的 legacy 总体门禁为 25%–35%，正式 100-seed 模拟实测 30.07%。
 - 21 列 v2 元数据包含 `relationship_profile`；受控值为 `neutral`、`warm_friend`、`playful_friend`、`nickname_easter_egg`。
 - 运行时按场景优先：先执行触发器/上下文、语义冷却、每日上限、最小间隔、滚动小时预算、夜间预算、组配额与关系画像配额，再在所选场景内选择合格变体。
-- 发布模拟门禁是 Easter egg 8%–12%、seasoning 0.5%–1.5%、dry-sharp 0%–4%；它们是 30 天 × 10 seeds 的播放暴露率，不是 TSV 行数占比。
-- 正式模拟结果为 1,500/1,500 次输出、0 hard violations；联合 validator 为 0 hard errors、0 warnings。
+- 发布模拟门禁是 legacy 25%–35%、Easter egg 8%–12%、seasoning 0.5%–1.5%、dry-sharp 0%–4%；它们是 30 天 × 100 seeds 的播放暴露率，不是 TSV 行数占比。
+- 正式模拟结果为 15,000/15,000 次输出、legacy 30.07%、0 hard violations；联合 validator 为 0 hard errors，唯一 warning 是不参与播放验收的 legacy surface 原始库存观察。
 
 下面的 806/51,326/52,132/533/20 列条目仅保留为 v1.2.1 历史基线，不是当前发布门禁：
 - 当前运行时精确集成 52,132 条启用语料：806 条 curated core 加 51,326 条通过安全筛选并由 manifest 精确绑定的 legacy surfaces；按唯一 `semantic_group` 聚合后精确为 533 个场景。

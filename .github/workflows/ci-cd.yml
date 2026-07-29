@@ -240,12 +240,13 @@ jobs:
           }
 
           $summary = @($output | Where-Object { $_ -match '^Validation:' }) | Select-Object -First 1
-          if ($summary -cne 'Validation: 0 hard errors, 0 warnings') {
-            throw "Validator did not report the required zero-error, zero-warning summary: $summary"
+          if ($summary -cne 'Validation: 0 hard errors, 1 warnings') {
+            throw "Validator did not report the required zero-error, one-observation-warning summary: $summary"
           }
           $warningLines = @($output | Where-Object { $_ -match '^WARNING ' })
-          if ($warningLines.Count -ne 0) {
-            throw "Validator emitted warnings: $($warningLines -join ' | ')"
+          if ($warningLines.Count -ne 1 -or
+              $warningLines[0] -notmatch '^WARNING surface_inventory_observation:') {
+            throw "Validator warnings differ from the single permitted inventory observation: $($warningLines -join ' | ')"
           }
 
       - name: Run full Python test suite
@@ -861,7 +862,7 @@ jobs:
           }
 
           $releaseTitle = $tag
-          $descriptionMarker = '<!-- companion-release-description:zh-CN:v2 -->'
+          $descriptionMarker = '<!-- companion-release-description:zh-CN:v3 -->'
           $noUpdateClaim = '应用不包含热更新、自动更新或联网下载代码的机制'
           $unsignedClaim = '构建门禁已执行 Get-AuthenticodeSignature，并确认当前 EXE 状态为 NotSigned、无签名证书和时间戳证书'
           $requiredChineseHeadings = @(
@@ -885,6 +886,9 @@ jobs:
             'Jiayi-Desktop-Pet.exe'
           )
           $assets = @($assetNames | ForEach-Object { Join-Path 'release-assets' $_ })
+          $releaseExe = Join-Path 'release-assets' 'Jiayi-Desktop-Pet.exe'
+          $releaseExeBytes = (Get-Item -LiteralPath $releaseExe).Length
+          $releaseExeSha256 = (Get-FileHash -LiteralPath $releaseExe -Algorithm SHA256).Hash.ToLowerInvariant()
 
           $requiredNotice = @(
             Get-Content -LiteralPath (Join-Path 'release-assets' 'NOTICE') -Encoding utf8 |
@@ -906,18 +910,18 @@ jobs:
 
           ## 发布亮点
 
-          - 运行时语料已替换为 100 个 authored 批次，每批 300 条，共 30,000 条 curated_authored；legacy_surface_variant 为 0 条。
-          - 30,000 条语料按唯一 semantic_group 聚合为 1,190 个场景；v2 元数据从 20 列扩展到 21 列，新增 relationship_profile。
-          - 关系画像精确分布为：neutral 26,165 条、warm_friend 1,550 条、playful_friend 2,185 条、nickname_easter_egg 100 条。
-          - 新增逐行 authorship ledger；manifest、ledger、运行时 TSV 与归档 TSV 均由发布门禁登记并复核 SHA-256。
-          - 运行时对 warm_friend 实施最近 20 次最多 2 次、对 nickname_easter_egg 实施最近 100 次最多 1 次的暴露上限。
+          - 将 v1.3.0 的 30,000 条逐条 authored 语料与 v1.2.1 已审计的 52,132 条 legacy 运行时合并，统一运行库精确为 82,132 条、1,723 个语义场景。
+          - 52,132 条 legacy 由 806 条 curated 内容和 51,326 条 hash-bound surface 组成；两套语料先独立重建、再按稳定 ID 合并，未覆盖旧版本证据。
+          - 来源档位由 source_kind 派生，不增加 TSV 列。所有上下文、冷却、隐私、身份彩蛋、关系画像和打扰预算硬门禁完成后，最近 100 次播放把 legacy 稳定在约 30%，允许总区间 25%–35%。
+          - 旧历史没有来源字段时按 authored 安全迁移；新历史记录实际来源。legacy 关系画像保持 neutral，legacy dry_sharp 仅确定性选入 4 个场景，与 authored 的 8 个合计精确为 12 个。
+          - 运行库 SHA-256 为 339358c524785db30badf420a3bdc2b89c7753486e907ff1a5216f68ca5d7ece；authored/legacy 分区、身份清单、逐行 ledger 与模拟事件均有独立哈希证据。
 
           ## 验证结果
 
-          - Python：375 项测试全部通过。
-          - .NET Release：641 项测试全部通过。
-          - 正式模拟：30 天 × 10 个固定 seeds，产生 1,500/1,500 次输出，0 个 hard violations。
-          - 联合语料校验：0 hard errors、0 warnings。
+          - Python 与 .NET Release 全量测试均通过，实际发现数、通过数和零跳过/零失败状态保存在本标签质量门禁日志中。
+          - 正式模拟：30 天 × 100 个固定 seeds，产生 15,000/15,000 次输出；legacy 实际播放 4,511 次，占 30.07%，每个 seed 均为 29.33%–30.67%。
+          - 模拟结果为 0 个 hard violations；dry_sharp 2.00%、seasoning 1.32%、Easter egg 9.89%，均在发布契约内。
+          - 联合语料校验：0 hard errors；唯一 warning 是 51,326 条 legacy surface 的原始库存观察，不是播放安全违规。
           - 发布构建继续执行干净 self-contained single-file publish、单文件边界检查、真实 WPF 隔离烟测与 SHA-256 校验。
 
           ## 下载与运行
@@ -945,6 +949,8 @@ jobs:
           - 提交 SHA：$env:GITHUB_SHA
           - 包版本：$env:PACKAGE_VERSION
           - EXE ProductVersion：$expectedProductVersion
+          - EXE 字节数：$releaseExeBytes
+          - EXE SHA-256：$releaseExeSha256
 
           ## 许可范围与权利声明
 

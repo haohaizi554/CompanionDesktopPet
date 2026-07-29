@@ -314,6 +314,19 @@ try {
     Assert-Rejected -Case 'TRX missing required counter' -ExpectedMessage 'missing required counter' -Action {
         Get-DotNetTrxEvidence -TrxPaths @($missingCounterTrx) -ExpectedDiscoveredTests 3 | Out-Null
     }
+
+    $workflow = Get-Content -LiteralPath (Join-Path $repoRoot '.github\workflows\ci-cd.yml') -Raw -Encoding utf8
+    foreach ($requiredHybridEvidence in @(
+        '82,132'
+        '15,000/15,000'
+        '30.07%'
+        'Validation: 0 hard errors, 1 warnings'
+        '--title $releaseTitle'
+    )) {
+        if (-not $workflow.Contains($requiredHybridEvidence)) {
+            throw "CI workflow is missing v1.4.0 hybrid release evidence: $requiredHybridEvidence"
+        }
+    }
 }
 finally {
     Remove-Module -Name 'Ci-TestEvidence.Core' -Force -ErrorAction SilentlyContinue
