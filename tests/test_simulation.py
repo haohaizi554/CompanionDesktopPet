@@ -435,7 +435,7 @@ class SimulationIntegrationTests(unittest.TestCase):
             sum(self.report.tone_counts.values()),
             self.report.output_count,
         )
-        self.assertEqual(
+        self.assertAlmostEqual(
             sum(self.report.tone_ratio.values()),
             1.0 if self.report.output_count else 0.0,
         )
