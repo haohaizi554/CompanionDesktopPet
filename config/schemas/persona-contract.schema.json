@@ -26,7 +26,7 @@
       "properties": {
         "expanded_runtime_rows": { "type": "integer", "minimum": 1 },
         "semantic_scene_count": { "type": "integer", "minimum": 1 },
-        "legacy_surface_rows": { "type": "integer", "minimum": 1 }
+        "legacy_surface_rows": { "const": 0 }
       },
       "additionalProperties": false
     },
@@ -187,11 +187,11 @@
           "type": "array",
           "items": {
             "enum": [
-              "rewritten_topic", "legacy_surface_variant", "curated_standalone",
+              "rewritten_topic", "legacy_surface_variant", "curated_standalone", "curated_authored",
               "preserved_easter_egg", "new_ambient", "archived_question", "manual_review"
             ]
           },
-          "minItems": 7, "maxItems": 7, "uniqueItems": true
+          "minItems": 8, "maxItems": 8, "uniqueItems": true
         },
         "relationship_profiles": {
           "type": "array",

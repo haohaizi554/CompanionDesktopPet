@@ -25,11 +25,13 @@ internal static class PersonaContractGenerated
 {
     public const int CuratedCoreMinimumRows = 800;
     public const int CuratedCoreMaximumRows = 1200;
-    public const int ExpandedRuntimeMinimumRows = 50000;
+    public const int ExpandedRuntimeMinimumRows = 30000;
     public const int ExpandedRuntimeMaximumRows = 60000;
-    public const int ExpandedRuntimeRows = 52132;
-    public const int SemanticSceneCount = 533;
-    public const int LegacySurfaceRows = 51326;
+    public const int ExpectedAuthoredRuntimeRows = 30000;
+    public const int ExpectedLegacySurfaceRows = 0;
+    public const int ExpandedRuntimeRows = ExpectedAuthoredRuntimeRows;
+    public const int SemanticSceneCount = 1190;
+    public const int LegacySurfaceRows = ExpectedLegacySurfaceRows;
     public const string DrySharpSceneHashNamespace = "persona-dry-sharp-scene-v1";
     public const string DrySharpSceneAssignmentField = "semantic_group";
     public const double DrySharpSceneHashThreshold = 0.07;
@@ -165,6 +167,7 @@ internal static class PersonaContractGenerated
         "rewritten_topic",
         "legacy_surface_variant",
         "curated_standalone",
+        "curated_authored",
         "preserved_easter_egg",
         "new_ambient",
         "archived_question",

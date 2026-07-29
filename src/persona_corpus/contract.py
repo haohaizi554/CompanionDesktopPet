@@ -176,16 +176,41 @@ def load_persona_contract(path: Path = DEFAULT_CONTRACT_PATH) -> PersonaContract
         "semantic_scene_count",
         "legacy_surface_rows",
     }
+    if set(release_inventory_raw) != expected_release_inventory:
+        raise PersonaContractError(
+            "release_inventory must contain exactly expanded_runtime_rows, "
+            "semantic_scene_count, and legacy_surface_rows"
+        )
     if (
-        set(release_inventory_raw) != expected_release_inventory
-        or any(type(value) is not int or value <= 0 for value in release_inventory_raw.values())
+        type(release_inventory_raw["expanded_runtime_rows"]) is not int
+        or release_inventory_raw["expanded_runtime_rows"] != 30000
     ):
         raise PersonaContractError(
-            "release_inventory must contain exactly three positive integer counts"
+            "release_inventory.expanded_runtime_rows must be integer 30000"
+        )
+    if (
+        type(release_inventory_raw["semantic_scene_count"]) is not int
+        or release_inventory_raw["semantic_scene_count"] <= 0
+    ):
+        raise PersonaContractError(
+            "release_inventory.semantic_scene_count must be a positive integer"
+        )
+    if (
+        type(release_inventory_raw["legacy_surface_rows"]) is not int
+        or release_inventory_raw["legacy_surface_rows"] != 0
+    ):
+        raise PersonaContractError(
+            "release_inventory.legacy_surface_rows must be integer 0"
         )
     release_inventory = {
         str(name): int(value) for name, value in release_inventory_raw.items()
     }
+    expanded_runtime_rows = release_inventory["expanded_runtime_rows"]
+    expanded_runtime_minimum, expanded_runtime_maximum = inventory["expanded_runtime"]
+    if not expanded_runtime_minimum <= expanded_runtime_rows <= expanded_runtime_maximum:
+        raise PersonaContractError(
+            "release_inventory.expanded_runtime_rows must be within inventory.expanded_runtime"
+        )
 
     category_groups = _string_tuple(raw.get("category_groups"), "category_groups")
     categories_raw = _mapping(raw.get("categories"), "categories")
@@ -215,6 +240,18 @@ def load_persona_contract(path: Path = DEFAULT_CONTRACT_PATH) -> PersonaContract
     output_modes = frozenset(_string_tuple(controlled["output_modes"], "output_modes"))
     tones = frozenset(_string_tuple(controlled["tones"], "tones"))
     source_kinds = frozenset(_string_tuple(controlled["source_kinds"], "source_kinds"))
+    expected_source_kinds = {
+        "rewritten_topic",
+        "legacy_surface_variant",
+        "curated_standalone",
+        "curated_authored",
+        "preserved_easter_egg",
+        "new_ambient",
+        "archived_question",
+        "manual_review",
+    }
+    if source_kinds != expected_source_kinds:
+        raise PersonaContractError("source_kinds must contain the exact controlled source set")
     relationship_profiles = frozenset(
         _string_tuple(controlled["relationship_profiles"], "relationship_profiles")
     )

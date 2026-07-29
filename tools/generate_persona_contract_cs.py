@@ -169,9 +169,11 @@ internal static class PersonaContractGenerated
     public const int CuratedCoreMaximumRows = {curated_core_maximum};
     public const int ExpandedRuntimeMinimumRows = {expanded_runtime_minimum};
     public const int ExpandedRuntimeMaximumRows = {expanded_runtime_maximum};
-    public const int ExpandedRuntimeRows = {int(release_inventory['expanded_runtime_rows'])};
+    public const int ExpectedAuthoredRuntimeRows = {int(release_inventory['expanded_runtime_rows'])};
+    public const int ExpectedLegacySurfaceRows = {int(release_inventory['legacy_surface_rows'])};
+    public const int ExpandedRuntimeRows = ExpectedAuthoredRuntimeRows;
     public const int SemanticSceneCount = {int(release_inventory['semantic_scene_count'])};
-    public const int LegacySurfaceRows = {int(release_inventory['legacy_surface_rows'])};
+    public const int LegacySurfaceRows = ExpectedLegacySurfaceRows;
     public const string DrySharpSceneHashNamespace = {_quoted(str(dry_sharp['scene_hash_namespace']))};
     public const string DrySharpSceneAssignmentField = {_quoted(str(dry_sharp['scene_assignment_field']))};
     public const double DrySharpSceneHashThreshold = {_cs_double(dry_sharp['scene_hash_threshold'], 'dry_sharp.scene_hash_threshold')};

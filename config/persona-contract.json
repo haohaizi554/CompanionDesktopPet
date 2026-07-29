@@ -7,14 +7,14 @@
       1200
     ],
     "expanded_runtime": [
-      50000,
+      30000,
       60000
     ]
   },
   "release_inventory": {
-    "expanded_runtime_rows": 52132,
-    "semantic_scene_count": 533,
-    "legacy_surface_rows": 51326
+    "expanded_runtime_rows": 30000,
+    "semantic_scene_count": 1190,
+    "legacy_surface_rows": 0
   },
   "category_groups": [
     "technical",
@@ -75,6 +75,7 @@
       "rewritten_topic",
       "legacy_surface_variant",
       "curated_standalone",
+      "curated_authored",
       "preserved_easter_egg",
       "new_ambient",
       "archived_question",
