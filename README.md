@@ -21,7 +21,7 @@ outputs/CompanionDesktopPet/使用说明.txt
 
 `佳怡桌宠.exe` 是 `win-x64` 自包含单文件应用，运行时不需要另行安装 .NET，也不依赖旁置或外部应用 DLL、JSON、PDB 等运行时 sidecar。“自包含单 EXE”不表示进程绝不加载 DLL；作为 Windows 桌面应用，它仍会正常使用操作系统提供的系统 DLL 与系统组件。
 
-当前公开交付是 [v1.1.0](https://github.com/haohaizi554/CompanionDesktopPet/releases/tag/v1.1.0)：EXE 从提交 `dda5350cb2fe102d78a41c5d998eaa4592ded267` 使用 .NET SDK `9.0.301` 构建，`ProductVersion=1.1.0+dda5350cb2fe102d78a41c5d998eaa4592ded267`，大小为 `80,454,312` 字节，SHA-256 为 `75a074d6c3731e135be99ceb694e0d3fa6ea9a9f9bcc0f52b736eb3c030cb692`。标签流水线与通过 `127.0.0.1:7890` 代理回下载后的 publish、交付及隔离烟测副本哈希一致，真实 WPF smoke 均自行以退出码 0 结束。GitHub 外层资产使用 `Jiayi-Desktop-Pet.exe`、`Jiayi-Desktop-Pet-README-zh-CN.txt` 和 `Jiayi-Desktop-Pet-win-x64.zip`；ZIP 内保留 `佳怡桌宠.exe` 与 `使用说明.txt`。完整证据见[发布与清理清单](docs/release/2026-07-25-expanded-runtime-release-checklist.md)。该 v1.1.0 EXE 未做 Authenticode 代码签名，从网络下载时可能出现 Windows SmartScreen/安全软件信誉提示。
+当前公开交付是 [v1.2.1](https://github.com/haohaizi554/CompanionDesktopPet/releases/tag/v1.2.1)：EXE 从提交 `421b54a349062ab540b27bfe6f9a97ba7df5b6f2` 使用 .NET SDK `9.0.301` 构建，`ProductVersion=1.2.1+421b54a349062ab540b27bfe6f9a97ba7df5b6f2`，大小为 `80,454,500` 字节，SHA-256 为 `7d5343c01e1ed89ef15e3d9595f6c9fb1ec24f8275db15628a5b541ad5c1ff03`。本版修复调度随机源并发、远未来农历日期安全反馈、UI 线程契约与菜单样式问题，将行为树权重纳入契约，并补齐全屏、角色状态、场景历史、事件策略和非法动作转换测试。标签流水线、通过 `127.0.0.1:7890` 回下载的 Release EXE、ZIP 内 EXE、仓库交付副本与隔离烟测副本逐字节一致；云端与本地真实 WPF smoke 均自行以退出码 0 结束。Release 标题精确为版本号 `v1.2.1`，正文为具体中文变更说明。完整证据见[发布与清理清单](docs/release/2026-07-25-expanded-runtime-release-checklist.md)。该 EXE 未做 Authenticode 代码签名，从网络下载时可能出现 Windows SmartScreen/安全软件信誉提示。
 
 ## 体验与操作
 
@@ -62,7 +62,7 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run
 - 点击专用恢复路径通过 8 小时连续会话、900 次连续点击和旧版静默记忆恢复测试；主动播报仍遵守原有静默预算。
 - 启动不在 UI 线程同步构建大型目录；预热期间使用固定本地 fallback，且真实 WPF 烟测只接受完整语料产生的启动回复。
 - WPF 只嵌入已集成的 v2 运行时资源；75,375 条源物理数据行及其 archive 证据不会整体进入运行时。
-- `v1.1.0` 已在目标 annotated tag 上重新完成 Release 测试、干净 self-contained single-file publish、源/副本 SHA-256、固定种子重建、隔离单 EXE 烟测、8 项资产上传与代理回下载复验；未沿用 v1.0.0 的历史数字或二进制哈希。
+- `v1.2.1` 已在目标 annotated tag 上重新完成 Python `372/372`、.NET Release `637/637`、干净 self-contained single-file publish、源/副本 SHA-256、固定种子重建、隔离单 EXE 烟测、8 项资产上传与代理回下载复验；未沿用旧版本的测试数字或二进制哈希。
 
 完整语料维护契约、20 字段说明和精确命令见 [README-persona-corpus.md](README-persona-corpus.md)。
 

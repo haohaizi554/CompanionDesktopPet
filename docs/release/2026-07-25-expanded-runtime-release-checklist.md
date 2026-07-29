@@ -1,9 +1,9 @@
 # Expanded Runtime 发布与清理清单
 
-日期：2026-07-25（`v1.1.0` 证据更新：2026-07-29）
-状态：`v1.1.0` 的最终测试、单 EXE、哈希、8 项资产、中文 GitHub Release 与代理回下载复验均已完成
+日期：2026-07-25（`v1.2.1` 证据更新：2026-07-29）
+状态：`v1.2.1` 的最终测试、单 EXE、哈希、8 项资产、具体中文 GitHub Release 与代理回下载复验均已完成
 
-本文是已集成 52,132 条 expanded runtime 的发布门禁。它不授权修改不可变 source；当前语料计数已重新核对。文档分别保留 `v1.0.0` 历史实证与 `v1.1.0` 新鲜实证；v1.1.0 从固定且已推送的最终 `main` 提交重新构建，没有沿用旧版二进制、测试数字或哈希。release tag 指向产出 EXE 的 source commit，标签后的 documentation commit 只登记已完成的外部证据。
+本文是已集成 52,132 条 expanded runtime 的发布门禁。它不授权修改不可变 source；当前语料计数已重新核对。文档保留 `v1.0.0`、`v1.1.0` 历史实证与 `v1.2.1` 新鲜实证；v1.2.1 从固定且已推送的最终 `main` 提交重新构建，没有沿用旧版二进制、测试数字或哈希。release tag 指向产出 EXE 的 source commit，标签后的 documentation commit 只登记已完成的外部证据。
 
 ## 1. 精确验收常量
 
@@ -241,6 +241,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
 | subseed derivation v2 | `e5f6d36ffb5d4936bccca24cb9c7177a63e02d937118342916bd5eea0a83640d` |
 | simulation report | `643a5ec7820fdcbe18778d2f526862846493f02871b3849a4dc561e4638f8592` |
 | validator-facing simulation events | `b4edc82d3217963c01af43074e1231b6e7d9d2cc81afa08c5ab0fd19a1c67c62` |
+| current `v1.2.1` `佳怡桌宠.exe` | `7d5343c01e1ed89ef15e3d9595f6c9fb1ec24f8275db15628a5b541ad5c1ff03` |
 | historical `v1.0.0` `佳怡桌宠.exe` | `b79bf57a94d63387b6d8db288e53f64b06af32a3aa4881e7c069634839442a82` |
 
 ### 7.1 `v1.0.0` 正式发布实证
@@ -278,6 +279,30 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
 
 - ZIP 无子目录，精确平铺 `佳怡桌宠.exe`、`使用说明.txt`、`LICENSE`、`LICENSE-SCOPE.md`、`ASSET_AND_PERSONA_RIGHTS.md`、`NOTICE`；每项与对应外层资产哈希一致。
 
+### 7.3 `v1.2.1` 最终登记证据（2026-07-29）
+
+- 构建来源：annotated tag `v1.2.1` 精确指向 `421b54a349062ab540b27bfe6f9a97ba7df5b6f2`，该提交等于当时的 `origin/main`；.NET SDK 为 `9.0.301`，EXE `ProductVersion=1.2.1+421b54a349062ab540b27bfe6f9a97ba7df5b6f2`。
+- CI：[main 最终门禁 run 30418888675](https://github.com/haohaizi554/CompanionDesktopPet/actions/runs/30418888675) 成功；[v1.2.1 标签 run 30419229928](https://github.com/haohaizi554/CompanionDesktopPet/actions/runs/30419229928) 的 quality gates、package 与 GitHub Release 三个 job 全部成功。标签门禁实际通过 Python `372/372` 与 .NET Release `637/637`，均为 0 失败、0 跳过；validator 为 `0 hard errors / 1 warning`，唯一 warning 为 `surface_inventory_observation`。
+- 正式 EXE：`80,454,500` 字节，SHA-256 为 `7d5343c01e1ed89ef15e3d9595f6c9fb1ec24f8275db15628a5b541ad5c1ff03`；云端 publish/delivery/isolated、直接 Release 资产、ZIP 内 EXE、仓库交付副本、任务交付副本与最终 isolated 副本逐字节一致。
+- Authenticode：`NotSigned`，SignerCertificate 与 TimeStamperCertificate 均为空；Release 中文正文明确提示 SmartScreen/安全软件可能显示信誉提示。
+- smoke：标签流水线 `SmokePID=8556`，通过 `http://127.0.0.1:7890` 回下载后的最终本地复核 `SmokePID=46072`；两次均 `ExitCode=0` 并自行退出。
+- GitHub Release：[v1.2.1](https://github.com/haohaizi554/CompanionDesktopPet/releases/tag/v1.2.1) 为非草稿、非预发布版本；标题精确为版本号 `v1.2.1`，正文使用中文逐项登记 12 项实际代码/测试变更、保持不变的契约边界、真实门禁结果、下载方式和构建来源，只有许可证要求逐字保留的 `Required Notice` 使用英文。
+- 外层资产精确为 8 项；`SHA256SUMS.txt` 精确覆盖其余 7 项。代理回下载后的字节数与 SHA-256：
+
+| Release 资产 | 字节数 | SHA-256 |
+| --- | ---: | --- |
+| `ASSET_AND_PERSONA_RIGHTS.md` | 2,718 | `bc06b35871e87f0951a8866722a1217db544455b9ef196557dc1e10fc2ff1bf9` |
+| `Jiayi-Desktop-Pet.exe` | 80,454,500 | `7d5343c01e1ed89ef15e3d9595f6c9fb1ec24f8275db15628a5b541ad5c1ff03` |
+| `Jiayi-Desktop-Pet-README-zh-CN.txt` | 3,141 | `8e2e6c212a0d83229d5444c7affc06a1259b479955b4d29d9f9736af6c78540f` |
+| `Jiayi-Desktop-Pet-win-x64.zip` | 80,468,760 | `5b13fb624fdf9bd12ef3eeca7be8316ffd8a480baac03a7e844b7f545a386ab5` |
+| `LICENSE` | 4,563 | `c0ea4a896d2c8c394b29f9427589996db826cd501c512279ff0ed3ef48fabbe5` |
+| `LICENSE-SCOPE.md` | 2,949 | `37f7e39235dd7e37724ed4872d52e035f1958f38dc959e1eaeaf33f91f829fc6` |
+| `NOTICE` | 235 | `fd7ed21b4c71bbfd505f632e092b9b68d9e7e2c4d1e457f28b50d827b8f08b8b` |
+| `SHA256SUMS.txt` | 616 | `7f3c2782286a72cb7cbfabd21a2386065590ba4b61367e7f6aad4720220fcec4` |
+
+- ZIP 无子目录，精确平铺 `佳怡桌宠.exe`、`使用说明.txt`、`LICENSE`、`LICENSE-SCOPE.md`、`ASSET_AND_PERSONA_RIGHTS.md`、`NOTICE`；包内 EXE 与外层 Release EXE 的 SHA-256 均为 `7d5343c01e1ed89ef15e3d9595f6c9fb1ec24f8275db15628a5b541ad5c1ff03`。
+- v1.2.0 初始标签 run 30418294065 在 Python 3.11 因 `sum(tone_ratio)==1.0` 的精确浮点比较失败；生产结果为 `0.9999999999999999`，业务值正确。v1.2.1 将该测试改为近似比较，并先在 main run 30418888675 完整通过后再创建新标签；未移动或复用失败的 v1.2.0 标签。
+
 版本化文件不能可靠记录“包含自身的最终提交 SHA”，因为写入该 SHA 会再次改变提交。本节只记录实际产生 EXE 的 built-from source commit；artifact/docs commit 与最终 `main` SHA 以 Git 远端结果为准。
 
 ## 8. 发布后清理
@@ -299,7 +324,7 @@ git status --short
 ## 9. 已关闭审计项与发布结论
 
 - 已关闭：surface manifest 为 51,326 行，expanded v2 为 52,132 行，唯一 `semantic_group` 精确为 533；五份隔离重建产物与 canonical SHA-256 全部一致。
-- 已关闭：simulation 已用当前 scheduler semantic binding 重放，1,500/1,500 attempts 有输出；Easter egg 9.87%、seasoning 4.93%、dry-sharp 4.00%，natural/adversarial/combined hard violations 全为零，dawn 与四季、nullable signals 均覆盖。
+- 已关闭：simulation 已用当前 scheduler semantic binding 重放，1,500/1,500 attempts 有输出；Easter egg 9.93%、seasoning 4.87%、dry-sharp 4.00%，natural/adversarial/combined hard violations 全为零，dawn 与四季、nullable signals 均覆盖。
 - 已关闭：scene-first fallback、identity exact set、surface/runtime 一一绑定、旧 seasoning/dry 历史迁移均有自动化测试；900-click retained-memory 门槛已收紧为 256 MiB，不通过缩减 runtime 规避。
 - 已关闭（v1.0.0 历史基线）：标签流水线的 Python 311/311 与 .NET Release 392/392 均为实际非零执行结果，不是仅凭进程退出码推断；CI 依赖闭包固定版本、wheel SHA-256 与完整传递依赖。
-- 已关闭（v1.1.0 当前 Release）：`outputs/CompanionDesktopPet/佳怡桌宠.exe` 已替换为从不可变 Release 代理回下载并复核的正式 EXE；built-from、SDK、ProductVersion、字节数、SHA-256、签名状态、两个 smoke、ZIP 清单、8 项资产与中文 Release 均已在第 7.2 节登记。v1.0.0 证据作为独立历史基线保留。
+- 已关闭（v1.2.1 当前 Release）：`outputs/CompanionDesktopPet/佳怡桌宠.exe` 已替换为从不可变 Release 代理回下载并复核的正式 EXE；built-from、SDK、ProductVersion、字节数、SHA-256、签名状态、两个 smoke、ZIP 清单、8 项资产与具体中文 Release 均已在第 7.3 节登记。v1.0.0/v1.1.0 证据作为独立历史基线保留。
