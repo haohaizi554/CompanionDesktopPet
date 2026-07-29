@@ -835,7 +835,7 @@ jobs:
             throw "GITHUB_SHA is not a full Git commit SHA: $env:GITHUB_SHA"
           }
 
-          $releaseTitle = "佳怡桌宠 $tag（Windows x64）"
+          $releaseTitle = $tag
           $descriptionMarker = '<!-- companion-release-description:zh-CN:v2 -->'
           $noUpdateClaim = '应用不包含热更新、自动更新或联网下载代码的机制'
           $unsignedClaim = '构建门禁已执行 Get-AuthenticodeSignature，并确认当前 EXE 状态为 NotSigned、无签名证书和时间戳证书'
@@ -1007,7 +1007,7 @@ jobs:
           }
           $publishedTitle = $publishedTitleOutput -join "`n"
           if ($publishedTitle -cne $releaseTitle) {
-            throw "Published GitHub Release title is not the required zh-CN title: $publishedTitle"
+            throw "Published GitHub Release title is not the exact version tag: $publishedTitle"
           }
 
           $publishedBodyOutput = @(& gh release view $tag --repo $repository --json body --jq '.body' 2>&1)

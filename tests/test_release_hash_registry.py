@@ -25,6 +25,14 @@ def file_sha256(relative_path: str) -> str:
 
 
 class ReleaseHashRegistryTests(unittest.TestCase):
+    def test_release_workflow_uses_only_the_version_tag_as_its_title(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "ci-cd.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("$releaseTitle = $tag", workflow)
+        self.assertNotIn('$releaseTitle = "佳怡桌宠 $tag（Windows x64）"', workflow)
+
     def registry(self) -> dict[str, str]:
         document = REGISTRY_PATH.read_text(encoding="utf-8")
         section = document.split("## 7. 发布哈希登记", 1)[1].split("### 7.1", 1)[0]
