@@ -9,12 +9,49 @@ from pathlib import Path
 from src.persona_corpus.content_catalog import CONTENT_CATALOG
 from src.persona_corpus.editorial import (
     EDITORIAL_MANIFEST,
+    LEGACY_IDENTITY_MANIFEST,
     EditorialManifestError,
+    LegacyIdentityManifestError,
     load_editorial_manifest,
+    load_legacy_identity_manifest,
 )
 
 
 class EditorialManifestTests(unittest.TestCase):
+    def test_legacy_identity_manifest_versions_the_exact_v121_set(self) -> None:
+        manifest = LEGACY_IDENTITY_MANIFEST
+
+        self.assertEqual("legacy-identity-v1.2.1", manifest.policy_version)
+        self.assertEqual(27, len(manifest.identity_easter_eggs))
+        self.assertEqual(
+            {
+                item.line_id
+                for item in EDITORIAL_MANIFEST.identity_easter_eggs.values()
+                if item.source_reference.startswith("legacy:")
+            },
+            set(manifest.identity_easter_eggs),
+        )
+        for item in manifest.identity_easter_eggs.values():
+            self.assertTrue(item.source_reference.startswith("legacy:"))
+            self.assertRegex(item.text_sha256, r"^[0-9a-f]{64}$")
+
+    def test_legacy_identity_manifest_rejects_an_incomplete_exact_set(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        payload = json.loads(
+            (root / "config/persona-legacy-identity-manifest-v1.2.1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        payload["line_ids"].pop()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "legacy-identity.json"
+            path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            with self.assertRaisesRegex(
+                LegacyIdentityManifestError,
+                "exact legacy identity set",
+            ):
+                load_legacy_identity_manifest(path)
+
     def test_catalog_decisions_are_bidirectionally_consistent(self) -> None:
         catalog_ids = {entry.variant_id for entry in CONTENT_CATALOG}
         adjudicated = set(EDITORIAL_MANIFEST.adjudicated_variants)

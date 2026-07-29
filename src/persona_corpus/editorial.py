@@ -16,6 +16,11 @@ from .models import CorpusLine
 DEFAULT_EDITORIAL_MANIFEST_PATH = (
     Path(__file__).resolve().parents[2] / "config" / "persona-editorial-manifest.json"
 )
+DEFAULT_LEGACY_IDENTITY_MANIFEST_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "config"
+    / "persona-legacy-identity-manifest-v1.2.1.json"
+)
 _TOP_LEVEL_KEYS = frozenset(
     {
         "$schema",
@@ -66,6 +71,10 @@ class EditorialManifestError(ValueError):
     """The machine-readable editorial adjudication manifest is invalid."""
 
 
+class LegacyIdentityManifestError(ValueError):
+    """The versioned legacy identity evidence set is invalid."""
+
+
 def _json_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
@@ -114,6 +123,13 @@ class EditorialManifest:
     retired_variants: tuple[str, ...]
     allowed_identity_markers: tuple[str, ...]
     forbidden_identity_markers: tuple[str, ...]
+    identity_easter_eggs: Mapping[str, IdentityEasterEggAdjudication]
+
+
+@dataclass(frozen=True, slots=True)
+class LegacyIdentityManifest:
+    schema_version: int
+    policy_version: str
     identity_easter_eggs: Mapping[str, IdentityEasterEggAdjudication]
 
 
@@ -275,6 +291,68 @@ def load_editorial_manifest(
 
 
 EDITORIAL_MANIFEST = load_editorial_manifest()
+
+
+def load_legacy_identity_manifest(
+    path: Path = DEFAULT_LEGACY_IDENTITY_MANIFEST_PATH,
+    *,
+    editorial_manifest: EditorialManifest = EDITORIAL_MANIFEST,
+) -> LegacyIdentityManifest:
+    """Bind the v1.2.1 identity namespace to the exact adjudicated legacy rows."""
+
+    path = Path(path)
+    try:
+        raw = json.loads(
+            path.read_text(encoding="utf-8"),
+            object_pairs_hook=_json_pairs,
+            parse_constant=_reject_constant,
+        )
+    except EditorialManifestError as error:
+        raise LegacyIdentityManifestError(str(error)) from error
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise LegacyIdentityManifestError(
+            f"{path}: invalid legacy identity manifest: {error}"
+        ) from error
+    expected_keys = {"$schema", "schema_version", "policy_version", "line_ids"}
+    if not isinstance(raw, dict) or set(raw) != expected_keys:
+        raise LegacyIdentityManifestError(
+            "legacy identity manifest has an unexpected key set"
+        )
+    if raw.get("$schema") != "./schemas/persona-legacy-identity-manifest.schema.json":
+        raise LegacyIdentityManifestError("legacy identity manifest schema path is invalid")
+    if raw.get("schema_version") != 1:
+        raise LegacyIdentityManifestError("legacy identity schema_version must be 1")
+    if raw.get("policy_version") != "legacy-identity-v1.2.1":
+        raise LegacyIdentityManifestError(
+            "legacy identity policy_version must be legacy-identity-v1.2.1"
+        )
+    line_ids = raw.get("line_ids")
+    if (
+        not isinstance(line_ids, list)
+        or any(not isinstance(line_id, str) or not line_id for line_id in line_ids)
+        or len(line_ids) != len(set(line_ids))
+    ):
+        raise LegacyIdentityManifestError(
+            "line_ids must be a unique non-empty string array"
+        )
+    exact_legacy = {
+        line_id: item
+        for line_id, item in editorial_manifest.identity_easter_eggs.items()
+        if item.source_reference.startswith("legacy:")
+    }
+    if set(line_ids) != set(exact_legacy):
+        raise LegacyIdentityManifestError(
+            "line_ids must equal the exact legacy identity set"
+        )
+    ordered = {line_id: exact_legacy[line_id] for line_id in line_ids}
+    return LegacyIdentityManifest(
+        schema_version=1,
+        policy_version="legacy-identity-v1.2.1",
+        identity_easter_eggs=MappingProxyType(ordered),
+    )
+
+
+LEGACY_IDENTITY_MANIFEST = load_legacy_identity_manifest()
 
 
 def is_exact_identity_easter_egg(row: CorpusLine) -> bool:

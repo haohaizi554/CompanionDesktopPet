@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://companiondesktop.pet/schemas/persona-legacy-identity-manifest.schema.json",
+  "title": "Companion Desktop Pet legacy identity manifest",
+  "type": "object",
+  "required": ["$schema", "schema_version", "policy_version", "line_ids"],
+  "properties": {
+    "$schema": { "const": "./schemas/persona-legacy-identity-manifest.schema.json" },
+    "schema_version": { "const": 1 },
+    "policy_version": { "const": "legacy-identity-v1.2.1" },
+    "line_ids": {
+      "type": "array",
+      "minItems": 27,
+      "maxItems": 27,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^v2_surface_[A-Za-z0-9_]+_[0-9a-f]{12}$"
+      }
+    }
+  },
+  "additionalProperties": false
+}
