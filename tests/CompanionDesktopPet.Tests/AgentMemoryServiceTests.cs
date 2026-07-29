@@ -128,7 +128,18 @@ public sealed class AgentMemoryServiceTests : IDisposable
             root => root["State"]!["Mood"] = 0,
             root => root["State"]!["Activity"] = "Dancing",
             root => root["LastCategory"] = 0,
-            root => root["History"]![0]!["OutputMode"] = 99);
+            root => root["History"]![0]!["OutputMode"] = 99,
+            root => root["History"]![0]!["SourceTier"] = "Imported");
+    }
+
+    [Fact]
+    public async Task Load_PreV140HistoryWithoutSourceTierDefaultsToAuthored()
+    {
+        var loaded = await LoadMutatedSnapshotAsync(
+            root => root["History"]![0]!.AsObject().Remove("SourceTier"));
+
+        Assert.NotNull(loaded);
+        Assert.Equal(PersonaSourceTier.Authored, Assert.Single(loaded!.History).SourceTier);
     }
 
     [Fact]

@@ -228,6 +228,7 @@ public sealed class AgentMemoryService
         && Enum.IsDefined(entry.CategoryGroup)
         && Enum.IsDefined(entry.OutputMode)
         && Enum.IsDefined(entry.DialogueTrigger)
+        && Enum.IsDefined(entry.SourceTier)
         && PersonaContractGenerated.ControlledRelationshipProfiles.Contains(entry.RelationshipProfile)
         && entry.InterruptionCost is >= 0 and <= 5;
 

@@ -74,6 +74,12 @@ public enum DialogueTrigger
     StoryTimer
 }
 
+public enum PersonaSourceTier
+{
+    Authored,
+    Legacy
+}
+
 public sealed record DialogueLine(
     string Id,
     DialogueCategory Category,
@@ -126,6 +132,10 @@ public sealed record DialogueLine(
     public TimeSpan Cooldown => TimeSpan.FromHours(CooldownHours);
 
     public TimeSpan SemanticCooldown => TimeSpan.FromHours(SemanticCooldownHours);
+
+    public PersonaSourceTier SourceTier => SourceKind == "curated_authored"
+        ? PersonaSourceTier.Authored
+        : PersonaSourceTier.Legacy;
 }
 
 public static class PersonaCorpus
@@ -204,6 +214,15 @@ public static class PersonaCorpus
         {
             throw new InvalidDataException(
                 $"Enabled v2 persona corpus must contain exactly {ExpectedAuthoredRuntimeRows} authored rows, found {authoredRows}.");
+        }
+
+        var legacyCuratedRows = all.Count(line =>
+            line.SourceTier == PersonaSourceTier.Legacy
+            && line.SourceKind != "legacy_surface_variant");
+        if (legacyCuratedRows != PersonaContractGenerated.ExpectedLegacyCuratedRows)
+        {
+            throw new InvalidDataException(
+                $"Enabled v2 persona corpus must contain exactly {PersonaContractGenerated.ExpectedLegacyCuratedRows} legacy curated rows, found {legacyCuratedRows}.");
         }
 
 

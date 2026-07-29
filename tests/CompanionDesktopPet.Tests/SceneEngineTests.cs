@@ -39,7 +39,41 @@ public sealed class SceneEngineTests
             Assert.Equal(scene.Lines[0].Cooldown, scene.Cooldown);
             Assert.Equal(scene.Lines[0].SemanticCooldown, scene.SemanticCooldown);
             Assert.Equal(scene.Lines[0].InterruptionCost, scene.InterruptionCost);
+            Assert.Equal(scene.Lines[0].SourceTier, scene.SourceTier);
         });
+    }
+
+    [Fact]
+    public void History_RecordsSourceTierAndOldEntriesDefaultToAuthored()
+    {
+        var legacy = SceneCatalog.PersonaScenes.First(scene => scene.SourceTier == PersonaSourceTier.Legacy);
+        var history = new SceneHistory();
+
+        history.Record(legacy, new DateTime(2026, 7, 29, 12, 0, 0), legacy.Lines[0]);
+
+        Assert.Equal(PersonaSourceTier.Legacy, Assert.Single(history.Entries).SourceTier);
+        var oldEntry = new SceneHistoryEntry("old", "old.group", DateTime.Now, "old");
+        Assert.Equal(PersonaSourceTier.Authored, oldEntry.SourceTier);
+    }
+
+    [Fact]
+    public void Scheduler_SourceTierPolicyForcesLegacyBelowFloorAndAuthoredAboveCeiling()
+    {
+        var authored = SceneCatalog.PersonaScenes.First(scene => scene.SourceTier == PersonaSourceTier.Authored);
+        var legacy = SceneCatalog.PersonaScenes.First(scene => scene.SourceTier == PersonaSourceTier.Legacy);
+        var belowFloor = Enumerable.Range(0, 20)
+            .Select(index => new SceneHistoryEntry(
+                $"a-{index}", $"a.{index}", DateTime.Today.AddMinutes(index), "a",
+                SourceTier: PersonaSourceTier.Authored))
+            .ToArray();
+        var aboveCeiling = Enumerable.Range(0, 20)
+            .Select(index => new SceneHistoryEntry(
+                $"l-{index}", $"l.{index}", DateTime.Today.AddMinutes(index), "l",
+                SourceTier: index < 8 ? PersonaSourceTier.Legacy : PersonaSourceTier.Authored))
+            .ToArray();
+
+        Assert.Equal([legacy], SceneScheduler.ApplySourceTierPolicy([authored, legacy], belowFloor));
+        Assert.Equal([authored], SceneScheduler.ApplySourceTierPolicy([authored, legacy], aboveCeiling));
     }
 
     [Fact]

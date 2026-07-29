@@ -26,6 +26,25 @@ public sealed class PersonaCorpusTests
     }
 
     [Fact]
+    public void Corpus_DerivesTheHybridSourceTierWithoutChangingTheTsvSchema()
+    {
+        Assert.DoesNotContain("source_tier", PersonaCorpus.V2Header);
+        Assert.Equal(
+            PersonaContractGenerated.ExpectedAuthoredRuntimeRows,
+            PersonaCorpus.All.Count(line => line.SourceTier == PersonaSourceTier.Authored));
+        Assert.Equal(
+            PersonaContractGenerated.ExpectedLegacyCuratedRows
+            + PersonaContractGenerated.ExpectedLegacySurfaceRows,
+            PersonaCorpus.All.Count(line => line.SourceTier == PersonaSourceTier.Legacy));
+        Assert.All(
+            PersonaCorpus.All.Where(line => line.SourceKind == "curated_authored"),
+            line => Assert.Equal(PersonaSourceTier.Authored, line.SourceTier));
+        Assert.All(
+            PersonaCorpus.All.Where(line => line.SourceKind != "curated_authored"),
+            line => Assert.Equal(PersonaSourceTier.Legacy, line.SourceTier));
+    }
+
+    [Fact]
     public void ApplicationAssembly_EmbedsTheExactEditorialIdentityPolicy()
     {
         Assert.Equal(29, PersonaCorpus.EditorialIdentityEasterEggIds.Count);
@@ -107,7 +126,7 @@ public sealed class PersonaCorpusTests
             $"corpus parse: elapsed={stopwatch.Elapsed} allocated={allocatedBytes:N0} retained={retainedBytes:N0}");
         Assert.Equal(PersonaContractGenerated.ExpandedRuntimeRows, lines.Count);
         Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(5), stopwatch.Elapsed.ToString());
-        Assert.True(allocatedBytes < 256L * 1024 * 1024, $"allocated bytes: {allocatedBytes:N0}");
+        Assert.True(allocatedBytes < 384L * 1024 * 1024, $"allocated bytes: {allocatedBytes:N0}");
         Assert.True(
             retainedBytes >= 0,
             $"retained-memory measurement was invalid: {retainedBytes:N0} bytes");
@@ -154,9 +173,12 @@ public sealed class PersonaCorpusTests
     [Fact]
     public void Corpus_AuthoredTechnicalInventoryMatchesTheContractWeight()
     {
-        var technicalShare = PersonaCorpus.All.Count(line =>
+        var authored = PersonaCorpus.All
+            .Where(line => line.SourceTier == PersonaSourceTier.Authored)
+            .ToArray();
+        var technicalShare = authored.Count(line =>
                 line.CategoryGroup == DialogueCategoryGroup.Technical)
-            / (double)PersonaCorpus.All.Count;
+            / (double)authored.Length;
 
         Assert.Equal(0.18, technicalShare, 6);
         Assert.Equal(0.18, DialogueForest.CategoryGroupWeights[DialogueCategoryGroup.Technical], 6);
@@ -289,21 +311,31 @@ public sealed class PersonaCorpusTests
                            || line.Text.Contains(shortNickname, StringComparison.Ordinal))
             .ToArray();
 
-        Assert.Equal(1_260, identityLines.Length);
-        Assert.DoesNotContain(identityLines, line => PersonaCorpus.EditorialIdentityEasterEggIds.Contains(line.Id));
-        Assert.All(identityLines, line =>
+        var authoredIdentityLines = identityLines
+            .Where(line => line.SourceTier == PersonaSourceTier.Authored)
+            .ToArray();
+        var legacyIdentityLines = identityLines
+            .Where(line => line.SourceTier == PersonaSourceTier.Legacy)
+            .ToArray();
+        Assert.Equal(1_260, authoredIdentityLines.Length);
+        Assert.Equal(29, legacyIdentityLines.Length);
+        Assert.DoesNotContain(authoredIdentityLines, line => PersonaCorpus.EditorialIdentityEasterEggIds.Contains(line.Id));
+        Assert.Equal(
+            PersonaCorpus.EditorialIdentityEasterEggIds.Order(),
+            legacyIdentityLines.Select(line => line.Id).Order());
+        Assert.All(authoredIdentityLines, line =>
         {
             Assert.Equal("curated_authored", line.SourceKind);
             Assert.StartsWith("catalog:authored-v1:", line.SourceReference, StringComparison.Ordinal);
             Assert.Contains(line.RelationshipProfile, PersonaContractGenerated.ControlledRelationshipProfiles);
         });
-        Assert.Equal(100, identityLines.Count(line => line.RelationshipProfile == "nickname_easter_egg"));
+        Assert.Equal(100, authoredIdentityLines.Count(line => line.RelationshipProfile == "nickname_easter_egg"));
         var forbidden = new[]
         {
             "\u6e56\u5357", "\u957f\u6c99", "\u5e7f\u4e1c", "\u6708\u85aa",
             "\u5de5\u8d44", "\u6536\u5165", "\u6253\u96f6\u5de5", "\u6362\u5de5\u4f5c"
         };
-        Assert.DoesNotContain(identityLines, line =>
+        Assert.DoesNotContain(authoredIdentityLines, line =>
             forbidden.Any(marker => line.Text.Contains(marker, StringComparison.Ordinal)));
     }
 

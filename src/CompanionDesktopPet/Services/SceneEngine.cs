@@ -36,7 +36,8 @@ public sealed record SceneDefinition(
     double BoredomDelta = -0.03,
     string? StoryArcId = null,
     int StoryNode = -1,
-    string RelationshipProfile = "neutral");
+    string RelationshipProfile = "neutral",
+    PersonaSourceTier SourceTier = PersonaSourceTier.Authored);
 
 public sealed record SceneContext(
     CompanionEvent Trigger,
@@ -65,7 +66,8 @@ public sealed record SceneHistoryEntry(
     string SurfaceOpening = "",
     string SurfaceEnding = "",
     string SurfaceTemplate = "",
-    string RelationshipProfile = "neutral");
+    string RelationshipProfile = "neutral",
+    PersonaSourceTier SourceTier = PersonaSourceTier.Authored);
 
 public sealed class SceneHistory
 {
@@ -123,7 +125,8 @@ public sealed class SceneHistory
             surface.Opening,
             surface.Ending,
             surface.Template,
-            line.RelationshipProfile);
+            line.RelationshipProfile,
+            line.SourceTier);
         lock (_sync)
         {
             _entries.Add(entry);
@@ -667,7 +670,7 @@ public sealed partial class SceneScheduler
         }
 
         var recent = RecentHistoryProfile.Create(history);
-        var candidates = AvailableScenes(context)
+        var eligibleScenes = AvailableScenes(context)
             .Where(scene => CanSelect(
                 scene,
                 context,
@@ -675,7 +678,10 @@ public sealed partial class SceneScheduler
                 history,
                 ignoreTrigger: false,
                 bypassInterruptionBudget))
-            .Select(scene => Score(scene, recent))
+            .ToArray();
+        var historyEntries = history.Entries;
+        var candidates = ApplySourceTierPolicy(eligibleScenes, historyEntries)
+            .Select(scene => Score(scene, recent, SourceTierScoreBonus(historyEntries, scene.SourceTier)))
             .ToArray();
         return ChooseBestWithEligibleLine(candidates, context.Now, history, random, lineEligibility);
     }
@@ -697,11 +703,14 @@ public sealed partial class SceneScheduler
 
         var contextTokens = ContextTokens(context);
         var recent = RecentHistoryProfile.Create(history);
-        var quotaRelaxed = AvailableScenes(context)
+        var quotaRelaxedScenes = AvailableScenes(context)
             .Where(scene => TriggerAndContextMatch(scene, context, contextTokens, history))
             .Where(scene => !history.IsSemanticGroupCoolingDown(scene, context.Now))
             .Where(history.MeetsRareRecentQuotas)
-            .Select(scene => Score(scene, recent))
+            .ToArray();
+        var historyEntries = history.Entries;
+        var quotaRelaxed = ApplySourceTierPolicy(quotaRelaxedScenes, historyEntries)
+            .Select(scene => Score(scene, recent, SourceTierScoreBonus(historyEntries, scene.SourceTier)))
             .ToArray();
         if (ChooseBestWithEligibleLine(quotaRelaxed, context.Now, history, random, lineEligibility) is { } quotaRelaxedScene)
         {
@@ -781,13 +790,14 @@ public sealed partial class SceneScheduler
         ArgumentNullException.ThrowIfNull(history);
         ArgumentNullException.ThrowIfNull(random);
 
-        var quotaEligibleScenes = scenes.Where(history.MeetsRareRecentQuotas).ToArray();
+        var playback = history.Entries;
+        var quotaEligibleScenes = ApplySourceTierPolicy(
+            scenes.Where(history.MeetsRareRecentQuotas).ToArray(), playback);
         if (quotaEligibleScenes.Length == 0)
         {
             return null;
         }
 
-        var playback = history.Entries;
         var lastLineId = playback.LastOrDefault()?.DialogueLineId;
         var recent = RecentHistoryProfile.Create(history);
         var hasNonRepeatingLine = quotaEligibleScenes.Any(scene =>
@@ -809,7 +819,7 @@ public sealed partial class SceneScheduler
                 && history.MeetsLineExposureQuota(line)
                 && (!hasNonRepeatingLine || line.Id != lastLineId)
                 && !lastPlayedAt.ContainsKey(line.Id)))
-            .Select(scene => Score(scene, recent))
+            .Select(scene => Score(scene, recent, SourceTierScoreBonus(playback, scene.SourceTier)))
             .ToArray();
         if (ChooseBest(scenesWithUnusedLines, random) is { } unusedScene)
         {
@@ -832,7 +842,7 @@ public sealed partial class SceneScheduler
                 && line.Enabled
                 && history.MeetsLineExposureQuota(line)
                 && (!hasNonRepeatingLine || line.Id != lastLineId)))
-            .Select(scene => Score(scene, recent))
+            .Select(scene => Score(scene, recent, SourceTierScoreBonus(playback, scene.SourceTier)))
             .ToArray();
         var selectedScene = ChooseBest(reusableScenes, random);
         if (selectedScene is null)
@@ -965,7 +975,62 @@ public sealed partial class SceneScheduler
         return tokens;
     }
 
-    private static ScoredScene Score(SceneDefinition scene, RecentHistoryProfile recent)
+    internal static SceneDefinition[] ApplySourceTierPolicy(
+        IReadOnlyList<SceneDefinition> scenes,
+        IReadOnlyList<SceneHistoryEntry> history)
+    {
+        if (scenes.Count == 0)
+        {
+            return [];
+        }
+
+        var authoredAvailable = scenes.Any(scene => scene.SourceTier == PersonaSourceTier.Authored);
+        var legacyAvailable = scenes.Any(scene => scene.SourceTier == PersonaSourceTier.Legacy);
+        var recent = history.TakeLast(PersonaContractGenerated.SourceTierRecentWindow).ToArray();
+        if (recent.Length < PersonaContractGenerated.SourceTierWarmupObservations)
+        {
+            return scenes.ToArray();
+        }
+
+        var legacyCount = recent.Count(entry => entry.SourceTier == PersonaSourceTier.Legacy);
+        var currentRatio = legacyCount / (double)recent.Length;
+        var preceding = recent.TakeLast(PersonaContractGenerated.SourceTierRecentWindow - 1).ToArray();
+        return scenes.Where(scene =>
+        {
+            if (scene.SourceTier == PersonaSourceTier.Authored
+                && currentRatio < PersonaContractGenerated.SourceTierLowerBound
+                && legacyAvailable)
+            {
+                return false;
+            }
+
+            var projectedLegacy = preceding.Count(entry => entry.SourceTier == PersonaSourceTier.Legacy)
+                                  + (scene.SourceTier == PersonaSourceTier.Legacy ? 1 : 0);
+            var projectedRatio = projectedLegacy / (double)(preceding.Length + 1);
+            return scene.SourceTier != PersonaSourceTier.Legacy
+                   || projectedRatio <= PersonaContractGenerated.SourceTierUpperBound
+                   || !authoredAvailable;
+        }).ToArray();
+    }
+
+    private static double SourceTierScoreBonus(
+        IReadOnlyList<SceneHistoryEntry> history,
+        PersonaSourceTier candidateTier)
+    {
+        var recent = history.TakeLast(PersonaContractGenerated.SourceTierRecentWindow).ToArray();
+        var preceding = recent.TakeLast(PersonaContractGenerated.SourceTierRecentWindow - 1).ToArray();
+        var projectedLegacy = preceding.Count(entry => entry.SourceTier == PersonaSourceTier.Legacy)
+                              + (candidateTier == PersonaSourceTier.Legacy ? 1 : 0);
+        var projectedTotal = preceding.Length + 1;
+        var deficit = PersonaContractGenerated.SourceTierTarget * projectedTotal - projectedLegacy;
+        var multiplier = recent.Length < PersonaContractGenerated.SourceTierWarmupObservations ? 2.0 : 0.5;
+        return candidateTier == PersonaSourceTier.Legacy ? deficit * multiplier : -deficit * multiplier;
+    }
+
+    private static ScoredScene Score(
+        SceneDefinition scene,
+        RecentHistoryProfile recent,
+        double sourceTierBonus = 0)
     {
         var total = recent.Total;
         var groupObserved = total == 0
@@ -986,7 +1051,8 @@ public sealed partial class SceneScheduler
                     + weightBonus
                     - scene.InterruptionCost * 0.75
                     - categoryObserved * 5
-                    + drySharpBonus;
+                    + drySharpBonus
+                    + sourceTierBonus;
         return new ScoredScene(scene, score, (int)Math.Floor(score - weightBonus));
     }
 
