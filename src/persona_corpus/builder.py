@@ -14,7 +14,7 @@ from .content_catalog import CONTENT_CATALOG, CatalogEntry
 from .contract import PERSONA_CONTRACT, category_group_for
 from .editorial import is_exact_identity_easter_egg
 from .extraction import SourceMapping
-from .models import CorpusLine, LegacyLine
+from .models import CorpusLine, LegacyLine, source_tier_for
 from .normalization import normalize_text
 from .privacy import (
     ENABLED_CONTENT_POLICY,
@@ -122,14 +122,6 @@ class BuildResult:
     authorship_ledger: tuple[AuthorshipLedgerRow, ...]
     dispositions: Mapping[int, tuple[str, ...]]
     partition_manifest: Mapping[str, object]
-
-
-def source_tier_for(source_kind: str) -> str:
-    """Derive the runtime source tier without adding a TSV column."""
-
-    if source_kind not in PERSONA_CONTRACT.source_kinds:
-        raise ValueError(f"unknown source kind {source_kind!r}")
-    return "authored" if source_kind == "curated_authored" else "legacy"
 
 
 def _stable_digest(*parts: object, length: int = 12) -> str:

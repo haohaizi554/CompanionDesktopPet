@@ -325,7 +325,7 @@ def clean_simulation() -> tuple[list[CorpusLine], dict[str, object], dict[str, o
 
 
 class ValidationContractTests(unittest.TestCase):
-    def test_enabled_legacy_surface_is_a_hard_validation_error(self) -> None:
+    def test_enabled_legacy_surface_is_allowed_by_hybrid_runtime_contract(self) -> None:
         row = valid_line(
             source_kind="legacy_surface_variant",
             source_reference="legacy:1;topic:fixture.window;variant:surface_1_0123456789ab",
@@ -333,7 +333,7 @@ class ValidationContractTests(unittest.TestCase):
 
         report = validate_corpus([row], valid_config(), {"exceptions": []})
 
-        self.assertIn("enabled_legacy_surface", issue_codes(report))
+        self.assertNotIn("enabled_legacy_surface", issue_codes(report))
 
     def test_category_group_contract_applies_to_enabled_and_disabled_rows(self) -> None:
         rows = [

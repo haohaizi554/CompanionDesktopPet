@@ -1,6 +1,6 @@
 {
   "$schema": "./schemas/persona-review-allowlist.schema.json",
   "schema_version": 1,
-  "corpus_sha256": "1d887627e6b4a8f303a0151cea8b99726d176b9953a396782e88cde69de5633c",
+  "corpus_sha256": "339358c524785db30badf420a3bdc2b89c7753486e907ff1a5216f68ca5d7ece",
   "exceptions": []
 }

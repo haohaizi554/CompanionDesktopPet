@@ -7,13 +7,13 @@ from datetime import datetime, timedelta
 from typing import Iterable, Mapping, Sequence
 
 from ..context import ContextError, PersonaContext
-from ..contract import TONES
+from ..contract import PERSONA_CONTRACT, TONES
 from ..lexical import (
     SEASONING_MARKERS,
     contains_seasoning_marker,
     match_seasoning_markers,
 )
-from ..models import CorpusLine
+from ..models import CorpusLine, source_tier_for
 from ..selector import SchedulerConfig
 from ..trigger_matching import trigger_matches as _trigger_matches
 from .constraints import AdversarialSuiteResult
@@ -47,6 +47,7 @@ CATEGORY_GROUPS = (
     "system_ambient",
 )
 OUTPUT_MODES = ("self_talk", "ambient", "user_direct", "system_observe")
+SOURCE_TIERS = ("authored", "legacy")
 TONE_VALUES = tuple(sorted(TONES))
 LENGTH_BUCKETS = ("<8", "8-16", "17-24", "25-36", ">36")
 PREFIX_WIDTHS = (2, 3, 4, 5, 6)
@@ -116,6 +117,9 @@ class SeedMetrics:
     tone_ratio: Mapping[str, float]
     dry_sharp_ratio: float
     seasoning_ratio: float
+    source_tier_counts: Mapping[str, int]
+    source_tier_ratio: Mapping[str, float]
+    legacy_ratio: float
     anomalies: tuple[str, ...]
 
 
@@ -149,6 +153,9 @@ class SimulationReport:
     mode_ratio: dict[str, float]
     tone_counts: dict[str, int]
     tone_ratio: dict[str, float]
+    source_tier_counts: dict[str, int]
+    source_tier_ratio: dict[str, float]
+    legacy_ratio: float
     technical_ratio: float
     easter_egg_ratio: float
     user_direct_ratio: float
@@ -355,6 +362,7 @@ def analyze_simulation(
     total_group_counts: Counter[str] = Counter()
     total_mode_counts: Counter[str] = Counter()
     total_tone_counts: Counter[str] = Counter()
+    total_source_tier_counts: Counter[str] = Counter()
     total_seasoning_count = 0
     selected_texts: list[str] = []
     id_cooldown_repeats = 0
@@ -378,6 +386,7 @@ def analyze_simulation(
         seed_group_counts: Counter[str] = Counter()
         seed_mode_counts: Counter[str] = Counter()
         seed_tone_counts: Counter[str] = Counter()
+        seed_source_tier_counts: Counter[str] = Counter()
         seed_seasoning_count = 0
         previous: SimulationAttempt | None = None
         last_id: dict[str, datetime] = {}
@@ -396,10 +405,13 @@ def analyze_simulation(
             seed_group_counts[row.category_group] += 1
             seed_mode_counts[row.output_mode] += 1
             seed_tone_counts[row.tone] += 1
+            source_tier = source_tier_for(row.source_kind)
+            seed_source_tier_counts[source_tier] += 1
             seed_seasoning_count += int(contains_seasoning_marker(row.text))
             total_group_counts[row.category_group] += 1
             total_mode_counts[row.output_mode] += 1
             total_tone_counts[row.tone] += 1
+            total_source_tier_counts[source_tier] += 1
             total_seasoning_count += int(contains_seasoning_marker(row.text))
             selected_texts.append(row.text)
 
@@ -474,6 +486,9 @@ def analyze_simulation(
         seed_group_ratio = _ratio(seed_group_counts, CATEGORY_GROUPS, seed_output_count)
         seed_mode_ratio = _ratio(seed_mode_counts, OUTPUT_MODES, seed_output_count)
         seed_tone_ratio = _ratio(seed_tone_counts, TONE_VALUES, seed_output_count)
+        seed_source_tier_ratio = _ratio(
+            seed_source_tier_counts, SOURCE_TIERS, seed_output_count
+        )
         if seed_output_count:
             if not (
                 distribution_policy.technical.minimum
@@ -514,6 +529,12 @@ def analyze_simulation(
                 anomalies[seed].add("dry_sharp_not_observed")
             if seed_seasoning_count == 0:
                 anomalies[seed].add("seasoning_not_observed")
+            per_seed_lower, per_seed_upper = (
+                float(value)
+                for value in PERSONA_CONTRACT.source_tier["per_seed_acceptance"]
+            )
+            if not per_seed_lower <= seed_source_tier_ratio["legacy"] <= per_seed_upper:
+                _add_hard(hard, anomalies, seed, "source_tier_ratio_out_of_bounds")
         else:
             seed_seasoning_ratio = 0.0
 
@@ -530,6 +551,11 @@ def analyze_simulation(
             tone_ratio=seed_tone_ratio,
             dry_sharp_ratio=seed_tone_ratio["dry_sharp"],
             seasoning_ratio=seed_seasoning_ratio,
+            source_tier_counts={
+                key: seed_source_tier_counts[key] for key in SOURCE_TIERS
+            },
+            source_tier_ratio=seed_source_tier_ratio,
+            legacy_ratio=seed_source_tier_ratio["legacy"],
             anomalies=(),
         )
 
@@ -540,6 +566,10 @@ def analyze_simulation(
     group_ratio = _ratio(group_counts, CATEGORY_GROUPS, output_count)
     mode_ratio = _ratio(mode_counts, OUTPUT_MODES, output_count)
     tone_ratio = _ratio(tone_counts, TONE_VALUES, output_count)
+    source_tier_counts = {
+        key: total_source_tier_counts[key] for key in SOURCE_TIERS
+    }
+    source_tier_ratio = _ratio(source_tier_counts, SOURCE_TIERS, output_count)
     seasoning_ratio = (
         total_seasoning_count / output_count if output_count else 0.0
     )
@@ -575,6 +605,11 @@ def analyze_simulation(
             <= lexical_exposure_policy.playback_acceptance[1]
         ):
             hard.add("seasoning_ratio_out_of_bounds")
+        source_lower, source_upper = (
+            float(value) for value in PERSONA_CONTRACT.source_tier["acceptance"]
+        )
+        if not source_lower <= source_tier_ratio["legacy"] <= source_upper:
+            hard.add("source_tier_ratio_out_of_bounds")
 
     lengths = [len(text) for text in selected_texts]
     length_counts = Counter(_length_bucket(length) for length in lengths)
@@ -605,6 +640,9 @@ def analyze_simulation(
             tone_ratio=metrics.tone_ratio,
             dry_sharp_ratio=metrics.dry_sharp_ratio,
             seasoning_ratio=metrics.seasoning_ratio,
+            source_tier_counts=metrics.source_tier_counts,
+            source_tier_ratio=metrics.source_tier_ratio,
+            legacy_ratio=metrics.legacy_ratio,
             anomalies=tuple(per_seed_anomalies[seed]),
         )
 
@@ -640,6 +678,9 @@ def analyze_simulation(
         mode_ratio=mode_ratio,
         tone_counts=tone_counts,
         tone_ratio=tone_ratio,
+        source_tier_counts=source_tier_counts,
+        source_tier_ratio=source_tier_ratio,
+        legacy_ratio=source_tier_ratio["legacy"],
         technical_ratio=group_ratio["technical"],
         easter_egg_ratio=group_ratio["easter_egg"],
         user_direct_ratio=mode_ratio["user_direct"],
@@ -774,6 +815,7 @@ def render_simulation_report(report: SimulationReport) -> str:
                 ),
                 ("dry_sharp forbidden metadata hits", report.dry_sharp_forbidden_hits),
                 ("seasoning playback ratio", _percent(report.seasoning_ratio)),
+                ("legacy source-tier playback ratio", _percent(report.legacy_ratio)),
                 (
                     "seasoning recent-window violations",
                     report.seasoning_recent_violations,
@@ -813,6 +855,20 @@ def render_simulation_report(report: SimulationReport) -> str:
     )
 
     policy = report.distribution_policy
+    lines.extend(["", "## Source-tier playback", ""])
+    lines.extend(
+        _markdown_table(
+            ("Source tier", "Selections", "Ratio"),
+            (
+                (
+                    tier,
+                    report.source_tier_counts[tier],
+                    _percent(report.source_tier_ratio[tier]),
+                )
+                for tier in SOURCE_TIERS
+            ),
+        )
+    )
     lines.extend(["", "## Scheduler-derived distribution contract", ""])
     lines.extend(
         _markdown_table(
@@ -1040,6 +1096,7 @@ def render_simulation_report(report: SimulationReport) -> str:
                 "EasterEgg",
                 "dry_sharp",
                 "seasoning",
+                "legacy source tier",
                 "Anomalies",
             ),
             (
@@ -1057,6 +1114,7 @@ def render_simulation_report(report: SimulationReport) -> str:
                     _percent(report.per_seed[seed].group_ratio["easter_egg"]),
                     _percent(report.per_seed[seed].dry_sharp_ratio),
                     _percent(report.per_seed[seed].seasoning_ratio),
+                    _percent(report.per_seed[seed].legacy_ratio),
                     ", ".join(report.per_seed_anomalies[seed]) or "none",
                 )
                 for seed in report.seeds

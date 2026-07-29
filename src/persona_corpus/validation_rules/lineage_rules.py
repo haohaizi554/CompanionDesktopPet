@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import csv
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,6 +10,7 @@ from typing import Mapping, Sequence
 
 from ..contract import PERSONA_CONTRACT, category_group_for
 from ..models import CorpusLine
+from ..schema import SURFACE_MANIFEST_HEADER
 from .common import IssueSink
 
 
@@ -117,7 +119,14 @@ def validate_lineage_structure(rows: Sequence[CorpusLine], issues: IssueSink) ->
 
 def build_repository_registry() -> LineageRegistry:
     from ..authored_catalog import load_authored_catalog
-    from ..builder import authored_line_id, load_source_mappings
+    from ..builder import (
+        SOURCE_KIND_ALIASES,
+        authored_line_id,
+        catalog_line_id,
+        load_source_mappings,
+    )
+    from ..content_catalog import CONTENT_CATALOG
+    from ..surface_variants import legacy_surface_line_id, legacy_surface_variant_token
 
     root = Path(__file__).resolve().parents[3]
     mappings = {
@@ -129,6 +138,37 @@ def build_repository_registry() -> LineageRegistry:
         root / "config/persona-authorship-manifest.json",
     )
     expected: dict[str, ExpectedLineage] = {}
+
+    for entry in CONTENT_CATALOG:
+        reference = f"{entry.source_reference};variant:{entry.variant_id}"
+        source_kind = (
+            "new_ambient"
+            if entry.category_group == "system_ambient"
+            else SOURCE_KIND_ALIASES.get(entry.source_kind, entry.source_kind)
+        )
+        catalog_error = ""
+        legacy = re.fullmatch(r"legacy:(\d+);topic:([^;]+)", entry.source_reference)
+        if legacy is not None:
+            source_line = int(legacy.group(1))
+            mapping = mappings.get(source_line)
+            if mapping is None:
+                catalog_error = f"legacy source line {source_line} does not exist"
+            elif mapping.category != entry.category or mapping.topic_id != entry.runtime_topic_id:
+                catalog_error = (
+                    f"legacy source line {source_line} resolves to "
+                    f"{mapping.category!r}/{mapping.topic_id!r}"
+                )
+        expected[entry.variant_id] = ExpectedLineage(
+            variant_id=entry.variant_id,
+            category=entry.category,
+            category_group=category_group_for(entry.category),
+            topic_id=entry.runtime_topic_id,
+            source_kind=source_kind,
+            source_reference=reference,
+            line_id=catalog_line_id(entry),
+            catalog_error=catalog_error,
+        )
+
     for entry in catalog.entries:
         reference = f"catalog:authored-v1:{entry.batch_id};variant:{entry.variant_id}"
         expected[entry.variant_id] = ExpectedLineage(
@@ -140,6 +180,62 @@ def build_repository_registry() -> LineageRegistry:
             source_reference=reference,
             line_id=authored_line_id(entry),
             text_sha256=hashlib.sha256(entry.text.encode("utf-8")).hexdigest(),
+        )
+
+    manifest_path = root / "data/optimized/persona-surface-manifest.tsv"
+    try:
+        with manifest_path.open("r", encoding="utf-8-sig", newline="") as stream:
+            reader = csv.reader(stream, delimiter="\t", strict=True)
+            header = tuple(next(reader))
+            if header != SURFACE_MANIFEST_HEADER:
+                raise ValueError("surface manifest header mismatch")
+            manifest_rows = [dict(zip(header, values, strict=True)) for values in reader]
+    except (OSError, UnicodeError, csv.Error, StopIteration, ValueError) as error:
+        raise ValueError(f"{manifest_path}: invalid tracked surface manifest: {error}") from error
+
+    seen_line_ids: set[str] = set()
+    for value in manifest_rows:
+        try:
+            source_line = int(value["source_line"])
+        except (KeyError, ValueError) as error:
+            raise ValueError("surface manifest contains an invalid source_line") from error
+        variant_id = value["variant_id"]
+        line_id = value["line_id"]
+        mapping = mappings.get(source_line)
+        if mapping is None:
+            raise ValueError(f"surface manifest references missing source line {source_line}")
+        source_digest = hashlib.sha256(mapping.original_text.encode("utf-8")).hexdigest()
+        expected_id = legacy_surface_line_id(source_line, mapping.topic_id, mapping.original_text)
+        expected_variant = legacy_surface_variant_token(
+            source_line, mapping.topic_id, mapping.original_text
+        )
+        expected_reference = (
+            f"legacy:{source_line};topic:{mapping.topic_id};variant:{expected_variant}"
+        )
+        if (
+            line_id in seen_line_ids
+            or variant_id in expected
+            or line_id != expected_id
+            or variant_id != expected_variant
+            or value["category"] != mapping.category
+            or value["category_group"] != category_group_for(mapping.category)
+            or value["topic_id"] != mapping.topic_id
+            or value["source_reference"] != expected_reference
+            or value["text_sha256"] != source_digest
+            or value["source_text_sha256"] != source_digest
+        ):
+            raise ValueError(f"surface manifest entry {line_id!r} is not source-exact")
+        seen_line_ids.add(line_id)
+        expected[variant_id] = ExpectedLineage(
+            variant_id=variant_id,
+            category=mapping.category,
+            category_group=category_group_for(mapping.category),
+            topic_id=mapping.topic_id,
+            source_kind="legacy_surface_variant",
+            source_reference=expected_reference,
+            line_id=line_id,
+            text_sha256=source_digest,
+            legacy_line=source_line,
         )
     sources = MappingProxyType(
         {

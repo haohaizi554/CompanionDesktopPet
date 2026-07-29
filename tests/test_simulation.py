@@ -78,6 +78,9 @@ METRIC_ATTRIBUTES = (
     "user_direct_ratio",
     "tone_counts",
     "tone_ratio",
+    "source_tier_counts",
+    "source_tier_ratio",
+    "legacy_ratio",
     "dry_sharp_policy",
     "lexical_exposure_policy",
     "dry_sharp_ratio",
@@ -202,6 +205,18 @@ class SimulationIntegrationTests(unittest.TestCase):
         self.assertEqual(0, report.adjacent_technical)
         self.assertEqual(0, report.adjacent_daily_care)
         self.assertEqual(0, report.adjacent_emotional_reflection)
+
+    def test_hybrid_source_tier_playback_meets_aggregate_and_per_seed_bounds(self) -> None:
+        report = self.report
+
+        self.assertEqual(report.output_count, sum(report.source_tier_counts.values()))
+        self.assertGreaterEqual(report.source_tier_ratio["legacy"], 0.25)
+        self.assertLessEqual(report.source_tier_ratio["legacy"], 0.35)
+        for seed, metrics in report.per_seed.items():
+            with self.subTest(seed=seed):
+                self.assertEqual(metrics.outputs, sum(metrics.source_tier_counts.values()))
+                self.assertGreaterEqual(metrics.legacy_ratio, 0.20)
+                self.assertLessEqual(metrics.legacy_ratio, 0.40)
 
     def test_report_exposes_every_approved_metric(self) -> None:
         for name in METRIC_ATTRIBUTES:
@@ -447,7 +462,7 @@ class SimulationIntegrationTests(unittest.TestCase):
             for seed, metrics in self.report.per_seed.items()
             if metrics.seasoning_ratio == 0
         }
-        self.assertEqual({5, 6}, seasoning_missing)
+        self.assertEqual(set(), seasoning_missing)
         for seed in seasoning_missing:
             self.assertIn(
                 "seasoning_ratio_below_minimum",
@@ -1395,7 +1410,9 @@ class SimulationUnitTests(unittest.TestCase):
                 self.assertNotIn(b"\r", payload)
                 self.assertNotIn(b"TODO: generated report placeholder", payload)
             rewrite = (output / "corpus-rewrite-summary.md").read_text(encoding="utf-8")
-            self.assertIn("Persona Corpus Authored Runtime Summary", rewrite)
+            self.assertIn("Persona Corpus Hybrid Runtime Summary", rewrite)
+            self.assertIn("| Legacy curated runtime rows | 806 |", rewrite)
+            self.assertIn("| Legacy runtime surfaces | 51326 |", rewrite)
             self.assertIn("catalog:authored-v1:", rewrite)
             self.assertNotIn("original-to-rewrite", rewrite)
 

@@ -2,6 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+def source_tier_for(source_kind: str) -> str:
+    """Derive the runtime source tier without adding a TSV column."""
+
+    if not isinstance(source_kind, str) or not source_kind:
+        raise ValueError("source kind must be a non-empty string")
+    return "authored" if source_kind == "curated_authored" else "legacy"
+
 
 @dataclass(frozen=True, slots=True)
 class LegacyLine:

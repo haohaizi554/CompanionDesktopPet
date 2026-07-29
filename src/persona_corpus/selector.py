@@ -4,7 +4,7 @@ import math
 import random
 import hashlib
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
@@ -14,7 +14,7 @@ from typing import Mapping, Sequence
 from .context import ContextError, PersonaContext, daypart_for
 from .history import HistoryFormatError, HistoryRecord, SelectionHistory
 from .identity_session import IdentitySessionExposure
-from .models import CorpusLine
+from .models import CorpusLine, source_tier_for
 from .surface_exposure import SURFACE_RECENT_WINDOW, surface_exposure
 from .trigger_matching import trigger_matches as _trigger_matches
 
@@ -201,6 +201,7 @@ _SCENE_SCHEDULING_FIELDS = (
 @dataclass(frozen=True, slots=True)
 class PreparedScene:
     semantic_group: str
+    source_tier: str
     variants: tuple[CorpusLine, ...]
     seasoning_variants: tuple[CorpusLine, ...]
     neutral_variants: tuple[CorpusLine, ...]
@@ -269,6 +270,14 @@ def prepare_corpus(corpus: Sequence[CorpusLine] | PreparedCorpus) -> PreparedCor
         if any(_scene_signature(row) != signature for row in ordered[1:]):
             rejected.append(semantic_group)
             continue
+        try:
+            tiers = {source_tier_for(row.source_kind) for row in ordered}
+        except ValueError:
+            rejected.append(semantic_group)
+            continue
+        if len(tiers) != 1:
+            rejected.append(semantic_group)
+            continue
         seasoning_rows: list[CorpusLine] = []
         neutral_rows: list[CorpusLine] = []
         for row in ordered:
@@ -280,6 +289,7 @@ def prepare_corpus(corpus: Sequence[CorpusLine] | PreparedCorpus) -> PreparedCor
         scenes.append(
             PreparedScene(
                 semantic_group=semantic_group,
+                source_tier=tiers.pop(),
                 variants=ordered,
                 seasoning_variants=tuple(seasoning_rows),
                 neutral_variants=tuple(neutral_rows),
@@ -403,6 +413,46 @@ def _candidate_window_count(
 ) -> int:
     preceding = records[-max(0, window - 1) :] if window > 1 else ()
     return sum(predicate(record) for record in preceding) + int(candidate_matches)
+
+
+def source_tier_decision(
+    records: Sequence[HistoryRecord],
+    candidate_tier: str,
+    authored_available: bool,
+    legacy_available: bool,
+) -> tuple[bool, float, str]:
+    """Apply the contract's safety-preserving recent-window source quota."""
+
+    if candidate_tier not in {"authored", "legacy"}:
+        raise ValueError("candidate_tier must be authored or legacy")
+    policy = _persona_contract().source_tier
+    window = int(policy["recent_window"])
+    warmup = int(policy["warmup_observations"])
+    target = float(policy["target"])
+    lower, upper = (float(value) for value in policy["acceptance"])
+    recent = tuple(records[-window:])
+    legacy_count = sum(record.source_tier == "legacy" for record in recent)
+    if len(recent) < warmup:
+        target_count = target * (len(recent) + 1)
+        projected = legacy_count + int(candidate_tier == "legacy")
+        deficit = target_count - projected
+        bonus = deficit * 2.0 if candidate_tier == "legacy" else -deficit * 2.0
+        return True, bonus, "source_tier_warmup"
+
+    current_ratio = legacy_count / len(recent)
+    projected_base = recent[-(window - 1) :] if window > 1 else ()
+    projected_legacy = sum(
+        record.source_tier == "legacy" for record in projected_base
+    ) + int(candidate_tier == "legacy")
+    projected_total = len(projected_base) + 1
+    projected_ratio = projected_legacy / projected_total
+    if candidate_tier == "authored" and current_ratio < lower and legacy_available:
+        return False, 0.0, "source_tier_lower_bound"
+    if candidate_tier == "legacy" and projected_ratio > upper and authored_available:
+        return False, 0.0, "source_tier_upper_bound"
+    deficit = target * projected_total - projected_legacy
+    bonus = deficit * 0.5 if candidate_tier == "legacy" else -deficit * 0.5
+    return True, bonus, "source_tier_target"
 
 
 def _score(
@@ -572,7 +622,7 @@ def _prefer_surface_exposure(
     seasoning = _persona_contract().lexical_exposure["seasoning"]
     acceptance = seasoning["playback_acceptance"]
     target = (float(acceptance[0]) + float(acceptance[1])) / 2.0
-    score_window = records[-SCORE_HISTORY_WINDOW:]
+    score_window = records[-int(_persona_contract().source_tier["recent_window"]):]
     observed = (
         sum(record.was_seasoning is not False for record in score_window) / len(score_window)
         if score_window
@@ -638,10 +688,24 @@ def select_line(
     seasoning_policy = _persona_contract().lexical_exposure["seasoning"]
     seasoning_window = int(seasoning_policy["recent_window"])
     seasoning_maximum = int(seasoning_policy["recent_max"])
-    seasoning_blocked = (
+    seasoning_recent_blocked = (
         sum(record.was_seasoning is not False for record in records[-max(0, seasoning_window - 1) :])
         >= seasoning_maximum
     )
+    seasoning_playback_window = int(_persona_contract().source_tier["recent_window"])
+    seasoning_playback_maximum = math.floor(
+        float(seasoning_policy["playback_acceptance"][1])
+        * seasoning_playback_window
+        + _EPSILON
+    )
+    seasoning_playback_blocked = (
+        sum(
+            record.was_seasoning is not False
+            for record in records[-max(0, seasoning_playback_window - 1) :]
+        )
+        >= seasoning_playback_maximum
+    )
+    seasoning_blocked = seasoning_recent_blocked or seasoning_playback_blocked
 
     def variant_available(row: CorpusLine) -> bool:
         return (
@@ -811,19 +875,51 @@ def select_line(
     if not candidates:
         return None
 
+    # Source balance is evaluated only after every hard safety/availability gate.
+    authored_available = any(scene.source_tier == "authored" for scene in candidates)
+    legacy_available = any(scene.source_tier == "legacy" for scene in candidates)
+    tier_decisions: dict[str, tuple[float, str]] = {}
+    tier_filtered: list[PreparedScene] = []
+    for scene in candidates:
+        allowed, bonus, reason = source_tier_decision(
+            records,
+            scene.source_tier,
+            authored_available,
+            legacy_available,
+        )
+        if allowed:
+            tier_filtered.append(scene)
+            tier_decisions[scene.semantic_group] = (bonus, reason)
+    candidates = tier_filtered
+    if not candidates:
+        return None
+
     # 10. A scene receives exactly one score regardless of surface variant count.
-    scored = [
-        _ScoredScene(
-            scene=scene,
-            scored=_score(
-                scene.representative,
-                records,
-                config,
-                prepared.dry_sharp_semantic_groups,
+    scored: list[_ScoredScene] = []
+    for scene in candidates:
+        base = _score(
+            scene.representative,
+            records,
+            config,
+            prepared.dry_sharp_semantic_groups,
+        )
+        source_bonus, source_reason = tier_decisions[scene.semantic_group]
+        adjusted_score = base.score + source_bonus
+        row_weight_bonus = float(scene.representative.weight) * 0.5
+        adjusted = replace(
+            base,
+            score=adjusted_score,
+            score_band=math.floor(
+                (adjusted_score - row_weight_bonus) / SCORE_BAND_WIDTH
+            ),
+            reasons=base.reasons
+            + (
+                f"source_tier={scene.source_tier}",
+                f"source_tier_bonus={source_bonus:.6f}",
+                source_reason,
             ),
         )
-        for scene in candidates
-    ]
+        scored.append(_ScoredScene(scene=scene, scored=adjusted))
 
     # 11. Choose a semantic scene first, then a surface variant. Namespaced
     # local RNGs make scene choice invariant when a scene gains more variants.
@@ -861,6 +957,7 @@ def select_line(
                 surface_opening=surface.opening,
                 surface_ending=surface.ending,
                 surface_template=surface.template,
+                source_tier=chosen_scene.scene.source_tier,
             )
         )
     except HistoryFormatError:

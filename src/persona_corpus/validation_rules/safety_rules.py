@@ -33,13 +33,6 @@ def validate_safety_preflight(
         issues.error("requires_reply", "text must not require a reply", line_id, row_number)
     if "?" in text or "？" in text:
         issues.error("question", "original text contains a question mark", line_id, row_number)
-    if row.enabled is True and row.source_kind == "legacy_surface_variant":
-        issues.error(
-            "enabled_legacy_surface",
-            "legacy surface rows are audit-only and must never be enabled",
-            line_id,
-            row_number,
-        )
     if row.source_kind == "legacy_surface_variant":
         if row.category_group != "easter_egg" and len(text) > MAX_SURFACE_TEXT_LENGTH:
             issues.error(

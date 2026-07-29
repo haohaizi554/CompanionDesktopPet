@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Iterable
 
+from .contract import PERSONA_CONTRACT
+
 
 HISTORY_SCHEMA_VERSION = 1
 _ROOT_KEYS = frozenset({"schema_version", "records"})
@@ -27,6 +29,7 @@ _RECORD_OPTIONAL_KEYS = frozenset(
         "surface_opening",
         "surface_ending",
         "surface_template",
+        "source_tier",
     }
 )
 _RECORD_KEYS = _RECORD_REQUIRED_KEYS | _RECORD_OPTIONAL_KEYS
@@ -93,6 +96,7 @@ class HistoryRecord:
     surface_opening: str = ""
     surface_ending: str = ""
     surface_template: str = ""
+    source_tier: str = "authored"
 
     def __post_init__(self) -> None:
         for name in ("selected_id", "category", "semantic_group"):
@@ -108,6 +112,8 @@ class HistoryRecord:
             raise HistoryFormatError("output_mode is not controlled")
         if self.trigger not in _TRIGGERS:
             raise HistoryFormatError("trigger is not controlled")
+        if self.source_tier not in {"authored", "legacy"}:
+            raise HistoryFormatError("source_tier is not controlled")
         if (
             isinstance(self.interrupt_cost, bool)
             or not isinstance(self.interrupt_cost, int)
@@ -196,6 +202,7 @@ class SelectionHistory:
                     "surface_opening": record.surface_opening,
                     "surface_ending": record.surface_ending,
                     "surface_template": record.surface_template,
+                    "source_tier": record.source_tier,
                 }
                 for record in self._records
             ],
@@ -252,6 +259,10 @@ class SelectionHistory:
                     surface_opening=raw.get("surface_opening", ""),
                     surface_ending=raw.get("surface_ending", ""),
                     surface_template=raw.get("surface_template", ""),
+                    source_tier=raw.get(
+                        "source_tier",
+                        PERSONA_CONTRACT.source_tier["missing_history_default"],
+                    ),
                 )
             except (KeyError, TypeError, HistoryFormatError) as error:
                 if isinstance(error, HistoryFormatError):

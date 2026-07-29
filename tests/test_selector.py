@@ -26,6 +26,7 @@ from src.persona_corpus.selector import (
     load_scheduler_config,
     prepare_corpus,
     select_line,
+    source_tier_decision,
 )
 from src.persona_corpus.surface_exposure import surface_exposure
 
@@ -57,7 +58,7 @@ def corpus_line(**overrides: object) -> CorpusLine:
         "enabled": True,
         "relationship_profile": "neutral",
         "text": "早饭的热气很适合慢慢醒神。",
-        "source_kind": "catalog",
+        "source_kind": "curated_authored",
         "source_reference": "catalog:test",
         "rewrite_reason": "test fixture",
     }
@@ -228,6 +229,7 @@ class SelectionHistoryTests(unittest.TestCase):
                 "surface_opening",
                 "surface_ending",
                 "surface_template",
+                "source_tier",
             },
             set(json.loads(payload)["records"][0]),
         )
@@ -240,6 +242,7 @@ class SelectionHistoryTests(unittest.TestCase):
             "surface_opening",
             "surface_ending",
             "surface_template",
+            "source_tier",
         ):
             del payload["records"][0][key]
 
@@ -249,6 +252,14 @@ class SelectionHistoryTests(unittest.TestCase):
         self.assertFalse(record.was_dry_sharp)
         self.assertIsNone(record.was_seasoning)
         self.assertEqual("", record.surface_template)
+        self.assertEqual("authored", record.source_tier)
+
+    def test_history_rejects_unknown_source_tier(self) -> None:
+        payload = json.loads(SelectionHistory([self.record()]).to_json())
+        payload["records"][0]["source_tier"] = "unknown"
+
+        with self.assertRaisesRegex(HistoryFormatError, "source_tier"):
+            SelectionHistory.from_json(json.dumps(payload))
 
     def test_json_schema_and_key_order_are_deterministic(self) -> None:
         history = SelectionHistory([self.record()])
@@ -381,6 +392,54 @@ class SelectionHistoryTests(unittest.TestCase):
                     played_at=datetime(2026, 7, 22, 10, 30, tzinfo=SHANGHAI),
                 )
             )
+
+
+class SourceTierPolicyTests(unittest.TestCase):
+    @staticmethod
+    def records(*, total: int, legacy: int) -> tuple[HistoryRecord, ...]:
+        return tuple(
+            HistoryRecord(
+                selected_id=f"history-{index}",
+                played_at=NOW + timedelta(minutes=index),
+                category="CharacterLife",
+                category_group="character_life",
+                semantic_group=f"history.scene.{index}",
+                output_mode="self_talk",
+                trigger="any",
+                interrupt_cost=0,
+                source_tier="legacy" if index >= total - legacy else "authored",
+            )
+            for index in range(total)
+        )
+
+    def test_recent_hundred_prioritizes_legacy_below_lower_bound(self) -> None:
+        records = self.records(total=100, legacy=24)
+
+        self.assertTrue(source_tier_decision(records, "legacy", True, True)[0])
+        self.assertFalse(source_tier_decision(records, "authored", True, True)[0])
+
+    def test_recent_hundred_blocks_legacy_above_upper_bound(self) -> None:
+        records = self.records(total=100, legacy=35)
+
+        self.assertFalse(source_tier_decision(records, "legacy", True, True)[0])
+        self.assertTrue(source_tier_decision(records, "authored", True, True)[0])
+
+    def test_source_tier_gate_falls_back_when_preferred_tier_is_unavailable(self) -> None:
+        low = self.records(total=100, legacy=24)
+        high = self.records(total=100, legacy=35)
+
+        self.assertTrue(source_tier_decision(low, "authored", True, False)[0])
+        self.assertTrue(source_tier_decision(high, "legacy", False, True)[0])
+
+    def test_warmup_scores_deficit_without_blocking_either_tier(self) -> None:
+        records = self.records(total=10, legacy=0)
+        legacy = source_tier_decision(records, "legacy", True, True)
+        authored = source_tier_decision(records, "authored", True, True)
+
+        self.assertTrue(legacy[0])
+        self.assertTrue(authored[0])
+        self.assertGreater(legacy[1], authored[1])
+        self.assertEqual("source_tier_warmup", legacy[2])
 
 
 class SchedulerConfigTests(unittest.TestCase):

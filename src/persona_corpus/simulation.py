@@ -624,14 +624,32 @@ def _render_authored_runtime_report(
     expected_rows = RELEASE_INVENTORY["expanded_runtime_rows"]
     if len(enabled) != expected_rows:
         raise SimulationError(
-            f"authored report needs {expected_rows} runtime rows; found {len(enabled)}"
+            f"hybrid report needs {expected_rows} runtime rows; found {len(enabled)}"
         )
-    if any(row.source_kind != "curated_authored" for row in enabled):
-        raise SimulationError("authored report found a non-curated_authored runtime row")
+    authored = [row for row in enabled if row.source_kind == "curated_authored"]
+    legacy_surface = [
+        row for row in enabled if row.source_kind == "legacy_surface_variant"
+    ]
+    legacy_curated = [
+        row
+        for row in enabled
+        if row.source_kind not in {"curated_authored", "legacy_surface_variant"}
+    ]
+    expected_partition = (
+        RELEASE_INVENTORY["authored_runtime_rows"],
+        RELEASE_INVENTORY["legacy_curated_rows"],
+        RELEASE_INVENTORY["legacy_surface_rows"],
+    )
+    actual_partition = (len(authored), len(legacy_curated), len(legacy_surface))
+    if actual_partition != expected_partition:
+        raise SimulationError(
+            f"hybrid report partition mismatch: expected {expected_partition!r}, "
+            f"found {actual_partition!r}"
+        )
 
     parsed: list[tuple[str, str, CorpusLine]] = []
     batch_counts: Counter[str] = Counter()
-    for row in enabled:
+    for row in authored:
         match = _AUTHORED_REFERENCE.fullmatch(row.source_reference)
         if match is None:
             raise SimulationError(
@@ -673,9 +691,9 @@ def _render_authored_runtime_report(
     profile_counts = Counter(row.relationship_profile for row in enabled)
     reviewed = Counter(row["category"] for row in review)
     lines = [
-        "# Persona Corpus Authored Runtime Summary",
+        "# Persona Corpus Hybrid Runtime Summary",
         "",
-        "The runtime contains only hash-bound authored-v1 rows. Legacy source rows remain in the archive and review artifacts; none are materialized as runtime surfaces.",
+        "The runtime combines hash-bound authored-v1 rows with the exact audited v1.2.1 legacy runtime. Inventory and lineage are reported separately by source partition.",
         "",
         "## Runtime inventory",
         "",
@@ -684,10 +702,12 @@ def _render_authored_runtime_report(
         _markdown_table(
             ("Metric", "Value"),
             (
-                ("Enabled authored runtime rows", len(enabled)),
+                ("Enabled runtime rows", len(enabled)),
+                ("Enabled authored runtime rows", len(authored)),
+                ("Legacy curated runtime rows", len(legacy_curated)),
+                ("Legacy runtime surfaces", len(legacy_surface)),
                 ("Authored batches", len(batch_counts)),
                 ("Rows per batch", 300),
-                ("Legacy runtime surfaces", 0),
             ),
         )
     )
@@ -746,7 +766,7 @@ def _render_authored_runtime_report(
     )
     return (
         _final_markdown(lines),
-        len(enabled),
+        len(authored),
         50,
         20,
         20,

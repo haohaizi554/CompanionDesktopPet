@@ -61,6 +61,7 @@ def _cartesian_grid_issues(rows: Sequence[CorpusLine], issues: _Issues) -> None:
     for row in rows:
         if (
             row.enabled is True
+            and row.source_kind != "legacy_surface_variant"
             and isinstance(row.text, str)
         ):
             by_topic[(str(row.category), str(row.topic_id))].append(row)
@@ -196,19 +197,19 @@ def _surface_inventory_issues(rows: Sequence[CorpusLine], issues: _Issues) -> No
 
 
 def _distribution_issues(rows: Sequence[CorpusLine], issues: _Issues) -> None:
-    enabled_rows = [
+    non_surface_rows = [
         row
         for row in rows
         if row.enabled is True and row.source_kind != "legacy_surface_variant"
     ]
-    authored_only = bool(enabled_rows) and all(row.source_kind == "curated_authored" for row in enabled_rows)
-    texts = [
-        row.text
-        for row in rows
-        if row.enabled is True
-        and row.source_kind != "legacy_surface_variant"
-        and isinstance(row.text, str)
+    authored_rows = [
+        row for row in non_surface_rows if row.source_kind == "curated_authored"
     ]
+    authored_only = len(authored_rows) >= int(
+        PERSONA_CONTRACT.inventory["expanded_runtime"][0]
+    )
+    distribution_rows = authored_rows if authored_only else non_surface_rows
+    texts = [row.text for row in distribution_rows if isinstance(row.text, str)]
     count = len(texts)
     if count >= 20:
         catchphrase_lines = sum(contains_seasoning_marker(text) for text in texts)
