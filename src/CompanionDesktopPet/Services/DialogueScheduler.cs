@@ -20,6 +20,8 @@ public sealed class DialogueScheduler
     internal DialogueScheduler(Func<int, int, int> next) =>
         _next = next ?? throw new ArgumentNullException(nameof(next));
 
+    internal DeveloperTestParameters? TestParameters { get; set; }
+
     [Obsolete("使用 NextDelay(DateTime, bool) 重载以显式传入 effectiveQuietMode")]
     public TimeSpan NextDelay() => NextDelay(DateTime.Now);
 
@@ -40,13 +42,14 @@ public sealed class DialogueScheduler
 
     public TimeSpan NextDelay(DateTime localTime, bool effectiveQuietMode = false)
     {
-        var (minimum, maximum) = GetMode(localTime, effectiveQuietMode) switch
+        var mode = GetMode(localTime, effectiveQuietMode);
+        var (minimum, maximum) = TestParameters?.Window(mode) ?? mode switch
         {
             AutomaticCadenceMode.Daytime => (5, 15),
             AutomaticCadenceMode.Evening => (10, 20),
             AutomaticCadenceMode.LateNightOrDawn => (30, 60),
             AutomaticCadenceMode.Fullscreen => (60, 120),
-            _ => throw new ArgumentOutOfRangeException()
+            _ => throw new ArgumentOutOfRangeException(nameof(mode))
         };
         return TimeSpan.FromSeconds(_next(minimum * 60, maximum * 60 + 1));
     }

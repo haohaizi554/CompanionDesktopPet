@@ -27,6 +27,8 @@ public enum BubbleCountdownState
 public sealed class BubbleCountdownController
 {
     public static readonly TimeSpan DisplayDuration = TimeSpan.FromSeconds(5);
+
+    public TimeSpan ActiveDisplayDuration { get; set; } = DisplayDuration;
     private readonly TimeProvider _timeProvider;
     private long _startedAt;
     private TimeSpan _remaining;
@@ -59,7 +61,7 @@ public sealed class BubbleCountdownController
     {
         AssertUiThread();
         if (_closed) return;
-        _remaining = DisplayDuration;
+        _remaining = ActiveDisplayDuration;
         if (_suspended)
         {
             State = BubbleCountdownState.Suspended;
