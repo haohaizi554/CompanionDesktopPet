@@ -131,7 +131,7 @@
                     Tag="⚙"
                     Style="{StaticResource KawaiiDeveloperMenuStyle}"
                     SubmenuOpened="DeveloperModeMenu_SubmenuOpened"
-                    AutomationProperties.HelpText="打开语料库，并在这层菜单里改这一次的测试参数。">
+                    AutomationProperties.HelpText="打开语料库，或从测试参数再进一层改这一次的间隔。">
             <MenuItem.Resources>
               <Style TargetType="ScrollBar" BasedOn="{StaticResource KawaiiScrollBarStyle}" />
             </MenuItem.Resources>
@@ -143,14 +143,15 @@
                         Header="全库语句…"
                         Tag="☰" />
             </MenuItem>
-            <Separator />
             <MenuItem x:Name="TestParametersMenuItem"
-                      Style="{StaticResource KawaiiMenuPanelStyle}"
-                      StaysOpenOnClick="True"
-                      AutomationProperties.Name="测试参数">
-              <MenuItem.Header>
+                      Header="测试参数"
+                      Tag="⌁"
+                      Style="{StaticResource KawaiiDeveloperMenuStyle}"
+                      SubmenuOpened="DeveloperModeMenu_SubmenuOpened"
+                      AutomationProperties.HelpText="再展开一层，手改自动台词间隔和气泡停留时间。">
+              <MenuItem Style="{StaticResource KawaiiMenuPanelStyle}" StaysOpenOnClick="True">
+                <MenuItem.Header>
                 <StackPanel Width="248" Margin="4,2,4,6">
-                  <TextBlock FontSize="13" FontWeight="SemiBold" Text="测试参数" />
                   <TextBlock Margin="0,2,0,8"
                              FontSize="11"
                              TextWrapping="Wrap"
@@ -232,7 +233,8 @@
                              TextWrapping="Wrap"
                              Foreground="{DynamicResource Pet.Brush.TextDisabled}" />
                 </StackPanel>
-              </MenuItem.Header>
+                </MenuItem.Header>
+              </MenuItem>
             </MenuItem>
           </MenuItem>
           <Separator />
