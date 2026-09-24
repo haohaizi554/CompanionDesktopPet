@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Interop;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Effects;
@@ -3667,6 +3668,190 @@ public sealed class WindowShellTests
                     style.Setters.OfType<Setter>(),
                     setter => setter.Property == Control.OverridesDefaultStyleProperty
                               && Equals(true, setter.Value));
+            }
+        });
+    }
+
+    [Fact]
+    public void MainWindow_ControlMenuOpensBesideTheCharacter()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var window = CreateWindow(settingsDirectory);
+            ContextMenu? menu = null;
+            try
+            {
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                var stage = Assert.IsType<Grid>(window.FindName("CharacterStage"));
+                menu = Assert.IsType<ContextMenu>(window.FindName("ControlMenu"));
+                Assert.Equal(PlacementMode.Custom, ContextMenuService.GetPlacement(stage));
+
+                OpenControlMenu(window, menu, stage);
+                AssertMenuClearsCharacter(window, menu, stage);
+                Assert.Equal(
+                    PlacementMode.Left,
+                    SubmenuPopup(window).Placement);
+
+                window.Left = SystemParameters.WorkArea.Left;
+                window.Top = SystemParameters.WorkArea.Top + 40;
+                menu.IsOpen = false;
+                OpenControlMenu(window, menu, stage);
+                AssertMenuClearsCharacter(window, menu, stage);
+                Assert.Equal(
+                    PlacementMode.Right,
+                    SubmenuPopup(window).Placement);
+            }
+            finally
+            {
+                if (menu is not null)
+                {
+                    menu.IsOpen = false;
+                }
+
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
+            }
+        });
+    }
+
+    private static void OpenControlMenu(Window window, ContextMenu menu, FrameworkElement stage)
+    {
+        menu.PlacementTarget = stage;
+        menu.Placement = PlacementMode.Custom;
+        menu.HorizontalOffset = 0;
+        menu.VerticalOffset = 0;
+        menu.IsOpen = true;
+        window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+        Assert.True(menu.IsOpen);
+        Assert.True(menu.ActualWidth > 0 && menu.ActualHeight > 0);
+    }
+
+    private static Popup SubmenuPopup(Window window)
+    {
+        var size = Assert.IsType<MenuItem>(window.FindName("SizeMenuItem"));
+        size.ApplyTemplate();
+        return Assert.IsType<Popup>(size.Template.FindName("PART_Popup", size));
+    }
+
+    private static void AssertMenuClearsCharacter(
+        Window window,
+        ContextMenu menu,
+        FrameworkElement stage)
+    {
+        var source = PresentationSource.FromVisual(window);
+        Assert.NotNull(source);
+        var menuDip = source!.CompositionTarget.TransformFromDevice.Transform(
+            menu.PointToScreen(new Point(0, 0)));
+        var menuRect = new Rect(menuDip.X, menuDip.Y, menu.ActualWidth, menu.ActualHeight);
+        var characterRect = new Rect(
+            window.Left + ((window.ActualWidth - stage.ActualWidth) / 2),
+            window.Top + window.ActualHeight - stage.ActualHeight,
+            stage.ActualWidth,
+            stage.ActualHeight);
+        Assert.True(
+            menuRect.Right <= characterRect.Left + 1
+            || menuRect.Left >= characterRect.Right - 1
+            || menuRect.Bottom <= characterRect.Top + 1
+            || menuRect.Top >= characterRect.Bottom - 1,
+            $"Menu {menuRect} overlaps character {characterRect}.");
+    }
+
+    [Fact]
+    public void MainWindow_DeveloperModeShowsTheCorpusAndAppliesHandEditedParameters()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var window = CreateWindow(settingsDirectory);
+            ContextMenu? menu = null;
+            DeveloperModeWindow? tool = null;
+            try
+            {
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                menu = Assert.IsType<ContextMenu>(window.FindName("ControlMenu"));
+                var developer = Assert.IsType<MenuItem>(window.FindName("DeveloperModeMenuItem"));
+                var corpus = Assert.IsType<MenuItem>(window.FindName("CorpusMenuItem"));
+                var browse = Assert.IsType<MenuItem>(window.FindName("BrowseAllCorpusMenuItem"));
+                Assert.Equal("开发者模式", developer.Header);
+                Assert.Equal("语料库", corpus.Header);
+
+                menu.IsOpen = true;
+                developer.IsSubmenuOpen = true;
+                corpus.IsSubmenuOpen = true;
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                if (!corpus.Items.OfType<MenuItem>().Any(item =>
+                        item.Header is string header && header.StartsWith("技术", StringComparison.Ordinal)))
+                {
+                    corpus.RaiseEvent(new RoutedEventArgs(MenuItem.SubmenuOpenedEvent));
+                }
+
+                var sawTechnical = corpus.Items.OfType<MenuItem>().Any(item =>
+                    item.Header is string header && header.StartsWith("技术", StringComparison.Ordinal));
+
+                Assert.True(sawTechnical, "语料分类没有出现在开发者模式里。");
+                browse.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+                ListView? lines = null;
+                TextBlock? count = null;
+                var linesDeadline = DateTime.UtcNow.AddSeconds(20);
+                while (DateTime.UtcNow < linesDeadline)
+                {
+                    window.Dispatcher.Invoke(() => { }, DispatcherPriority.ContextIdle);
+                    tool = window.OwnedWindows.OfType<DeveloperModeWindow>().SingleOrDefault();
+                    if (tool is null)
+                    {
+                        continue;
+                    }
+
+                    lines = Assert.IsType<ListView>(tool.FindName("LineList"));
+                    count = Assert.IsType<TextBlock>(tool.FindName("LineCountText"));
+                    if (lines.Items.Count > 1000)
+                    {
+                        break;
+                    }
+                }
+
+                Assert.NotNull(tool);
+                Assert.NotNull(count);
+                Assert.Contains(PersonaCorpus.All.Count.ToString(), count!.Text);
+                Assert.True(lines!.Items.Count > 1000);
+
+                developer.IsSubmenuOpen = true;
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ContextIdle);
+                var dayMin = Assert.IsType<TextBox>(window.FindName("DayMinBox"));
+                var dayMax = Assert.IsType<TextBox>(window.FindName("DayMaxBox"));
+                dayMin.Text = "1";
+                dayMax.Text = "2";
+                var apply = Assert.IsType<Button>(window.FindName("ApplyParametersButton"));
+                apply.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                Assert.Equal(1, window.DialogueSchedulerForTests.TestParameters!.DayMinimumMinutes);
+                Assert.Equal(2, window.DialogueSchedulerForTests.TestParameters.DayMaximumMinutes);
+                Assert.InRange(
+                    window.DialogueSchedulerForTests.NextDelay(new DateTime(2026, 7, 26, 10, 0, 0)),
+                    TimeSpan.FromMinutes(1),
+                    TimeSpan.FromMinutes(2));
+
+                var speak = Assert.IsType<Button>(tool.FindName("SpeakLineButton"));
+                speak.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                var speech = Assert.IsType<TextBlock>(window.FindName("SpeechText"));
+                Assert.False(string.IsNullOrWhiteSpace(speech.Text));
+            }
+            finally
+            {
+                foreach (Window owned in window.OwnedWindows.OfType<Window>().ToArray())
+                {
+                    owned.Close();
+                }
+
+                if (menu is not null)
+                {
+                    menu.IsOpen = false;
+                }
+
+                window.Close();
+                DeleteSettingsDirectory(settingsDirectory);
             }
         });
     }

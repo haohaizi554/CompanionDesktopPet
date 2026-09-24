@@ -74,6 +74,7 @@
             Background="Transparent"
             RenderTransformOrigin="0.5,0.92"
             Focusable="True"
+            ContextMenuService.Placement="Custom"
             AutomationProperties.Name="佳怡"
             AutomationProperties.HelpText="右键或按菜单键打开控制面板；拖动佳怡可以移动位置。">
       <Grid.RenderTransform>
@@ -108,7 +109,7 @@
           <MenuItem x:Name="GreetingMenuItem" Header="打个招呼♡" Tag="♡" />
           <MenuItem x:Name="PauseMenuItem" Header="暂停动画" Tag="☾" />
           <Separator />
-          <MenuItem Header="大小" Tag="◌">
+          <MenuItem x:Name="SizeMenuItem" Header="大小" Tag="◌">
             <MenuItem x:Name="SmallSizeMenuItem" Header="小巧" Tag="Small" IsCheckable="True" />
             <MenuItem x:Name="NormalSizeMenuItem" Header="刚刚好" Tag="Normal" IsCheckable="True" IsChecked="True" />
             <MenuItem x:Name="LargeSizeMenuItem" Header="大一点" Tag="Large" IsCheckable="True" />
@@ -124,6 +125,116 @@
                     IsCheckable="True"
                     ToolTipService.ShowOnDisabled="True" />
           <MenuItem x:Name="RestorePositionMenuItem" Header="回到右下角" Tag="⌂" />
+          <Separator />
+          <MenuItem x:Name="DeveloperModeMenuItem"
+                    Header="开发者模式"
+                    Tag="⚙"
+                    Style="{StaticResource KawaiiDeveloperMenuStyle}"
+                    SubmenuOpened="DeveloperModeMenu_SubmenuOpened"
+                    AutomationProperties.HelpText="打开语料库，并在这层菜单里改这一次的测试参数。">
+            <MenuItem.Resources>
+              <Style TargetType="ScrollBar" BasedOn="{StaticResource KawaiiScrollBarStyle}" />
+            </MenuItem.Resources>
+            <MenuItem x:Name="CorpusMenuItem"
+                      Header="语料库"
+                      Tag="☰"
+                      AutomationProperties.HelpText="按分类组和分类查看全部语句。">
+              <MenuItem x:Name="BrowseAllCorpusMenuItem"
+                        Header="全库语句…"
+                        Tag="☰" />
+            </MenuItem>
+            <Separator />
+            <MenuItem x:Name="TestParametersMenuItem"
+                      Style="{StaticResource KawaiiMenuPanelStyle}"
+                      StaysOpenOnClick="True"
+                      AutomationProperties.Name="测试参数">
+              <MenuItem.Header>
+                <StackPanel Width="248" Margin="4,2,4,6">
+                  <TextBlock FontSize="13" FontWeight="SemiBold" Text="测试参数" />
+                  <TextBlock Margin="0,2,0,8"
+                             FontSize="11"
+                             TextWrapping="Wrap"
+                             Foreground="{DynamicResource Pet.Brush.TextDisabled}"
+                             Text="只改这一次，不会动语料本。" />
+                  <Grid Margin="0,0,0,6">
+                    <TextBlock VerticalAlignment="Center" FontSize="12" Text="白天" />
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                      <TextBox x:Name="DayMinBox" Width="42" MinHeight="26" FontSize="12" Padding="4,2" HorizontalContentAlignment="Center" Style="{StaticResource KawaiiTextBoxStyle}" PreviewMouseLeftButtonDown="ParameterBox_PreviewMouseLeftButtonDown" />
+                      <TextBlock Width="22" VerticalAlignment="Center" HorizontalAlignment="Center" FontSize="12" Foreground="{DynamicResource Pet.Brush.PanelHint}" Text="到" />
+                      <TextBox x:Name="DayMaxBox" Width="42" MinHeight="26" FontSize="12" Padding="4,2" HorizontalContentAlignment="Center" Style="{StaticResource KawaiiTextBoxStyle}" PreviewMouseLeftButtonDown="ParameterBox_PreviewMouseLeftButtonDown" />
+                      <TextBlock Margin="6,0,0,0" VerticalAlignment="Center" FontSize="11" Foreground="{DynamicResource Pet.Brush.TextDisabled}" Text="分钟" />
+                    </StackPanel>
+                  </Grid>
+                  <Grid Margin="0,0,0,6">
+                    <TextBlock VerticalAlignment="Center" FontSize="12" Text="傍晚" />
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                      <TextBox x:Name="EveningMinBox" Width="42" MinHeight="26" FontSize="12" Padding="4,2" HorizontalContentAlignment="Center" Style="{StaticResource KawaiiTextBoxStyle}" PreviewMouseLeftButtonDown="ParameterBox_PreviewMouseLeftButtonDown" />
+                      <TextBlock Width="22" VerticalAlignment="Center" HorizontalAlignment="Center" FontSize="12" Foreground="{DynamicResource Pet.Brush.PanelHint}" Text="到" />
+                      <TextBox x:Name="EveningMaxBox" Width="42" MinHeight="26" FontSize="12" Padding="4,2" HorizontalContentAlignment="Center" Style="{StaticResource KawaiiTextBoxStyle}" PreviewMouseLeftButtonDown="ParameterBox_PreviewMouseLeftButtonDown" />
+                      <TextBlock Margin="6,0,0,0" VerticalAlignment="Center" FontSize="11" Foreground="{DynamicResource Pet.Brush.TextDisabled}" Text="分钟" />
+                    </StackPanel>
+                  </Grid>
+                  <Grid Margin="0,0,0,6">
+                    <TextBlock VerticalAlignment="Center" FontSize="12" Text="深夜" />
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                      <TextBox x:Name="LateMinBox" Width="42" MinHeight="26" FontSize="12" Padding="4,2" HorizontalContentAlignment="Center" Style="{StaticResource KawaiiTextBoxStyle}" PreviewMouseLeftButtonDown="ParameterBox_PreviewMouseLeftButtonDown" />
+                      <TextBlock Width="22" VerticalAlignment="Center" HorizontalAlignment="Center" FontSize="12" Foreground="{DynamicResource Pet.Brush.PanelHint}" Text="到" />
+                      <TextBox x:Name="LateMaxBox" Width="42" MinHeight="26" FontSize="12" Padding="4,2" HorizontalContentAlignment="Center" Style="{StaticResource KawaiiTextBoxStyle}" PreviewMouseLeftButtonDown="ParameterBox_PreviewMouseLeftButtonDown" />
+                      <TextBlock Margin="6,0,0,0" VerticalAlignment="Center" FontSize="11" Foreground="{DynamicResource Pet.Brush.TextDisabled}" Text="分钟" />
+                    </StackPanel>
+                  </Grid>
+                  <Grid Margin="0,0,0,6">
+                    <TextBlock VerticalAlignment="Center" FontSize="12" Text="全屏" />
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                      <TextBox x:Name="FullscreenMinBox" Width="42" MinHeight="26" FontSize="12" Padding="4,2" HorizontalContentAlignment="Center" Style="{StaticResource KawaiiTextBoxStyle}" PreviewMouseLeftButtonDown="ParameterBox_PreviewMouseLeftButtonDown" />
+                      <TextBlock Width="22" VerticalAlignment="Center" HorizontalAlignment="Center" FontSize="12" Foreground="{DynamicResource Pet.Brush.PanelHint}" Text="到" />
+                      <TextBox x:Name="FullscreenMaxBox" Width="42" MinHeight="26" FontSize="12" Padding="4,2" HorizontalContentAlignment="Center" Style="{StaticResource KawaiiTextBoxStyle}" PreviewMouseLeftButtonDown="ParameterBox_PreviewMouseLeftButtonDown" />
+                      <TextBlock Margin="6,0,0,0" VerticalAlignment="Center" FontSize="11" Foreground="{DynamicResource Pet.Brush.TextDisabled}" Text="分钟" />
+                    </StackPanel>
+                  </Grid>
+                  <Grid Margin="0,0,0,8">
+                    <TextBlock VerticalAlignment="Center" FontSize="12" Text="气泡" />
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                      <TextBox x:Name="BubbleBox" Width="42" MinHeight="26" FontSize="12" Padding="4,2" HorizontalContentAlignment="Center" Style="{StaticResource KawaiiTextBoxStyle}" PreviewMouseLeftButtonDown="ParameterBox_PreviewMouseLeftButtonDown" />
+                      <TextBlock Margin="6,0,0,0" VerticalAlignment="Center" FontSize="11" Foreground="{DynamicResource Pet.Brush.TextDisabled}" Text="秒" />
+                    </StackPanel>
+                  </Grid>
+                  <TextBlock x:Name="ParameterErrorText"
+                             Margin="0,0,0,6"
+                             FontSize="11"
+                             TextWrapping="Wrap"
+                             Foreground="#FFBE4B70" />
+                  <Grid>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="*" />
+                      <ColumnDefinition Width="8" />
+                      <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Button x:Name="ApplyParametersButton"
+                            MinHeight="28"
+                            Padding="6,4"
+                            FontSize="12"
+                            Style="{StaticResource KawaiiPrimaryButtonStyle}"
+                            Content="就用这组"
+                            Click="ApplyParameters_Click" />
+                    <Button x:Name="ResetParametersButton"
+                            Grid.Column="2"
+                            MinHeight="28"
+                            Padding="6,4"
+                            FontSize="12"
+                            Style="{StaticResource KawaiiSecondaryButtonStyle}"
+                            Content="恢复默认"
+                            Click="ResetParameters_Click" />
+                  </Grid>
+                  <TextBlock x:Name="ParameterStatusText"
+                             Margin="0,6,0,0"
+                             FontSize="11"
+                             TextWrapping="Wrap"
+                             Foreground="{DynamicResource Pet.Brush.TextDisabled}" />
+                </StackPanel>
+              </MenuItem.Header>
+            </MenuItem>
+          </MenuItem>
           <Separator />
           <MenuItem x:Name="HideToTrayMenuItem"
                     Header="藏到托盘里 ♡"

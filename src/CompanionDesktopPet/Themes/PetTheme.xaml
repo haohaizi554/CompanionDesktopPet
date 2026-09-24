@@ -187,6 +187,104 @@
     </Setter>
   </Style>
 
+  <Style x:Key="KawaiiDeveloperMenuStyle" TargetType="MenuItem" BasedOn="{StaticResource KawaiiMenuItemStyle}">
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="MenuItem">
+          <Grid>
+            <Border x:Name="MenuItemChrome"
+                    MinHeight="35"
+                    CornerRadius="14"
+                    BorderThickness="1"
+                    BorderBrush="Transparent"
+                    Background="{TemplateBinding Background}">
+              <Grid Margin="10,0">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="24" />
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="24" />
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="IconGlyph"
+                           VerticalAlignment="Center"
+                           HorizontalAlignment="Center"
+                           FontFamily="Segoe UI Symbol"
+                           Text="{TemplateBinding Tag}" />
+                <ContentPresenter Grid.Column="1"
+                                  Margin="7,0,8,0"
+                                  VerticalAlignment="Center"
+                                  ContentSource="Header"
+                                  RecognizesAccessKey="True" />
+                <TextBlock x:Name="SubmenuArrow"
+                           Grid.Column="2"
+                           VerticalAlignment="Center"
+                           HorizontalAlignment="Center"
+                           Text="›"
+                           FontSize="18" />
+              </Grid>
+            </Border>
+            <Popup x:Name="PART_Popup"
+                   AllowsTransparency="True"
+                   Focusable="False"
+                   HorizontalOffset="-4"
+                   IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}"
+                   Placement="Right"
+                   PopupAnimation="Fade">
+              <Grid Margin="12">
+                <Border Padding="8"
+                        MinWidth="250"
+                        MaxWidth="280"
+                        CornerRadius="20"
+                        BorderThickness="2"
+                        BorderBrush="{DynamicResource Pet.Brush.MenuBorder}"
+                        Background="{DynamicResource Pet.Brush.MenuSurface}">
+                  <Border.Effect>
+                    <DropShadowEffect Color="{DynamicResource Pet.Color.Shadow.Popup}"
+                                      BlurRadius="22"
+                                      ShadowDepth="4"
+                                      Opacity="{DynamicResource Pet.Opacity.Shadow.Popup}" />
+                  </Border.Effect>
+                  <ScrollViewer x:Name="DeveloperSubmenuScroll"
+                                MaxHeight="420"
+                                VerticalScrollBarVisibility="Auto"
+                                HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel IsItemsHost="True"
+                                KeyboardNavigation.DirectionalNavigation="Cycle" />
+                  </ScrollViewer>
+                </Border>
+              </Grid>
+            </Popup>
+          </Grid>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsHighlighted" Value="True">
+              <Setter TargetName="MenuItemChrome" Property="Background" Value="{DynamicResource Pet.Brush.MenuItemHover}" />
+              <Setter TargetName="MenuItemChrome" Property="BorderBrush" Value="{DynamicResource Pet.Brush.MenuHighlight}" />
+            </Trigger>
+            <Trigger Property="IsSubmenuOpen" Value="True">
+              <Setter TargetName="MenuItemChrome" Property="Background" Value="{DynamicResource Pet.Brush.MenuItemHover}" />
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter Property="Foreground" Value="{DynamicResource Pet.Brush.TextDisabled}" />
+              <Setter TargetName="MenuItemChrome" Property="Opacity" Value="{DynamicResource Pet.Opacity.Disabled}" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style x:Key="KawaiiMenuPanelStyle" TargetType="MenuItem">
+    <Setter Property="StaysOpenOnClick" Value="True" />
+    <Setter Property="Focusable" Value="False" />
+    <Setter Property="Padding" Value="2,0" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="MenuItem">
+          <ContentPresenter ContentSource="Header" />
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
   <Style x:Key="KawaiiSeparatorStyle" TargetType="Separator">
     <Setter Property="OverridesDefaultStyle" Value="True" />
     <Setter Property="Template">
@@ -198,5 +296,390 @@
         </ControlTemplate>
       </Setter.Value>
     </Setter>
+  </Style>
+
+  <SolidColorBrush x:Key="Pet.Brush.PanelCard" Color="#F7FFFFFF" />
+  <SolidColorBrush x:Key="Pet.Brush.PanelCardBorder" Color="#99F3B7C4" />
+  <SolidColorBrush x:Key="Pet.Brush.PanelSelected" Color="#FFFFE4EC" />
+  <SolidColorBrush x:Key="Pet.Brush.PanelHint" Color="#FFB08990" />
+
+  <Style x:Key="KawaiiCaptionStyle" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{StaticResource Pet.FontFamily.Ui}" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource Pet.Brush.MenuChecked}" />
+  </Style>
+
+  <Style x:Key="KawaiiNoteStyle" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{StaticResource Pet.FontFamily.Ui}" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+    <Setter Property="Foreground" Value="{DynamicResource Pet.Brush.TextDisabled}" />
+  </Style>
+
+  <Style x:Key="KawaiiTextBoxStyle" TargetType="TextBox">
+    <Setter Property="FontFamily" Value="{StaticResource Pet.FontFamily.Ui}" />
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="Foreground" Value="{DynamicResource Pet.Brush.TextPrimary}" />
+    <Setter Property="CaretBrush" Value="{DynamicResource Pet.Brush.HeartPrimary}" />
+    <Setter Property="SelectionBrush" Value="#66FF9BB2" />
+    <Setter Property="Background" Value="#FFFFFFF8" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Pet.Brush.AccentBorder}" />
+    <Setter Property="BorderThickness" Value="1.5" />
+    <Setter Property="Padding" Value="10,6" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="TextBox">
+          <Border x:Name="Box"
+                  CornerRadius="12"
+                  Background="{TemplateBinding Background}"
+                  BorderBrush="{TemplateBinding BorderBrush}"
+                  BorderThickness="{TemplateBinding BorderThickness}"
+                  SnapsToDevicePixels="True">
+            <ScrollViewer x:Name="PART_ContentHost"
+                          Margin="{TemplateBinding Padding}"
+                          Focusable="False" />
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsKeyboardFocused" Value="True">
+              <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource Pet.Brush.HeartPrimary}" />
+              <Setter TargetName="Box" Property="BorderThickness" Value="2" />
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter TargetName="Box" Property="Opacity" Value="{DynamicResource Pet.Opacity.Disabled}" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style x:Key="KawaiiPrimaryButtonStyle" TargetType="Button">
+    <Setter Property="Foreground" Value="White" />
+    <Setter Property="FontFamily" Value="{StaticResource Pet.FontFamily.Ui}" />
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="Padding" Value="16,8" />
+    <Setter Property="MinHeight" Value="38" />
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="Button">
+          <Border x:Name="Face"
+                  CornerRadius="16"
+                  Padding="{TemplateBinding Padding}"
+                  SnapsToDevicePixels="True">
+            <Border.Background>
+              <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                <GradientStop Color="#FFFF8AA6" Offset="0" />
+                <GradientStop Color="#FFE85A86" Offset="1" />
+              </LinearGradientBrush>
+            </Border.Background>
+            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="Face" Property="Opacity" Value="0.92" />
+            </Trigger>
+            <Trigger Property="IsPressed" Value="True">
+              <Setter TargetName="Face" Property="Opacity" Value="0.8" />
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter TargetName="Face" Property="Opacity" Value="{DynamicResource Pet.Opacity.Disabled}" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style x:Key="KawaiiSecondaryButtonStyle" TargetType="Button">
+    <Setter Property="Foreground" Value="{DynamicResource Pet.Brush.TextPrimary}" />
+    <Setter Property="FontFamily" Value="{StaticResource Pet.FontFamily.Ui}" />
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="Padding" Value="16,8" />
+    <Setter Property="MinHeight" Value="38" />
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="Button">
+          <Border x:Name="Face"
+                  CornerRadius="16"
+                  Padding="{TemplateBinding Padding}"
+                  Background="#F7FFFFFF"
+                  BorderBrush="{DynamicResource Pet.Brush.AccentBorder}"
+                  BorderThickness="1.5"
+                  SnapsToDevicePixels="True">
+            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="Face" Property="Background" Value="#FFFFF0F4" />
+            </Trigger>
+            <Trigger Property="IsPressed" Value="True">
+              <Setter TargetName="Face" Property="Background" Value="#FFFFE4EC" />
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter TargetName="Face" Property="Opacity" Value="{DynamicResource Pet.Opacity.Disabled}" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style x:Key="KawaiiCloseButtonStyle" TargetType="Button">
+    <Setter Property="Width" Value="32" />
+    <Setter Property="Height" Value="32" />
+    <Setter Property="Foreground" Value="{DynamicResource Pet.Brush.MenuChecked}" />
+    <Setter Property="FontSize" Value="16" />
+    <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="Button">
+          <Border x:Name="Face"
+                  CornerRadius="16"
+                  Background="Transparent">
+            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="Face" Property="Background" Value="#FFFFE4EC" />
+            </Trigger>
+            <Trigger Property="IsPressed" Value="True">
+              <Setter TargetName="Face" Property="Background" Value="#FFFFD0DC" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style x:Key="KawaiiListViewItemStyle" TargetType="ListViewItem">
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Margin" Value="2,3" />
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+    <Setter Property="Foreground" Value="{DynamicResource Pet.Brush.TextPrimary}" />
+    <Setter Property="FontFamily" Value="{StaticResource Pet.FontFamily.Ui}" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ListViewItem">
+          <Border x:Name="Card"
+                  Padding="12,8"
+                  CornerRadius="14"
+                  BorderThickness="1"
+                  BorderBrush="Transparent"
+                  SnapsToDevicePixels="True">
+            <Border.Style>
+              <Style TargetType="Border">
+                <Setter Property="Background" Value="Transparent" />
+                <Style.Triggers>
+                  <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#BFFFFFFF" />
+                  </Trigger>
+                </Style.Triggers>
+              </Style>
+            </Border.Style>
+            <ContentPresenter />
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsSelected" Value="True">
+              <Setter TargetName="Card" Property="Background" Value="{DynamicResource Pet.Brush.PanelSelected}" />
+              <Setter TargetName="Card" Property="BorderBrush" Value="#66E98FA4" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style x:Key="KawaiiListViewStyle" TargetType="ListView">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Foreground" Value="{DynamicResource Pet.Brush.TextPrimary}" />
+    <Setter Property="FontFamily" Value="{StaticResource Pet.FontFamily.Ui}" />
+    <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+    <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto" />
+    <Setter Property="ScrollViewer.CanContentScroll" Value="True" />
+    <Setter Property="VirtualizingPanel.IsVirtualizing" Value="True" />
+    <Setter Property="VirtualizingPanel.VirtualizationMode" Value="Recycling" />
+    <Setter Property="ItemContainerStyle" Value="{StaticResource KawaiiListViewItemStyle}" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ListView">
+          <ScrollViewer Focusable="False"
+                        Padding="2,0"
+                        CanContentScroll="True"
+                        HorizontalScrollBarVisibility="Disabled"
+                        VerticalScrollBarVisibility="Auto">
+            <ItemsPresenter />
+          </ScrollViewer>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style x:Key="KawaiiTreeViewItemStyle" TargetType="TreeViewItem">
+    <Setter Property="Foreground" Value="{DynamicResource Pet.Brush.TextPrimary}" />
+    <Setter Property="FontFamily" Value="{StaticResource Pet.FontFamily.Ui}" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Margin" Value="0,1" />
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="TreeViewItem">
+          <Grid>
+            <Grid.RowDefinitions>
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <Border x:Name="Row"
+                    Margin="0,1"
+                    Padding="2,4"
+                    CornerRadius="12"
+                    BorderThickness="1"
+                    BorderBrush="Transparent"
+                    SnapsToDevicePixels="True">
+              <Border.Style>
+                <Style TargetType="Border">
+                  <Setter Property="Background" Value="Transparent" />
+                  <Style.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True">
+                      <Setter Property="Background" Value="#99FFFFFF" />
+                    </Trigger>
+                  </Style.Triggers>
+                </Style>
+              </Border.Style>
+              <StackPanel Orientation="Horizontal">
+                <ToggleButton x:Name="Expander"
+                              Width="18"
+                              Height="18"
+                              Margin="2,0,4,0"
+                              Focusable="False"
+                              IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
+                  <ToggleButton.Template>
+                    <ControlTemplate TargetType="ToggleButton">
+                      <Border Background="Transparent">
+                        <TextBlock x:Name="Glyph"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   FontSize="12"
+                                   Foreground="{DynamicResource Pet.Brush.HeartPrimary}"
+                                   Text="▸" />
+                      </Border>
+                      <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                          <Setter TargetName="Glyph" Property="Text" Value="▾" />
+                        </Trigger>
+                      </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                  </ToggleButton.Template>
+                </ToggleButton>
+                <ContentPresenter ContentSource="Header" VerticalAlignment="Center" />
+              </StackPanel>
+            </Border>
+            <ItemsPresenter x:Name="ItemsHost" Grid.Row="1" Margin="16,0,0,0" />
+          </Grid>
+          <ControlTemplate.Triggers>
+            <Trigger Property="HasItems" Value="False">
+              <Setter TargetName="Expander" Property="Visibility" Value="Hidden" />
+            </Trigger>
+            <Trigger Property="IsExpanded" Value="False">
+              <Setter TargetName="ItemsHost" Property="Visibility" Value="Collapsed" />
+            </Trigger>
+            <Trigger Property="IsSelected" Value="True">
+              <Setter TargetName="Row" Property="Background" Value="{DynamicResource Pet.Brush.PanelSelected}" />
+              <Setter TargetName="Row" Property="BorderBrush" Value="#66E98FA4" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style x:Key="KawaiiScrollBarPageButton" TargetType="RepeatButton">
+    <Setter Property="Focusable" Value="False" />
+    <Setter Property="IsTabStop" Value="False" />
+    <Setter Property="Opacity" Value="0" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="RepeatButton">
+          <Border Background="Transparent" />
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style x:Key="KawaiiScrollBarThumb" TargetType="Thumb">
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="Thumb">
+          <Border Margin="2"
+                  CornerRadius="4"
+                  Background="#99E98FA4" />
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style x:Key="KawaiiScrollBarStyle" TargetType="ScrollBar">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Width" Value="10" />
+    <Setter Property="MinWidth" Value="10" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ScrollBar">
+          <Grid Width="10" Margin="0,6">
+            <Track x:Name="PART_Track" IsDirectionReversed="True">
+              <Track.DecreaseRepeatButton>
+                <RepeatButton Style="{StaticResource KawaiiScrollBarPageButton}"
+                              Command="ScrollBar.PageUpCommand" />
+              </Track.DecreaseRepeatButton>
+              <Track.IncreaseRepeatButton>
+                <RepeatButton Style="{StaticResource KawaiiScrollBarPageButton}"
+                              Command="ScrollBar.PageDownCommand" />
+              </Track.IncreaseRepeatButton>
+              <Track.Thumb>
+                <Thumb Style="{StaticResource KawaiiScrollBarThumb}" MinHeight="28" />
+              </Track.Thumb>
+            </Track>
+          </Grid>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+    <Style.Triggers>
+      <Trigger Property="Orientation" Value="Horizontal">
+        <Setter Property="Width" Value="Auto" />
+        <Setter Property="Height" Value="10" />
+        <Setter Property="MinHeight" Value="10" />
+        <Setter Property="Template">
+          <Setter.Value>
+            <ControlTemplate TargetType="ScrollBar">
+              <Grid Height="10" Margin="6,0">
+                <Track x:Name="PART_Track">
+                  <Track.DecreaseRepeatButton>
+                    <RepeatButton Style="{StaticResource KawaiiScrollBarPageButton}"
+                                  Command="ScrollBar.PageLeftCommand" />
+                  </Track.DecreaseRepeatButton>
+                  <Track.IncreaseRepeatButton>
+                    <RepeatButton Style="{StaticResource KawaiiScrollBarPageButton}"
+                                  Command="ScrollBar.PageRightCommand" />
+                  </Track.IncreaseRepeatButton>
+                  <Track.Thumb>
+                    <Thumb Style="{StaticResource KawaiiScrollBarThumb}" MinWidth="28" />
+                  </Track.Thumb>
+                </Track>
+              </Grid>
+            </ControlTemplate>
+          </Setter.Value>
+        </Setter>
+      </Trigger>
+    </Style.Triggers>
   </Style>
 </ResourceDictionary>

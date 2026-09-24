@@ -79,6 +79,13 @@ public partial class MainWindow : Window
     private DialogueWarmupViewState _dialogueWarmupViewState = DialogueWarmupViewState.Pending;
     private IInputElement? _controlMenuFocusReturnTarget;
     private bool _controlMenuOpenedFromKeyboard;
+    private bool _controlMenuPlacementReady;
+    private ControlMenuPlacement _controlMenuPlacement;
+    private bool _corpusMenuBuilt;
+    private readonly HashSet<MenuItem> _populatedCorpusMenus = [];
+    private readonly DeveloperTestParameters _developerParameters = DeveloperTestParameters.CreateDefault();
+    private readonly DialogueScheduler _dialogueScheduler;
+    private DeveloperModeWindow? _developerWindow;
     private bool _isHiddenToTray;
     private FullscreenSnapshot _fullscreen;
 
@@ -132,8 +139,9 @@ public partial class MainWindow : Window
             ?? RaiseLiveRegionChanged;
         _foregroundFullscreenDetector = options.ForegroundFullscreenDetector
             ?? new WindowsForegroundFullscreenDetector();
+        _dialogueScheduler = options.DialogueScheduler ?? new DialogueScheduler();
         _automaticCadence = new AutomaticDialogueCadenceController(
-            options.DialogueScheduler ?? new DialogueScheduler(),
+            _dialogueScheduler,
             _timeProvider);
         _animation = options.AnimationController ?? new AnimationController(
             BreathingScale,
@@ -169,6 +177,7 @@ public partial class MainWindow : Window
         NormalSizeMenuItem.Click += SetSize_Click;
         LargeSizeMenuItem.Click += SetSize_Click;
         TopmostMenuItem.Click += ToggleTopmost_Click;
+        ControlMenu.CustomPopupPlacementCallback = PlaceControlMenu;
         ControlMenu.Opened += ControlMenu_Opened;
         ControlMenu.Closed += ControlMenu_Closed;
         ControlMenu.PreviewKeyDown += ControlMenu_PreviewKeyDown;
@@ -176,6 +185,9 @@ public partial class MainWindow : Window
         RestorePositionMenuItem.Click += RestorePosition_Click;
         HideToTrayMenuItem.Click += HideToTray_Click;
         ExitMenuItem.Click += Exit_Click;
+        BrowseAllCorpusMenuItem.Click += BrowseAllCorpus_Click;
+        CorpusMenuItem.SubmenuOpened += CorpusMenu_SubmenuOpened;
+        WriteDeveloperDraft(_developerParameters);
         UpdateTrayAvailabilityControls();
         _bubbleTimer.Tick += BubbleTimer_Tick;
         _automaticTimer.Tick += AutomaticTimer_Tick;
@@ -1101,9 +1113,10 @@ public partial class MainWindow : Window
             return;
         }
 
-        _automaticTimer.Interval = _automaticCadence.Arm(
-            localTime,
-            fullscreen.EffectiveQuietMode);
+        var delay = _automaticCadence.Arm(localTime, fullscreen.EffectiveQuietMode);
+        _automaticTimer.Interval = delay < TimeSpan.FromMilliseconds(1)
+            ? TimeSpan.FromMilliseconds(1)
+            : delay;
         _automaticTimer.Start();
     }
 
@@ -1810,7 +1823,9 @@ public partial class MainWindow : Window
         _controlMenuFocusReturnTarget = GetControlMenuFocusReturnTarget();
         _controlMenuOpenedFromKeyboard = true;
         ControlMenu.PlacementTarget = CharacterStage;
-        ControlMenu.Placement = PlacementMode.Center;
+        ControlMenu.Placement = PlacementMode.Custom;
+        ControlMenu.HorizontalOffset = 0;
+        ControlMenu.VerticalOffset = 0;
         ControlMenu.IsOpen = true;
         e.Handled = true;
     }
@@ -1825,16 +1840,406 @@ public partial class MainWindow : Window
 
         _controlMenuFocusReturnTarget ??= GetControlMenuFocusReturnTarget();
         RefreshAutoStartState();
+        WriteDeveloperDraft(_developerParameters);
         Dispatcher.BeginInvoke(
             () =>
             {
-                if (ControlMenu.IsOpen)
+                if (!ControlMenu.IsOpen)
                 {
-                    SayMenuItem.Focus();
+                    return;
                 }
+
+                if (_controlMenuPlacementReady)
+                {
+                    AlignSubmenuPopups(ControlMenu, _controlMenuPlacement.SubmenuOpensRight);
+                }
+
+                SayMenuItem.Focus();
             },
             DispatcherPriority.Input);
     }
+
+    private CustomPopupPlacement[] PlaceControlMenu(Size popupSize, Size targetSize, Point offset)
+    {
+        _ = targetSize;
+        _ = offset;
+        var menu = ToDipSize(popupSize);
+        var character = GetCharacterScreenBounds();
+        var placement = ControlMenuPlacementService.Place(
+            character,
+            menu,
+            GetControlMenuWorkArea(character));
+        _controlMenuPlacement = placement;
+        _controlMenuPlacementReady = true;
+        return
+        [
+            new CustomPopupPlacement(
+                ToDeviceOffset(placement.Origin, character),
+                PopupPrimaryAxis.None)
+        ];
+    }
+
+    private ScreenRect GetControlMenuWorkArea(ScreenRect character)
+    {
+        var workAreas = WorkAreaService.GetWorkAreas();
+        if (workAreas.Count == 0)
+        {
+            var work = SystemParameters.WorkArea;
+            return new ScreenRect(work.Left, work.Top, work.Width, work.Height);
+        }
+
+        var center = new ScreenPoint(
+            character.Left + (character.Width / 2),
+            character.Top + (character.Height / 2));
+        var workArea = workAreas.FirstOrDefault(area => area.Contains(center));
+        return workArea.Width > 0 ? workArea : workAreas[0];
+    }
+
+    private ScreenSize ToDipSize(Size deviceSize)
+    {
+        var source = PresentationSource.FromVisual(this);
+        if (source is null)
+        {
+            return new ScreenSize(deviceSize.Width, deviceSize.Height);
+        }
+
+        var dip = source.CompositionTarget.TransformFromDevice.Transform(
+            new Vector(deviceSize.Width, deviceSize.Height));
+        return new ScreenSize(Math.Max(0, dip.X), Math.Max(0, dip.Y));
+    }
+
+    private Point ToDeviceOffset(ScreenPoint menuOrigin, ScreenRect character)
+    {
+        var source = PresentationSource.FromVisual(this);
+        if (source is null)
+        {
+            return new Point(menuOrigin.X - character.Left, menuOrigin.Y - character.Top);
+        }
+
+        var toDevice = source.CompositionTarget.TransformToDevice;
+        var menu = toDevice.Transform(new Point(menuOrigin.X, menuOrigin.Y));
+        var origin = toDevice.Transform(new Point(character.Left, character.Top));
+        return new Point(menu.X - origin.X, menu.Y - origin.Y);
+    }
+
+    private void AlignSubmenuPopups(ItemsControl menu, bool opensRight)
+    {
+        foreach (var item in menu.Items.OfType<MenuItem>())
+        {
+            item.ApplyTemplate();
+            if (item.Template?.FindName("PART_Popup", item) is Popup popup)
+            {
+                popup.Placement = opensRight ? PlacementMode.Right : PlacementMode.Left;
+            }
+
+            if (item.HasItems
+                && item.Template?.FindName("SubmenuArrow", item) is TextBlock arrow)
+            {
+                arrow.Text = opensRight ? "›" : "‹";
+            }
+
+            item.SubmenuOpened -= ControlSubmenuOpened;
+            item.SubmenuOpened += ControlSubmenuOpened;
+        }
+    }
+
+    private void ControlSubmenuOpened(object sender, RoutedEventArgs e)
+    {
+        if (_controlMenuPlacementReady && sender is MenuItem item)
+        {
+            AlignSubmenuPopups(item, _controlMenuPlacement.SubmenuOpensRight);
+        }
+    }
+
+    private void BrowseAllCorpus_Click(object sender, RoutedEventArgs e) =>
+        Dispatcher.BeginInvoke(
+            () => OpenDeveloperWindow(CorpusBrowserIndex.Root),
+            DispatcherPriority.Input);
+
+    private void DeveloperModeMenu_SubmenuOpened(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem item)
+        {
+            return;
+        }
+
+        item.ApplyTemplate();
+        if (item.Template.FindName("DeveloperSubmenuScroll", item) is ScrollViewer scroll)
+        {
+            scroll.MaxHeight = Math.Max(220, SystemParameters.WorkArea.Height - 96);
+        }
+    }
+
+    private void ParameterBox_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is TextBox box && !box.IsKeyboardFocusWithin)
+        {
+            box.Focus();
+            e.Handled = true;
+        }
+    }
+
+    private void ApplyParameters_Click(object sender, RoutedEventArgs e) => ApplyDeveloperDraft(keepStatus: false);
+
+    private void ResetParameters_Click(object sender, RoutedEventArgs e)
+    {
+        WriteDeveloperDraft(DeveloperTestParameters.CreateDefault());
+        ApplyDeveloperDraft(keepStatus: true);
+    }
+
+    private void CorpusMenu_SubmenuOpened(object sender, RoutedEventArgs e)
+    {
+        if (_corpusMenuBuilt || _isClosed)
+        {
+            return;
+        }
+
+        _corpusMenuBuilt = true;
+        var root = CorpusBrowserIndex.Root;
+        BrowseAllCorpusMenuItem.Header = $"全库语句  {root.Lines.Length}";
+        foreach (var child in root.Children)
+        {
+            CorpusMenuItem.Items.Add(CreateFolderMenu(child));
+        }
+
+        if (_controlMenuPlacementReady)
+        {
+            AlignSubmenuPopups(CorpusMenuItem, _controlMenuPlacement.SubmenuOpensRight);
+        }
+    }
+
+    private MenuItem CreateFolderMenu(CorpusFolder folder)
+    {
+        var item = new MenuItem
+        {
+            Header = folder.Header,
+            Tag = "·",
+            Style = MenuItemStyle
+        };
+        item.Items.Add(new MenuItem
+        {
+            Header = "…",
+            IsEnabled = false,
+            Style = MenuItemStyle
+        });
+        item.SubmenuOpened += (_, _) => PopulateFolder(item, folder);
+        return item;
+    }
+
+    private void PopulateFolder(MenuItem item, CorpusFolder folder)
+    {
+        if (!_populatedCorpusMenus.Add(item))
+        {
+            return;
+        }
+
+        item.Items.Clear();
+        item.Items.Add(CreateBrowseItem(folder));
+        if (folder.Children.Length == 0)
+        {
+            AddLineItems(item, folder);
+        }
+        else
+        {
+            item.Items.Add(CreateSeparator());
+            foreach (var child in folder.Children)
+            {
+                item.Items.Add(CreateFolderMenu(child));
+            }
+        }
+
+        if (_controlMenuPlacementReady)
+        {
+            AlignSubmenuPopups(item, _controlMenuPlacement.SubmenuOpensRight);
+        }
+    }
+
+    private MenuItem CreateBrowseItem(CorpusFolder folder)
+    {
+        var item = new MenuItem
+        {
+            Header = $"查看全部 {folder.Lines.Length} 条",
+            Tag = "☰",
+            Style = MenuItemStyle
+        };
+        item.Click += (_, _) => Dispatcher.BeginInvoke(
+            () => OpenDeveloperWindow(folder),
+            DispatcherPriority.Input);
+        return item;
+    }
+
+    private void AddLineItems(MenuItem item, CorpusFolder folder)
+    {
+        const int menuLineCap = 40;
+        var shown = Math.Min(menuLineCap, folder.Lines.Length);
+        if (shown > 0)
+        {
+            item.Items.Add(CreateSeparator());
+        }
+
+        for (var index = 0; index < shown; index++)
+        {
+            var line = folder.Lines[index];
+            var header = line.Text.Length <= 42 ? line.Text : string.Concat(line.Text.AsSpan(0, 42), "…");
+            var entry = new MenuItem
+            {
+                Header = header,
+                Tag = "✦",
+                ToolTip = line.Text,
+                Style = MenuItemStyle
+            };
+            entry.Click += (_, _) => SpeakDeveloperLine(line);
+            item.Items.Add(entry);
+        }
+
+        if (folder.Lines.Length > shown)
+        {
+            var rest = folder.Lines.Length - shown;
+            var more = new MenuItem
+            {
+                Header = $"还有 {rest} 条，打开窗口查看",
+                Tag = "☰",
+                Style = MenuItemStyle
+            };
+            more.Click += (_, _) => Dispatcher.BeginInvoke(
+                () => OpenDeveloperWindow(folder),
+                DispatcherPriority.Input);
+            item.Items.Add(more);
+        }
+    }
+
+    private void OpenDeveloperWindow(CorpusFolder folder)
+    {
+        if (InteractionFrozen)
+        {
+            return;
+        }
+
+        if (_developerWindow is { IsLoaded: true })
+        {
+            _developerWindow.SelectFolder(folder);
+            _developerWindow.Activate();
+            return;
+        }
+
+        var window = new DeveloperModeWindow(CorpusBrowserIndex.Root, SpeakDeveloperLine)
+        {
+            Owner = this,
+            Topmost = Topmost
+        };
+        window.Closed += (_, _) =>
+        {
+            if (ReferenceEquals(_developerWindow, window))
+            {
+                _developerWindow = null;
+            }
+        };
+        _developerWindow = window;
+        window.SelectFolder(folder);
+        window.Show();
+    }
+
+    private void SpeakDeveloperLine(DialogueLine line)
+    {
+        if (InteractionFrozen || string.IsNullOrWhiteSpace(line.Text))
+        {
+            return;
+        }
+
+        ShowBubble(line.Text);
+    }
+
+    private void ApplyDeveloperParameters(DeveloperTestParameters draft)
+    {
+        _developerParameters.CopyFrom(draft);
+        _dialogueScheduler.TestParameters = _developerParameters;
+        _bubbleCountdown.ActiveDisplayDuration = TimeSpan.FromSeconds(_developerParameters.BubbleSeconds);
+        if (!PresentationSuspended)
+        {
+            ArmAutomaticTimer(LocalNow, ObserveFullscreen());
+        }
+    }
+
+    private void ApplyDeveloperDraft(bool keepStatus)
+    {
+        if (!TryReadDeveloperDraft(out var draft, out var error))
+        {
+            ParameterErrorText.Text = error;
+            ParameterStatusText.Text = string.Empty;
+            return;
+        }
+
+        var validation = draft.Validate();
+        if (validation is not null)
+        {
+            ParameterErrorText.Text = validation;
+            ParameterStatusText.Text = string.Empty;
+            return;
+        }
+
+        ParameterErrorText.Text = string.Empty;
+        ApplyDeveloperParameters(draft);
+        ParameterStatusText.Text = keepStatus
+            ? "已经回到原来的间隔和气泡时间。"
+            : "已经换成这组啦。";
+    }
+
+    private bool TryReadDeveloperDraft(out DeveloperTestParameters draft, out string error)
+    {
+        draft = _developerParameters.Clone();
+        if (!TryDeveloperInteger(DayMinBox, out var dayMin)
+            || !TryDeveloperInteger(DayMaxBox, out var dayMax)
+            || !TryDeveloperInteger(EveningMinBox, out var eveningMin)
+            || !TryDeveloperInteger(EveningMaxBox, out var eveningMax)
+            || !TryDeveloperInteger(LateMinBox, out var lateMin)
+            || !TryDeveloperInteger(LateMaxBox, out var lateMax)
+            || !TryDeveloperInteger(FullscreenMinBox, out var fullscreenMin)
+            || !TryDeveloperInteger(FullscreenMaxBox, out var fullscreenMax)
+            || !TryDeveloperInteger(BubbleBox, out var bubble))
+        {
+            error = "这里要填整数。";
+            return false;
+        }
+
+        draft.DayMinimumMinutes = dayMin;
+        draft.DayMaximumMinutes = dayMax;
+        draft.EveningMinimumMinutes = eveningMin;
+        draft.EveningMaximumMinutes = eveningMax;
+        draft.LateNightMinimumMinutes = lateMin;
+        draft.LateNightMaximumMinutes = lateMax;
+        draft.FullscreenMinimumMinutes = fullscreenMin;
+        draft.FullscreenMaximumMinutes = fullscreenMax;
+        draft.BubbleSeconds = bubble;
+        error = string.Empty;
+        return true;
+    }
+
+    private static bool TryDeveloperInteger(TextBox box, out int value) =>
+        int.TryParse(box.Text.Trim(), out value);
+
+    private void WriteDeveloperDraft(DeveloperTestParameters parameters)
+    {
+        DayMinBox.Text = parameters.DayMinimumMinutes.ToString();
+        DayMaxBox.Text = parameters.DayMaximumMinutes.ToString();
+        EveningMinBox.Text = parameters.EveningMinimumMinutes.ToString();
+        EveningMaxBox.Text = parameters.EveningMaximumMinutes.ToString();
+        LateMinBox.Text = parameters.LateNightMinimumMinutes.ToString();
+        LateMaxBox.Text = parameters.LateNightMaximumMinutes.ToString();
+        FullscreenMinBox.Text = parameters.FullscreenMinimumMinutes.ToString();
+        FullscreenMaxBox.Text = parameters.FullscreenMaximumMinutes.ToString();
+        BubbleBox.Text = parameters.BubbleSeconds.ToString();
+        ParameterErrorText.Text = string.Empty;
+        ParameterStatusText.Text = string.Empty;
+    }
+
+    private Style MenuItemStyle => (Style)ControlMenu.FindResource(typeof(MenuItem));
+
+    private Separator CreateSeparator() => new()
+    {
+        Style = (Style)ControlMenu.FindResource(typeof(Separator))
+    };
+
+    internal DialogueScheduler DialogueSchedulerForTests => _dialogueScheduler;
 
     private static void RaiseLiveRegionChanged(FrameworkElement element)
     {
@@ -1862,6 +2267,7 @@ public partial class MainWindow : Window
 
     private void ControlMenu_Closed(object sender, RoutedEventArgs e)
     {
+        _controlMenuPlacementReady = false;
         if (_controlMenuOpenedFromKeyboard)
         {
             ControlMenu.ClearValue(ContextMenu.PlacementProperty);
