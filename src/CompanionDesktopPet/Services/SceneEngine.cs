@@ -1066,13 +1066,15 @@ public sealed partial class SceneScheduler
         var drySharpDeficit = PersonaContractGenerated.DrySharpPlaybackTarget - drySharpObserved;
         var drySharpBonus = scene.Tone == "dry_sharp" ? drySharpDeficit * 200 : 0;
         var weightBonus = scene.Weight * 0.5;
+        var trained = LineSelectionModel.Shared.Adjustment(scene.SemanticGroup, recent.Entries);
         var score = (DialogueForest.CategoryGroupWeights[scene.CategoryGroup] - groupObserved) * 100
                     + (DialogueForest.OutputModeTargets[scene.OutputMode] - modeObserved) * 35
                     + weightBonus
                     - scene.InterruptionCost * 0.75
                     - categoryObserved * 5
                     + drySharpBonus
-                    + sourceTierBonus;
+                    + sourceTierBonus
+                    + trained;
         return new ScoredScene(scene, score, (int)Math.Floor(score - weightBonus));
     }
 
@@ -1081,7 +1083,8 @@ public sealed partial class SceneScheduler
         IReadOnlyDictionary<DialogueCategoryGroup, int> CategoryGroups,
         IReadOnlyDictionary<DialogueOutputMode, int> OutputModes,
         IReadOnlyDictionary<DialogueCategory, int> Categories,
-        int DrySharpCount)
+        int DrySharpCount,
+        IReadOnlyList<SceneHistoryEntry> Entries)
     {
         public static RecentHistoryProfile Create(SceneHistory history)
         {
@@ -1106,7 +1109,8 @@ public sealed partial class SceneScheduler
                 categoryGroups,
                 outputModes,
                 categories,
-                drySharpCount);
+                drySharpCount,
+                recent);
         }
     }
 

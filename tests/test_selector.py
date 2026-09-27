@@ -19,6 +19,7 @@ from src.persona_corpus.history import HistoryFormatError, HistoryRecord, Select
 from src.persona_corpus.identity_session import IdentitySessionExposure
 from src.persona_corpus.loader import load_v2
 from src.persona_corpus.models import CorpusLine
+from src.persona_corpus import selector as selector_module
 from src.persona_corpus.selector import (
     DEFAULT_SCHEDULER_CONFIG,
     SchedulerConfig,
@@ -28,6 +29,7 @@ from src.persona_corpus.selector import (
     select_line,
     source_tier_decision,
 )
+import src.persona_corpus.selector as selector_module
 from src.persona_corpus.surface_exposure import surface_exposure
 
 
@@ -994,6 +996,68 @@ class SelectorScoringAndMutationTests(unittest.TestCase):
             seed=0,
         )
         self.assertEqual("observe", chosen_mode.row.id if chosen_mode else None)
+
+    def test_trained_family_and_near_duplicate_terms_change_the_winner(self) -> None:
+        model = {
+            "familyScale": 24,
+            "nearDuplicatePenalty": 18,
+            "nearDuplicateHamming": 10,
+            "nearDuplicateWindow": 8,
+            "groups": {
+                "chat.en": {
+                    "family": "ProactiveChat|英语",
+                    "category": "ProactiveChat",
+                    "target": 0.5,
+                    "fingerprint": "0000000000000000",
+                },
+                "chat.st": {
+                    "family": "ProactiveChat|街上",
+                    "category": "ProactiveChat",
+                    "target": 0.5,
+                    "fingerprint": "ffffffffffffffff",
+                },
+                "chat.copy": {
+                    "family": "ProactiveChat|英语",
+                    "category": "ProactiveChat",
+                    "target": 0.5,
+                    "fingerprint": "0000000000000000",
+                },
+            },
+        }
+        selector_module._selection_model_override = model
+        try:
+            history = SelectionHistory(
+                [history_record(corpus_line(id="said", semantic_group="chat.en"), NOW - timedelta(minutes=80))]
+            )
+            selected = select_line(
+                [
+                    corpus_line(id="again", semantic_group="chat.en"),
+                    corpus_line(id="street", semantic_group="chat.st"),
+                ],
+                context_at(),
+                history,
+                NOW,
+                seed=0,
+            )
+            self.assertEqual("street", selected.row.id if selected else None)
+
+            near_history = SelectionHistory(
+                [history_record(corpus_line(id="said", semantic_group="chat.en"), NOW - timedelta(minutes=80))]
+            )
+            near = select_line(
+                [
+                    corpus_line(id="copy", semantic_group="chat.copy"),
+                    corpus_line(id="street", semantic_group="chat.st"),
+                ],
+                context_at(),
+                near_history,
+                NOW,
+                seed=0,
+            )
+            self.assertEqual("street", near.row.id if near else None)
+            self.assertTrue(any(reason.startswith("family_bonus=") for reason in near.reasons))
+        finally:
+            selector_module._selection_model_override = None
 
     def test_seed_is_input_order_invariant_and_does_not_touch_global_random(self) -> None:
         rows = [

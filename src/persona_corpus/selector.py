@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 import random
 import hashlib
@@ -20,9 +21,13 @@ from .trigger_matching import trigger_matches as _trigger_matches
 
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "persona-scheduler.json"
+SELECTION_MODEL_PATH = (
+    Path(__file__).resolve().parents[2] / "data" / "optimized" / "line-selection-model.json"
+)
 SCORE_HISTORY_WINDOW = 50
 SCORE_BAND_WIDTH = 1.0
 _EPSILON = 1e-9
+_selection_model_override: dict[str, object] | None = None
 
 
 @lru_cache(maxsize=1)
@@ -489,6 +494,7 @@ def _score(
     dry_sharp_target = float(_persona_contract().dry_sharp["playback_target"])
     dry_sharp_deficit = dry_sharp_target - dry_sharp_observed
     dry_sharp_bonus = dry_sharp_deficit * 200.0 if row.tone == "dry_sharp" else 0.0
+    family_bonus, near_duplicate_penalty = _trained_adjustment(row.semantic_group, recent)
     score = (
         group_deficit * 100.0
         + mode_deficit * 35.0
@@ -496,6 +502,8 @@ def _score(
         - interrupt_penalty
         - category_repeat_penalty
         + dry_sharp_bonus
+        + family_bonus
+        - near_duplicate_penalty
     )
     # Row weight chooses among peers; it must not first exclude the lighter peer
     # by moving otherwise-identical candidates into different score bands.
@@ -512,8 +520,68 @@ def _score(
         f"category_repeat_penalty={category_repeat_penalty:.6f}",
         f"dry_sharp_deficit={dry_sharp_deficit:.6f}",
         f"dry_sharp_bonus={dry_sharp_bonus:.6f}",
+        f"family_bonus={family_bonus:.6f}",
+        f"near_duplicate_penalty={near_duplicate_penalty:.6f}",
     )
     return _ScoredCandidate(row=row, score=score, score_band=band, reasons=reasons)
+
+
+def _trained_adjustment(
+    semantic_group: str, recent: Sequence[HistoryRecord]
+) -> tuple[float, float]:
+    model = _selection_model()
+    groups = model.get("groups")
+    if not isinstance(groups, dict):
+        return 0.0, 0.0
+    prior = groups.get(semantic_group)
+    if not isinstance(prior, dict):
+        return 0.0, 0.0
+
+    category_count = 0
+    family_count = 0
+    duplicate_penalty = 0.0
+    window = int(model["nearDuplicateWindow"])
+    window_start = max(0, len(recent) - window)
+    fingerprint = int(prior["fingerprint"], 16)
+    hamming_limit = int(model["nearDuplicateHamming"])
+    for index, record in enumerate(recent):
+        other = groups.get(record.semantic_group)
+        if not isinstance(other, dict) or other["category"] != prior["category"]:
+            continue
+        category_count += 1
+        if other["family"] == prior["family"]:
+            family_count += 1
+        if (
+            index >= window_start
+            and record.semantic_group != semantic_group
+            and _popcount(fingerprint ^ int(other["fingerprint"], 16)) <= hamming_limit
+        ):
+            duplicate_penalty = float(model["nearDuplicatePenalty"])
+
+    family_bonus = (
+        0.0
+        if category_count == 0
+        else (float(prior["target"]) - (family_count / category_count)) * float(model["familyScale"])
+    )
+    return family_bonus, duplicate_penalty
+
+
+def _selection_model() -> dict[str, object]:
+    if _selection_model_override is not None:
+        return _selection_model_override
+    return _load_selection_model()
+
+
+@lru_cache(maxsize=1)
+def _load_selection_model() -> dict[str, object]:
+    if not SELECTION_MODEL_PATH.is_file():
+        return {}
+    loaded = json.loads(SELECTION_MODEL_PATH.read_text(encoding="utf-8"))
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _popcount(value: int) -> int:
+    return bin(value).count("1")
 
 
 def _selector_subseed(seed: int | None, stage: str, semantic_group: str = "") -> int | None:
