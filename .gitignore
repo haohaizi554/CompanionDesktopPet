@@ -6,5 +6,13 @@
 .vs/
 publish/
 outputs/verify/
+outputs/standalone/
 *.user
 *.suo
+voice/runtime.json
+voice/python/
+dialogue/python/
+config/llm.runtime.json
+voice/engine/
+voice/packs/jiayi/weights/*.ckpt
+voice/packs/jiayi/weights/*.pth

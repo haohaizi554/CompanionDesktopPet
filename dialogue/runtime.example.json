@@ -1,0 +1,8 @@
+{
+  "python": "dialogue/python/Scripts/python.exe",
+  "serve": "dialogue/serve.py",
+  "soul": "data/persona/jiayi-soul.json",
+  "config": "config/llm.runtime.json",
+  "checkpoint": "%LOCALAPPDATA%/CompanionDesktopPet/dialogue/checkpoints.sqlite",
+  "note": "文本走大模型。语音仍由本地 GPT-SoVITS 合成。密钥只放在 gitignore 的 llm.runtime.json。"
+}
