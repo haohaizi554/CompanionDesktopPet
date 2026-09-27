@@ -191,44 +191,112 @@ def _clamped(value, default: float, low: float, high: float) -> float:
     return min(high, max(low, number))
 
 
-def _synthesize(pipeline, request: dict) -> bool:
+def _content_chars(text: str) -> int:
+    return sum(1 for char in text if char.isalnum() or "\u4e00" <= char <= "\u9fff")
+
+
+def _prepare_text(text: str) -> str:
+    """A leading pause is what the sampler drops, instead of the first clause."""
+    text = text.strip()
+    if text and text[0] not in "。，、！？,.!?":
+        text = "。" + text
+    if text and text[-1] not in "。，、！？,.!?…":
+        text += "。"
+    return text
+
+
+def _split_method(text: str) -> str:
+    # cut0 keeps one breath. cut2/cut5 split on commas and those short pieces get swallowed.
+    return "cut0" if len(text) <= 80 else "cut1"
+
+
+def _audible(audio) -> bool:
     import numpy as np
+
+    audio = np.asarray(audio)
+    return audio.size > 0 and int(np.max(np.abs(audio))) >= 32
+
+
+def _long_enough(text: str, audio, sample_rate: int, speed: float) -> bool:
+    chars = _content_chars(text)
+    if chars <= 0 or not sample_rate:
+        return True
+    duration = float(audio.size) / float(sample_rate)
+    floor = max(0.45, chars * 0.055 / max(speed, 0.5))
+    return duration + 1e-6 >= floor
+
+
+def _collect(generator):
+    import numpy as np
+
+    pieces = []
+    sample_rate = 32000
+    for sample_rate, audio in generator:
+        audio = np.asarray(audio)
+        if audio.ndim > 1:
+            audio = np.squeeze(audio)
+        audio = audio.reshape(-1)
+        if _audible(audio):
+            pieces.append(audio)
+    if not pieces:
+        return int(sample_rate), None
+    if len(pieces) == 1:
+        return int(sample_rate), pieces[0]
+    return int(sample_rate), np.concatenate(pieces)
+
+
+def _synthesize(pipeline, request: dict) -> bool:
     import soundfile as sf
 
-    text = str(request.get("text") or "").strip()
+    raw = str(request.get("text") or "").strip()
     out_path = request.get("out_path")
-    if not text or not out_path:
+    if not raw or not out_path:
         raise ValueError("text and out_path are required")
 
-    generator = pipeline.run(
-        {
-            "text": text,
-            "text_lang": request.get("text_lang") or "zh",
-            "ref_audio_path": request["ref_audio_path"],
-            "prompt_text": request.get("prompt_text") or "",
-            "prompt_lang": request.get("prompt_lang") or "zh",
-            "text_split_method": "cut2",
-            "batch_size": 1,
-            "speed_factor": _clamped(request.get("speed_factor"), 1.0, 0.5, 2.0),
-            "temperature": _clamped(request.get("temperature"), 1.0, 0.2, 1.5),
-            "repetition_penalty": _clamped(request.get("repetition_penalty"), 1.35, 1.0, 2.0),
-            "seed": -1,
-            "parallel_infer": True,
-            "repetition_penalty": 1.35,
-            "streaming_mode": False,
-            "return_fragment": False,
-        }
-    )
-    sample_rate, audio = next(generator)
-    if pipeline.stop_flag:
-        return False
-    audio = np.asarray(audio)
-    if audio.ndim > 1:
-        audio = audio.reshape(-1)
-    if audio.size == 0 or int(np.max(np.abs(audio))) < 32:
+    text = _prepare_text(raw)
+    speed = _clamped(request.get("speed_factor"), 1.0, 0.5, 2.0)
+    temperature = _clamped(request.get("temperature"), 1.0, 0.2, 1.5)
+    repetition = _clamped(request.get("repetition_penalty"), 1.35, 1.0, 2.0)
+    top_k = int(_clamped(request.get("top_k"), 15, 1, 50))
+    top_p = _clamped(request.get("top_p"), 1.0, 0.1, 1.0)
+    best_rate = None
+    best_audio = None
+    for seed in (-1, 1):
+        generator = pipeline.run(
+            {
+                "text": text,
+                "text_lang": request.get("text_lang") or "zh",
+                "ref_audio_path": request["ref_audio_path"],
+                "prompt_text": request.get("prompt_text") or "",
+                "prompt_lang": request.get("prompt_lang") or "zh",
+                "text_split_method": _split_method(raw),
+                "batch_size": 1,
+                "split_bucket": False,
+                "speed_factor": speed,
+                "temperature": temperature,
+                "top_k": top_k,
+                "top_p": top_p,
+                "repetition_penalty": repetition,
+                "seed": seed,
+                "parallel_infer": False,
+                "streaming_mode": False,
+                "return_fragment": False,
+            }
+        )
+        sample_rate, audio = _collect(generator)
+        if getattr(pipeline, "stop_flag", False):
+            return False
+        if audio is None:
+            continue
+        if best_audio is None or audio.size > best_audio.size:
+            best_rate = sample_rate
+            best_audio = audio
+        if _long_enough(raw, audio, sample_rate, speed):
+            break
+    if best_audio is None:
         raise RuntimeError("合成结果没有声音")
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
-    sf.write(out_path, audio, int(sample_rate))
+    sf.write(out_path, best_audio, int(best_rate))
     return True
 
 
