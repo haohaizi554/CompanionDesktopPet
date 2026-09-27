@@ -4,6 +4,7 @@
 .pytest_cache/
 *.py[cod]
 .vs/
+.idea/
 publish/
 outputs/verify/
 outputs/standalone/
