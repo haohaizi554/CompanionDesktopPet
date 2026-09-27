@@ -15,6 +15,13 @@ from typing_extensions import Annotated, TypedDict
 from persona_dialogue.audit import audit, clean_reply
 from persona_dialogue.distill import render_prompt
 from persona_dialogue.retrieve import LineIndex
+from persona_dialogue.skills import (
+    SKILL_TOOLS,
+    apply_tool_calls,
+    normalize_settings,
+    setting_prompt,
+    wants_setting,
+)
 
 _MEMORY_LIMIT = 16
 _FALLBACK = "我在呢，你慢慢说。"
@@ -28,6 +35,8 @@ class DialogueState(TypedDict, total=False):
     attempts: int
     accepted: bool
     failure: str
+    settings: dict
+    actions: list
 
 
 def build_graph(model, soul: dict, index: LineIndex, checkpointer):
@@ -52,6 +61,7 @@ def build_graph(model, soul: dict, index: LineIndex, checkpointer):
                 "failure": "empty",
                 "attempts": 99,
                 "retrieved": [],
+                "actions": [],
             }
         if len(text) > 200:
             return {
@@ -61,6 +71,7 @@ def build_graph(model, soul: dict, index: LineIndex, checkpointer):
                 "failure": "long",
                 "attempts": 99,
                 "retrieved": [],
+                "actions": [],
             }
         return {
             "user_text": text,
@@ -69,6 +80,7 @@ def build_graph(model, soul: dict, index: LineIndex, checkpointer):
             "failure": "",
             "attempts": 0,
             "retrieved": [],
+            "actions": [],
             "messages": [HumanMessage(content=text)],
         }
 
@@ -76,15 +88,42 @@ def build_graph(model, soul: dict, index: LineIndex, checkpointer):
         return {"retrieved": index.search(state.get("user_text") or "", limit=4)}
 
     def draft(state: DialogueState) -> dict:
+        settings = normalize_settings(state.get("settings"))
+        text = state.get("user_text") or ""
+        history = list(state.get("messages") or [])[-12:]
+        if wants_setting(text):
+            response = _invoke(
+                model,
+                [SystemMessage(content=setting_prompt(settings)), HumanMessage(content=text)],
+                tools=True,
+                force=True,
+            )
+            calls = getattr(response, "tool_calls", None) or []
+            settings, actions, notes = apply_tool_calls(settings, calls)
+            if not actions:
+                return {
+                    "draft": "这下我没改成，你再说清楚一点。",
+                    "actions": [],
+                    "settings": settings,
+                }
+            spoken = model.invoke(
+                [
+                    SystemMessage(content="你是佳怡。用一句不超过二十个字的口语确认，不要提技能，不要列数字。"),
+                    HumanMessage(content="对方说：" + text + "。结果：" + " ".join(notes)),
+                ]
+            )
+            content = _message_text(spoken) or "好，我按你说的改了。"
+            return {"draft": content, "actions": actions, "settings": settings}
+
+        prompt = render_prompt(soul, state.get("retrieved") or [], state.get("failure") or "")
+        response = model.invoke([SystemMessage(content=prompt), *history])
+        return {"draft": _message_text(response), "actions": [], "settings": settings}
+
+    def rewrite(state: DialogueState) -> dict:
         prompt = render_prompt(soul, state.get("retrieved") or [], state.get("failure") or "")
         history = list(state.get("messages") or [])[-12:]
         response = model.invoke([SystemMessage(content=prompt), *history])
-        content = getattr(response, "content", response)
-        if isinstance(content, list):
-            content = "".join(
-                part.get("text", "") if isinstance(part, dict) else str(part) for part in content
-            )
-        return {"draft": str(content)}
+        return {"draft": _message_text(response)}
 
     def inspect(state: DialogueState) -> dict:
         cleaned = clean_reply(state.get("draft") or "")
@@ -116,11 +155,11 @@ def build_graph(model, soul: dict, index: LineIndex, checkpointer):
     def after_normalize(state: DialogueState) -> Literal["retrieve", "end"]:
         return "end" if state.get("accepted") else "retrieve"
 
-    def after_inspect(state: DialogueState) -> Literal["draft", "fallback", "end"]:
+    def after_inspect(state: DialogueState) -> Literal["rewrite", "fallback", "end"]:
         if state.get("accepted"):
             return "end"
         if int(state.get("attempts") or 0) < 2:
-            return "draft"
+            return "rewrite"
         return "fallback"
 
     builder = StateGraph(DialogueState)
@@ -128,6 +167,7 @@ def build_graph(model, soul: dict, index: LineIndex, checkpointer):
     builder.add_node("normalize", normalize)
     builder.add_node("retrieve", retrieve)
     builder.add_node("draft", draft)
+    builder.add_node("rewrite", rewrite)
     builder.add_node("inspect", inspect)
     builder.add_node("fallback", fallback)
     builder.add_edge(START, "trim")
@@ -142,7 +182,26 @@ def build_graph(model, soul: dict, index: LineIndex, checkpointer):
     builder.add_conditional_edges(
         "inspect",
         after_inspect,
-        {"draft": "draft", "fallback": "fallback", "end": END},
+        {"rewrite": "rewrite", "fallback": "fallback", "end": END},
     )
+    builder.add_edge("rewrite", "inspect")
     builder.add_edge("fallback", END)
     return builder.compile(checkpointer=checkpointer)
+
+
+def _invoke(model, messages, tools: bool, force: bool = False):
+    if tools and hasattr(model, "bind_tools"):
+        if force:
+            model = model.bind_tools(SKILL_TOOLS, tool_choice="required")
+        else:
+            model = model.bind_tools(SKILL_TOOLS)
+    return model.invoke(messages)
+
+
+def _message_text(response) -> str:
+    content = getattr(response, "content", response)
+    if isinstance(content, list):
+        content = "".join(
+            part.get("text", "") if isinstance(part, dict) else str(part) for part in content
+        )
+    return str(content or "").strip()

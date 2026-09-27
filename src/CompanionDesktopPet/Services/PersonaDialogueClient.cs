@@ -5,7 +5,7 @@ using System.Text.Json;
 
 namespace CompanionDesktopPet.Services;
 
-internal readonly record struct PersonaDialogueReply(bool Ok, string Text, bool Fallback);
+internal readonly record struct PersonaDialogueReply(bool Ok, string Text, bool Fallback, string Actions = "[]");
 
 internal sealed class PersonaDialogueClient : IDisposable
 {
@@ -122,7 +122,10 @@ internal sealed class PersonaDialogueClient : IDisposable
         }
     }
 
-    internal async Task<PersonaDialogueReply> ReplyAsync(string text, CancellationToken cancellationToken = default)
+    internal async Task<PersonaDialogueReply> ReplyAsync(
+        string text,
+        IReadOnlyDictionary<string, object?>? settings = null,
+        CancellationToken cancellationToken = default)
     {
         if (!IsReady || _stdin is null)
         {
@@ -138,16 +141,22 @@ internal sealed class PersonaDialogueClient : IDisposable
 
         try
         {
-            var payload = JsonSerializer.Serialize(new Dictionary<string, object?>
+            var payload = new Dictionary<string, object?>
             {
                 ["id"] = id,
                 ["type"] = "reply",
                 ["text"] = text,
                 ["thread_id"] = "jiayi"
-            });
+            };
+            if (settings is not null)
+            {
+                payload["settings"] = settings;
+            }
+
+            var json = JsonSerializer.Serialize(payload);
             lock (_gate)
             {
-                _stdin.WriteLine(payload);
+                _stdin.WriteLine(json);
             }
 
             return await pending.Task.WaitAsync(TimeSpan.FromSeconds(50), cancellationToken);
@@ -250,7 +259,10 @@ internal sealed class PersonaDialogueClient : IDisposable
             {
                 var text = root.TryGetProperty("text", out var textValue) ? textValue.GetString() ?? "" : "";
                 var fallback = root.TryGetProperty("fallback", out var fallbackValue) && fallbackValue.ValueKind == JsonValueKind.True;
-                pending.TrySetResult(new PersonaDialogueReply(true, text, fallback));
+                var actions = root.TryGetProperty("actions", out var actionsValue) && actionsValue.ValueKind == JsonValueKind.Array
+                    ? actionsValue.GetRawText()
+                    : "[]";
+                pending.TrySetResult(new PersonaDialogueReply(true, text, fallback, actions));
                 return;
             }
 

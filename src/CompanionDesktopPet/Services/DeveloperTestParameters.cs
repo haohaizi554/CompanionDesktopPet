@@ -1,3 +1,5 @@
+using CompanionDesktopPet.Models;
+
 namespace CompanionDesktopPet.Services;
 
 public sealed class DeveloperTestParameters
@@ -12,6 +14,10 @@ public sealed class DeveloperTestParameters
     public const double MaximumSpeechTemperature = 1.5;
     public const double MinimumSpeechRepetition = 1;
     public const double MaximumSpeechRepetition = 2;
+    public const int MinimumTopK = 1;
+    public const int MaximumTopK = 50;
+    public const double MinimumTopP = 0.1;
+    public const double MaximumTopP = 1;
 
     public int DayMinimumMinutes { get; set; } = 5;
     public int DayMaximumMinutes { get; set; } = 15;
@@ -25,6 +31,8 @@ public sealed class DeveloperTestParameters
     public double SpeechSpeed { get; set; } = 1;
     public double SpeechTemperature { get; set; } = 1;
     public double SpeechRepetition { get; set; } = 1.35;
+    public int TopK { get; set; } = 15;
+    public double TopP { get; set; } = 1;
 
     public static DeveloperTestParameters CreateDefault() => new();
 
@@ -41,7 +49,9 @@ public sealed class DeveloperTestParameters
         BubbleSeconds = BubbleSeconds,
         SpeechSpeed = SpeechSpeed,
         SpeechTemperature = SpeechTemperature,
-        SpeechRepetition = SpeechRepetition
+        SpeechRepetition = SpeechRepetition,
+        TopK = TopK,
+        TopP = TopP
     };
 
     public void CopyFrom(DeveloperTestParameters source)
@@ -59,7 +69,55 @@ public sealed class DeveloperTestParameters
         SpeechSpeed = source.SpeechSpeed;
         SpeechTemperature = source.SpeechTemperature;
         SpeechRepetition = source.SpeechRepetition;
+        TopK = source.TopK;
+        TopP = source.TopP;
     }
+
+    public bool TryCopyTuning(PetTuning tuning)
+    {
+        ArgumentNullException.ThrowIfNull(tuning);
+        var draft = Clone();
+        draft.DayMinimumMinutes = tuning.DayMinimumMinutes;
+        draft.DayMaximumMinutes = tuning.DayMaximumMinutes;
+        draft.EveningMinimumMinutes = tuning.EveningMinimumMinutes;
+        draft.EveningMaximumMinutes = tuning.EveningMaximumMinutes;
+        draft.LateNightMinimumMinutes = tuning.LateNightMinimumMinutes;
+        draft.LateNightMaximumMinutes = tuning.LateNightMaximumMinutes;
+        draft.FullscreenMinimumMinutes = tuning.FullscreenMinimumMinutes;
+        draft.FullscreenMaximumMinutes = tuning.FullscreenMaximumMinutes;
+        draft.BubbleSeconds = tuning.BubbleSeconds;
+        draft.SpeechSpeed = tuning.SpeechSpeed;
+        draft.SpeechTemperature = tuning.SpeechTemperature;
+        draft.SpeechRepetition = tuning.SpeechRepetition;
+        draft.TopK = tuning.TopK;
+        draft.TopP = tuning.TopP;
+        if (draft.Validate() is not null)
+        {
+            return false;
+        }
+
+        CopyFrom(draft);
+        return true;
+    }
+
+    public PetTuning ToTuning(bool voiceEnabled) => new()
+    {
+        DayMinimumMinutes = DayMinimumMinutes,
+        DayMaximumMinutes = DayMaximumMinutes,
+        EveningMinimumMinutes = EveningMinimumMinutes,
+        EveningMaximumMinutes = EveningMaximumMinutes,
+        LateNightMinimumMinutes = LateNightMinimumMinutes,
+        LateNightMaximumMinutes = LateNightMaximumMinutes,
+        FullscreenMinimumMinutes = FullscreenMinimumMinutes,
+        FullscreenMaximumMinutes = FullscreenMaximumMinutes,
+        BubbleSeconds = BubbleSeconds,
+        SpeechSpeed = SpeechSpeed,
+        SpeechTemperature = SpeechTemperature,
+        SpeechRepetition = SpeechRepetition,
+        TopK = TopK,
+        TopP = TopP,
+        VoiceEnabled = voiceEnabled
+    };
 
     internal (int Minimum, int Maximum) Window(AutomaticCadenceMode mode) => mode switch
     {
@@ -113,6 +171,16 @@ public sealed class DeveloperTestParameters
         if (!InSpeechRange(SpeechRepetition, MinimumSpeechRepetition, MaximumSpeechRepetition))
         {
             return $"重复要在 {MinimumSpeechRepetition:0.#} 到 {MaximumSpeechRepetition:0.#} 之间。";
+        }
+
+        if (TopK < MinimumTopK || TopK > MaximumTopK)
+        {
+            return $"采样个数要在 {MinimumTopK} 到 {MaximumTopK} 之间。";
+        }
+
+        if (!InSpeechRange(TopP, MinimumTopP, MaximumTopP))
+        {
+            return $"采样范围要在 {MinimumTopP:0.#} 到 {MaximumTopP:0.#} 之间。";
         }
 
         return null;

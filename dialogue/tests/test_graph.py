@@ -71,6 +71,70 @@ class GraphTests(unittest.TestCase):
         found = index.search("路口等车")
         self.assertEqual("路口的灯刚换，我们等车。", found[0])
 
+    def test_setting_request_is_recognized_and_plain_chat_is_not(self) -> None:
+        from persona_dialogue.skills import wants_setting
+
+        self.assertTrue(wants_setting("把语速调成0.9倍"))
+        self.assertFalse(wants_setting("我有点累"))
+
+    def test_skill_changes_speech_and_hidden_sampling_without_touching_other_fields(self) -> None:
+        from persona_dialogue.skills import DEFAULT_SETTINGS, apply_tool_calls
+
+        updated, actions, notes = apply_tool_calls(
+            DEFAULT_SETTINGS,
+            [{"name": "set_speech", "args": {"speed": 0.8, "top_k": 8}, "id": "s1"}],
+        )
+        self.assertEqual(0.8, updated["speech_speed"])
+        self.assertEqual(1.0, updated["speech_temperature"])
+        self.assertEqual(8, updated["top_k"])
+        self.assertEqual(1.0, updated["top_p"])
+        self.assertEqual("set_speech", actions[0]["skill"])
+        self.assertEqual(0.8, actions[0]["speed"])
+        self.assertNotIn("temperature", actions[0])
+        self.assertTrue(notes[0])
+
+        unchanged, rejected, _notes = apply_tool_calls(
+            DEFAULT_SETTINGS,
+            [{"name": "set_speech", "args": {"speed": 9}, "id": "s2"}],
+        )
+        self.assertEqual([], rejected)
+        self.assertEqual(1.0, unchanged["speech_speed"])
+
+    def test_tool_call_is_applied_once_and_the_next_turn_does_not_repeat_it(self) -> None:
+        model = ToolThenSpeechModel()
+        index = LineIndex(["你先把杯子放下。"])
+        with tempfile.TemporaryDirectory() as directory:
+            with SqliteSaver.from_conn_string(str(Path(directory) / "memory.sqlite")) as saver:
+                graph = build_graph(model, SOUL, index, saver)
+                config = {"configurable": {"thread_id": "jiayi"}, "recursion_limit": 12}
+                first = graph.invoke({"user_text": "语速慢一点", "settings": {}}, config)
+                self.assertEqual("好，我慢一点说。", first["draft"])
+                self.assertEqual([{"skill": "set_bubble", "seconds": 8}], first["actions"])
+
+                second = graph.invoke({"user_text": "嗯", "settings": first["settings"]}, config)
+                self.assertEqual("我听着呢。", second["draft"])
+                self.assertEqual([], second["actions"])
+
+
+class ToolThenSpeechModel:
+    def __init__(self) -> None:
+        self.phase = 0
+
+    def bind_tools(self, tools, **_kwargs):
+        self.tools = tools
+        return self
+
+    def invoke(self, messages):
+        self.phase += 1
+        if self.phase == 1:
+            return AIMessage(
+                content="",
+                tool_calls=[{"name": "set_bubble", "args": {"seconds": 8}, "id": "c1"}],
+            )
+        if self.phase == 2:
+            return AIMessage(content="好，我慢一点说。")
+        return AIMessage(content="我听着呢。")
+
 
 if __name__ == "__main__":
     unittest.main()

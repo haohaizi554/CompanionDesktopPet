@@ -11,7 +11,7 @@ internal interface IVoiceSpeaker : IDisposable
 
     void Speak(string text, string? tone, string? trigger = null, bool urgent = false);
 
-    void ApplySpeech(double speed, double temperature, double repetitionPenalty);
+    void ApplySpeech(double speed, double temperature, double repetitionPenalty, int topK, double topP);
 
     void Stop();
 
@@ -54,6 +54,8 @@ internal sealed class JiayiVoiceSpeaker : IVoiceSpeaker
     private double _speechSpeed = 1;
     private double _speechTemperature = 1;
     private double _speechRepetition = 1.35;
+    private int _topK = 15;
+    private double _topP = 1;
 
     private JiayiVoiceSpeaker(VoiceRuntime runtime, JiayiVoicePack pack, string scriptPath)
     {
@@ -132,13 +134,15 @@ internal sealed class JiayiVoiceSpeaker : IVoiceSpeaker
         _work.Set();
     }
 
-    public void ApplySpeech(double speed, double temperature, double repetitionPenalty)
+    public void ApplySpeech(double speed, double temperature, double repetitionPenalty, int topK, double topP)
     {
         lock (_pendingGate)
         {
             _speechSpeed = speed;
             _speechTemperature = temperature;
             _speechRepetition = repetitionPenalty;
+            _topK = topK;
+            _topP = topP;
         }
     }
 
@@ -248,11 +252,15 @@ internal sealed class JiayiVoiceSpeaker : IVoiceSpeaker
                 var speed = _speechSpeed;
                 var temperature = _speechTemperature;
                 var repetition = _speechRepetition;
+                var topK = _topK;
+                var topP = _topP;
                 lock (_pendingGate)
                 {
                     speed = _speechSpeed;
                     temperature = _speechTemperature;
                     repetition = _speechRepetition;
+                    topK = _topK;
+                    topP = _topP;
                     if (Volatile.Read(ref _ready) == 1 && Enabled)
                     {
                         turn = _queue.TryStartSynthesis();
@@ -288,7 +296,9 @@ internal sealed class JiayiVoiceSpeaker : IVoiceSpeaker
                     out_path = outPath,
                     speed_factor = speed,
                     temperature,
-                    repetition_penalty = repetition
+                    repetition_penalty = repetition,
+                    top_k = topK,
+                    top_p = topP
                 });
                 SynthesisStarted?.Invoke(turn.Value.Text);
                 if (!TryWrite(request) && Volatile.Read(ref _disposed) == 0)

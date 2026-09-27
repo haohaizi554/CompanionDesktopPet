@@ -60,6 +60,8 @@ def main() -> int:
                         "accepted": False,
                         "failure": "",
                         "retrieved": [],
+                        "settings": message.get("settings") if isinstance(message.get("settings"), dict) else {},
+                        "actions": [],
                     },
                     config={
                         "configurable": {"thread_id": str(message.get("thread_id") or "jiayi")},
@@ -72,6 +74,7 @@ def main() -> int:
                         "type": "reply",
                         "text": result.get("draft") or "",
                         "fallback": result.get("failure") == "fallback",
+                        "actions": result.get("actions") or [],
                     }
                 )
             except Exception as error:  # noqa: BLE001 - one bad turn must not kill the process.

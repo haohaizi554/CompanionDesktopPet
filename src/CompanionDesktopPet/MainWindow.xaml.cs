@@ -93,8 +93,11 @@ public partial class MainWindow : Window
     private bool _voiceLibraryMenuBuilt;
     private readonly IVoiceSpeaker? _voice;
     private readonly PersonaDialogueClient? _personaDialogue;
+    private readonly DialogueSendQueue _dialogueQueue = new();
+    private DialogueComposerWindow? _dialogueComposer;
     private int _personaDialogueSession;
-    private int _personaDialogueBusy;
+    private int _dialoguePump;
+    private TaskCompletionSource<bool>? _dialogueSpoken;
     private readonly DispatcherTimer _voiceProgressTimer;
     private SoundPlayer? _voicePlayer;
     private bool _voiceLineActive;
@@ -178,6 +181,7 @@ public partial class MainWindow : Window
         Loaded += Window_Loaded;
         ContentRendered += Window_ContentRendered;
         LocationChanged += Window_LocationChanged;
+        Closing += (_, _) => _dialogueComposer?.CloseForShutdown();
         Closed += Window_Closed;
         PetImage.PreviewMouseLeftButtonDown += PetImage_MouseLeftButtonDown;
         PetImage.PreviewMouseMove += PetImage_MouseMove;
@@ -222,7 +226,22 @@ public partial class MainWindow : Window
         CorpusMenuItem.SubmenuOpened += CorpusMenu_SubmenuOpened;
         BrowseVoiceLibraryMenuItem.Click += BrowseVoiceLibrary_Click;
         VoiceLibraryMenuItem.SubmenuOpened += VoiceLibraryMenu_SubmenuOpened;
+        if (_settings.Tuning is { } tuning && _developerParameters.TryCopyTuning(tuning))
+        {
+            if (_voice is not null)
+            {
+                _voice.Enabled = tuning.VoiceEnabled;
+                VoiceMenuItem.IsChecked = tuning.VoiceEnabled;
+            }
+        }
+
         WriteDeveloperDraft(_developerParameters);
+        _voice?.ApplySpeech(
+            _developerParameters.SpeechSpeed,
+            _developerParameters.SpeechTemperature,
+            _developerParameters.SpeechRepetition,
+            _developerParameters.TopK,
+            _developerParameters.TopP);
         UpdateTrayAvailabilityControls();
         _bubbleTimer.Tick += BubbleTimer_Tick;
         _automaticTimer.Tick += AutomaticTimer_Tick;
@@ -836,6 +855,7 @@ public partial class MainWindow : Window
         }
 
         PositionBubble();
+        PositionDialogue();
     }
 
     private void PetImage_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
@@ -1044,16 +1064,212 @@ public partial class MainWindow : Window
         {
             _personaDialogueSession++;
             _personaDialogue?.Stop();
+            _dialogueQueue.Clear();
         }
 
         _ = SaveSettingsAsync(skipWhenExiting: true);
     }
 
+    private DialogueComposerWindow Composer => _dialogueComposer ??= CreateComposer();
+
+    private DialogueComposerWindow CreateComposer()
+    {
+        var composer = new DialogueComposerWindow { Owner = this, Topmost = Topmost };
+        composer.SendRequested += (_, _) => SubmitDialogue();
+        return composer;
+    }
+
+    private int _dialoguePosition;
+
     private void UpdateDialogueComposer()
     {
-        DialogueComposer.Visibility = DialogueMenuItem.IsChecked
-            ? Visibility.Visible
-            : Visibility.Collapsed;
+        var open = DialogueMenuItem.IsChecked && !_isHiddenToTray;
+        if (!open)
+        {
+            _dialogueComposer?.Hide();
+            return;
+        }
+
+        var composer = Composer;
+        composer.Topmost = Topmost;
+        if (!composer.IsVisible)
+        {
+            Dispatcher.BeginInvoke(OpenDialogueComposer, DispatcherPriority.ApplicationIdle);
+            return;
+        }
+
+        PositionDialogue();
+    }
+
+    private void OpenDialogueComposer()
+    {
+        if (_dialogueComposer is not { } composer || composer.IsVisible || !DialogueMenuItem.IsChecked || _isHiddenToTray)
+        {
+            return;
+        }
+
+        composer.Topmost = Topmost;
+        composer.ApplySide(DialoguePlacementSide.Below);
+        PositionDialogue();
+        composer.Show();
+        composer.FocusInput();
+    }
+
+    private void PositionDialogue()
+    {
+        if (_dialoguePosition > 0
+            || _dialogueComposer is not { } composer
+            || !DialogueMenuItem.IsChecked
+            || _isHiddenToTray)
+        {
+            return;
+        }
+
+        _dialoguePosition++;
+        try
+        {
+            var size = composer.MeasureSurface();
+            if (size.Width <= 0 || size.Height <= 0)
+            {
+                return;
+            }
+
+            var workAreas = WorkAreaService.GetWorkAreas();
+            if (workAreas.Count == 0)
+            {
+                return;
+            }
+
+            var character = GetCharacterScreenBounds();
+            var center = new ScreenPoint(
+                character.Left + (character.Width / 2),
+                character.Top + (character.Height / 2));
+            var workArea = workAreas.FirstOrDefault(area => area.Contains(center));
+            if (workArea.Width <= 0)
+            {
+                workArea = workAreas[0];
+            }
+
+            var safeWorkArea = new ScreenRect(
+                workArea.Left + BubbleShadowSafety,
+                workArea.Top + BubbleShadowSafety,
+                Math.Max(0, workArea.Width - (BubbleShadowSafety * 2)),
+                Math.Max(0, workArea.Height - (BubbleShadowSafety * 2)));
+            var placement = DialoguePlacementService.Place(
+                character,
+                new ScreenSize(size.Width, size.Height),
+                safeWorkArea);
+            composer.ApplySide(placement.Side);
+            var left = placement.Origin.X - BubbleShadowSafety;
+            var top = placement.Origin.Y - BubbleShadowSafety;
+            if (double.IsNaN(composer.Left) || Math.Abs(composer.Left - left) > 0.5)
+            {
+                composer.Left = left;
+            }
+
+            if (double.IsNaN(composer.Top) || Math.Abs(composer.Top - top) > 0.5)
+            {
+                composer.Top = top;
+            }
+        }
+        finally
+        {
+            _dialoguePosition--;
+        }
+    }
+
+    private void SubmitDialogue()
+    {
+        if (_dialogueComposer is null)
+        {
+            return;
+        }
+
+        if (InteractionFrozen || _personaDialogue is not { IsReady: true })
+        {
+            ShowBubble("我还在醒，等一下再说。");
+            return;
+        }
+
+        var text = _dialogueComposer.Draft;
+        if (!_dialogueQueue.TryEnqueue(text))
+        {
+            return;
+        }
+
+        _dialogueComposer.ClearDraft();
+        StartDialoguePump();
+    }
+
+    private void StartDialoguePump()
+    {
+        if (Interlocked.CompareExchange(ref _dialoguePump, 1, 0) != 0)
+        {
+            return;
+        }
+
+        _ = PumpDialogueAsync();
+    }
+
+    private async Task PumpDialogueAsync()
+    {
+        try
+        {
+            while (_dialogueQueue.TryDequeue(out var text))
+            {
+                if (InteractionFrozen || !DialogueMenuItem.IsChecked || _personaDialogue is not { IsReady: true })
+                {
+                    _dialogueQueue.Clear();
+                    break;
+                }
+
+                ShowBubble("……");
+                var reply = await _personaDialogue.ReplyAsync(
+                    text,
+                    DialogueSkills.Describe(
+                        _developerParameters,
+                        _scale,
+                        Topmost,
+                        _paused,
+                        _voice is { Enabled: true }));
+                if (InteractionFrozen || !DialogueMenuItem.IsChecked)
+                {
+                    _dialogueQueue.Clear();
+                    break;
+                }
+
+                ApplyDialogueActions(reply.Actions);
+
+                var answer = reply.Ok && !string.IsNullOrWhiteSpace(reply.Text)
+                    ? reply.Text
+                    : "这句话我没接住，你再说一次。";
+                var speak = reply.Ok && _voice is { Enabled: true };
+                var spoken = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                if (speak)
+                {
+                    _dialogueSpoken = spoken;
+                }
+
+                ShowBubble(answer, speak: speak, tone: "gentle", urgent: true);
+                if (speak && _voiceLineActive)
+                {
+                    await Task.WhenAny(spoken.Task, Task.Delay(TimeSpan.FromSeconds(90)));
+                }
+
+                if (ReferenceEquals(_dialogueSpoken, spoken))
+                {
+                    _dialogueSpoken = null;
+                }
+            }
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _dialoguePump, 0);
+            if (_dialogueQueue.Count > 0)
+            {
+                StartDialoguePump();
+            }
+        }
     }
 
     private async Task EnsurePersonaDialogueAsync()
@@ -1086,61 +1302,6 @@ public partial class MainWindow : Window
                 ? "对话暂时没连上。"
                 : "对话暂时没连上。");
             _ = SaveSettingsAsync(skipWhenExiting: true);
-        }
-    }
-
-    private async void DialogueSend_Click(object sender, RoutedEventArgs e) =>
-        await SendPersonaDialogueAsync();
-
-    private async void DialogueInput_KeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key != Key.Enter)
-        {
-            return;
-        }
-
-        e.Handled = true;
-        await SendPersonaDialogueAsync();
-    }
-
-    private async Task SendPersonaDialogueAsync()
-    {
-        if (InteractionFrozen || _personaDialogue is not { IsReady: true })
-        {
-            ShowBubble("我还在醒，等一下再说。");
-            return;
-        }
-
-        var text = DialogueInput.Text.Trim();
-        if (text.Length == 0)
-        {
-            return;
-        }
-
-        if (Interlocked.Exchange(ref _personaDialogueBusy, 1) == 1)
-        {
-            return;
-        }
-
-        DialogueInput.Clear();
-        try
-        {
-            ShowBubble("……");
-            var reply = await _personaDialogue.ReplyAsync(text);
-            if (InteractionFrozen)
-            {
-                return;
-            }
-
-            ShowBubble(
-                reply.Ok && !string.IsNullOrWhiteSpace(reply.Text) ? reply.Text : "这句话我没接住，你再说一次。",
-                speak: reply.Ok,
-                tone: "gentle",
-                urgent: true);
-        }
-        finally
-        {
-            Interlocked.Exchange(ref _personaDialogueBusy, 0);
         }
     }
 
@@ -1197,6 +1358,7 @@ public partial class MainWindow : Window
         }
 
         FinishVoiceHold(linger: true);
+        _dialogueSpoken?.TrySetResult(true);
     }
 
     private void OnVoicePlaybackReady(VoiceClip clip)
@@ -1469,6 +1631,7 @@ public partial class MainWindow : Window
         SpeechBubble.Visibility = Visibility.Collapsed;
         BubblePopup.IsOpen = false;
         _bubbleSuspendedForWindowHide = false;
+        PositionDialogue();
     }
 
     private void PositionBubble()
@@ -1534,6 +1697,7 @@ public partial class MainWindow : Window
         // coordinates change with the character and keep the bubble physically anchored.
         BubblePopup.HorizontalOffset = placement.Origin.X - BubbleShadowSafety;
         BubblePopup.VerticalOffset = placement.Origin.Y - BubbleShadowSafety;
+        PositionDialogue();
     }
 
     internal void SynchronizeBubbleTimer()
@@ -2065,6 +2229,7 @@ public partial class MainWindow : Window
         Left = clamped.X;
         Top = clamped.Y;
         PositionBubble();
+        PositionDialogue();
         ShowEventBubble(CompanionEvent.SizeChanged, LocalNow, ObserveFullscreen());
         await SaveSettingsAsync(skipWhenExiting: true);
     }
@@ -2092,6 +2257,11 @@ public partial class MainWindow : Window
         }
 
         Topmost = TopmostMenuItem.IsChecked;
+        if (_dialogueComposer is not null)
+        {
+            _dialogueComposer.Topmost = Topmost;
+        }
+
         await SaveSettingsAsync(skipWhenExiting: true);
     }
 
@@ -2132,6 +2302,7 @@ public partial class MainWindow : Window
             _bubbleTimer.Stop();
             _bubbleSuspendedForWindowHide = BubblePopup.IsOpen;
             BubblePopup.IsOpen = false;
+            _dialogueComposer?.Hide();
             StopVoicePlayback();
             Hide();
         }
@@ -2234,6 +2405,10 @@ public partial class MainWindow : Window
         _bubbleCountdown.Resume();
         SynchronizeBubbleTimer();
         PositionBubble();
+        if (DialogueMenuItem.IsChecked)
+        {
+            UpdateDialogueComposer();
+        }
         if (resumingFromTray)
         {
             var replayDisplayed = ConsumePendingDialogueWarmupOutcome(
@@ -2706,6 +2881,103 @@ public partial class MainWindow : Window
         ShowBubble(line.Text, speak: true, tone: line.Tone, trigger: line.Trigger.ToString(), urgent: true);
     }
 
+    private void ApplyDialogueActions(string actionsJson)
+    {
+        if (!DialogueSkills.TryApply(
+                actionsJson,
+                _developerParameters,
+                _scale,
+                Topmost,
+                _paused,
+                _voice is { Enabled: true },
+                out var state)
+            || !state.Changed)
+        {
+            return;
+        }
+
+        ApplyDeveloperParameters(state.Timing);
+        if (_scale != state.Scale)
+        {
+            ResizeWithoutAnnouncement(state.Scale);
+        }
+
+        if (Topmost != state.AlwaysOnTop)
+        {
+            Topmost = state.AlwaysOnTop;
+            TopmostMenuItem.IsChecked = state.AlwaysOnTop;
+            if (_dialogueComposer is not null)
+            {
+                _dialogueComposer.Topmost = state.AlwaysOnTop;
+            }
+        }
+
+        if (_paused != state.AnimationPaused)
+        {
+            SetAnimationPaused(state.AnimationPaused);
+        }
+
+        if (_voice is not null && _voice.Enabled != state.VoiceEnabled)
+        {
+            _voice.Enabled = state.VoiceEnabled;
+            VoiceMenuItem.IsChecked = state.VoiceEnabled;
+            if (!state.VoiceEnabled)
+            {
+                StopVoicePlayback();
+            }
+        }
+
+        WriteDeveloperDraft(state.Timing);
+        _ = SaveSettingsAsync(skipWhenExiting: true);
+    }
+
+    private void ResizeWithoutAnnouncement(PetScale scale)
+    {
+        _scale = scale;
+        var previousCharacter = GetCharacterScreenBounds();
+        ApplyScale(scale);
+        UpdateLayout();
+        var localBounds = GetCharacterLocalBounds();
+        var requested = new ScreenPoint(
+            previousCharacter.Left + (previousCharacter.Width / 2)
+                - localBounds.Left - (localBounds.Width / 2),
+            previousCharacter.Bottom - localBounds.Bottom);
+        var clamped = ScreenPlacementService.ClampVisibleBounds(
+            requested,
+            localBounds,
+            WorkAreaService.GetWorkAreas());
+        Left = clamped.X;
+        Top = clamped.Y;
+        PositionBubble();
+        PositionDialogue();
+    }
+
+    private void SetAnimationPaused(bool paused)
+    {
+        if (_paused == paused)
+        {
+            return;
+        }
+
+        _paused = paused;
+        if (_paused)
+        {
+            PreserveScheduledStartupGreeting();
+            InvalidateAmbientSchedule();
+            CancelActiveAmbientAction();
+            _actionCoordinator.Pause();
+            _animation.PauseIdle();
+        }
+        else
+        {
+            _animation.ResumeIdle();
+            _actionCoordinator.Resume();
+            ScheduleNextAmbientAction();
+        }
+
+        UpdatePauseLabel();
+    }
+
     private void ApplyDeveloperParameters(DeveloperTestParameters draft)
     {
         _developerParameters.CopyFrom(draft);
@@ -2714,7 +2986,9 @@ public partial class MainWindow : Window
         _voice?.ApplySpeech(
             _developerParameters.SpeechSpeed,
             _developerParameters.SpeechTemperature,
-            _developerParameters.SpeechRepetition);
+            _developerParameters.SpeechRepetition,
+            _developerParameters.TopK,
+            _developerParameters.TopP);
         if (!PresentationSuspended)
         {
             ArmAutomaticTimer(LocalNow, ObserveFullscreen());
@@ -2740,6 +3014,7 @@ public partial class MainWindow : Window
 
         ParameterErrorText.Text = string.Empty;
         ApplyDeveloperParameters(draft);
+        _ = SaveSettingsAsync(skipWhenExiting: true);
         var voiceOn = _voice is { Enabled: true };
         ParameterStatusText.Text = keepStatus
             ? voiceOn
@@ -3062,7 +3337,8 @@ public partial class MainWindow : Window
 
             _settings = new PetSettings(Left, Top, _scale, _paused, Topmost)
             {
-                DialogueEnabled = DialogueMenuItem.IsChecked
+                DialogueEnabled = DialogueMenuItem.IsChecked,
+                Tuning = _developerParameters.ToTuning(_voice is { Enabled: true })
             };
             await _saveSettingsAsync(_settings);
         }
@@ -3094,6 +3370,7 @@ public partial class MainWindow : Window
         _bubbleTimer.Stop();
         StopVoicePlayback();
         _voice?.Dispose();
+        _dialogueComposer?.CloseForShutdown();
         _personaDialogue?.Dispose();
         _memoryTimer.Stop();
         _eventTimer.Stop();
