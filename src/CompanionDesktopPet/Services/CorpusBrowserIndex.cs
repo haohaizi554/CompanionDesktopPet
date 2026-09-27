@@ -122,71 +122,36 @@ public static class CorpusBrowserIndex
         }
 
         var topicIds = byTopic.Keys.ToArray();
-        return new CorpusFolder(
-            CorpusLabels.Category(category),
-            lines.ToArray(),
-            Fold(byTopic, (topicId, topicLines) => BuildTopic(topicId, topicLines, topicIds)));
-    }
-
-    private static CorpusFolder BuildTopic(
-        string topicId,
-        List<DialogueLine> lines,
-        IReadOnlyList<string> topicSiblings)
-    {
-        var byScene = new Dictionary<string, List<DialogueLine>>(StringComparer.Ordinal);
-        foreach (var line in lines)
+        Array.Sort(topicIds, StringComparer.Ordinal);
+        var byFamily = new Dictionary<string, List<DialogueLine>>(StringComparer.Ordinal);
+        foreach (var topicId in topicIds)
         {
-            Add(byScene, line.SemanticGroup, line);
-        }
-
-        var sceneIds = byScene.Keys.ToArray();
-        var scenes = Fold(byScene, (sceneId, sceneLines) => new CorpusFolder(
-            DisplayId(sceneId, sceneIds),
-            sceneLines.ToArray(),
-            []));
-        // A topic with one scene repeats the same label as an extra menu and tree row.
-        if (scenes.Length == 1)
-        {
-            return new CorpusFolder(DisplayId(topicId, topicSiblings), lines.ToArray(), []);
-        }
-
-        return new CorpusFolder(DisplayId(topicId, topicSiblings), lines.ToArray(), scenes);
-    }
-
-    private static CorpusFolder[] Fold(
-        Dictionary<string, List<DialogueLine>> map,
-        Func<string, List<DialogueLine>, CorpusFolder> build)
-    {
-        var keys = map.Keys.ToArray();
-        Array.Sort(keys, StringComparer.Ordinal);
-        var folders = new CorpusFolder[keys.Length];
-        for (var index = 0; index < keys.Length; index++)
-        {
-            folders[index] = build(keys[index], map[keys[index]]);
-        }
-
-        return folders;
-    }
-
-    private static string DisplayId(string id, IReadOnlyList<string> siblings)
-    {
-        var leaf = Leaf(id);
-        var collisions = 0;
-        foreach (var sibling in siblings)
-        {
-            if (Leaf(sibling) == leaf)
+            var topicLines = byTopic[topicId];
+            var family = CorpusMenuTaxonomy.Assign(category, topicId, topicLines);
+            if (!byFamily.TryGetValue(family, out var familyLines))
             {
-                collisions++;
+                familyLines = [];
+                byFamily[family] = familyLines;
+            }
+
+            familyLines.AddRange(topicLines);
+        }
+
+        var children = new List<CorpusFolder>();
+        foreach (var title in CorpusMenuTaxonomy.Order(category))
+        {
+            if (byFamily.Remove(title, out var familyLines))
+            {
+                children.Add(new CorpusFolder(title, familyLines.ToArray(), []));
             }
         }
 
-        return collisions > 1 ? id : leaf;
-    }
+        foreach (var pair in byFamily)
+        {
+            children.Add(new CorpusFolder(pair.Key, pair.Value.ToArray(), []));
+        }
 
-    private static string Leaf(string id)
-    {
-        var dot = id.LastIndexOf('.');
-        return dot >= 0 && dot < id.Length - 1 ? id[(dot + 1)..] : id;
+        return new CorpusFolder(CorpusLabels.Category(category), lines.ToArray(), children.ToArray());
     }
 
     private static void Add<TKey>(
