@@ -10,7 +10,7 @@ from pathlib import Path
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 
-from persona_dialogue.graph import build_graph
+from persona_dialogue.graph import build_graph, remember_line
 from persona_dialogue.llm import LlmConfig, build_model
 from persona_dialogue.retrieve import LineIndex
 
@@ -48,6 +48,15 @@ def main() -> int:
             kind = message.get("type")
             if kind == "exit":
                 return 0
+            thread_id = str(message.get("thread_id") or "jiayi")
+            if kind == "remember":
+                try:
+                    remember_line(graph, thread_id, str(message.get("text") or ""))
+                    _emit({"id": message.get("id"), "type": "remembered"})
+                except Exception as error:  # noqa: BLE001 - one bad line must not kill the process.
+                    traceback.print_exc(file=sys.stderr)
+                    _emit({"id": message.get("id"), "type": "error", "message": str(error)})
+                continue
             if kind != "reply":
                 _emit({"id": message.get("id"), "type": "error", "message": "未知请求"})
                 continue
@@ -64,7 +73,7 @@ def main() -> int:
                         "actions": [],
                     },
                     config={
-                        "configurable": {"thread_id": str(message.get("thread_id") or "jiayi")},
+                        "configurable": {"thread_id": thread_id},
                         "recursion_limit": 12,
                     },
                 )

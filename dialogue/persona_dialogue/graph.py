@@ -2,6 +2,7 @@
 
 顺序是固定的：裁剪记忆、收下这句话、检索原句、按人物卡起草、审计。
 审计不过就重写一次。还是不过，就退回一句本地的短话，不把模型原文送去朗读。
+她自己先说出口的语料句，用 remember_line 写进同一条记忆，不另叫模型。
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from persona_dialogue.skills import (
 )
 
 _MEMORY_LIMIT = 16
+_REMEMBER_LIMIT = 120
 _FALLBACK = "我在呢，你慢慢说。"
 
 
@@ -90,7 +92,6 @@ def build_graph(model, soul: dict, index: LineIndex, checkpointer):
     def draft(state: DialogueState) -> dict:
         settings = normalize_settings(state.get("settings"))
         text = state.get("user_text") or ""
-        history = list(state.get("messages") or [])[-12:]
         if wants_setting(text):
             response = _invoke(
                 model,
@@ -115,13 +116,24 @@ def build_graph(model, soul: dict, index: LineIndex, checkpointer):
             content = _message_text(spoken) or "好，我按你说的改了。"
             return {"draft": content, "actions": actions, "settings": settings}
 
-        prompt = render_prompt(soul, state.get("retrieved") or [], state.get("failure") or "")
+        history = list(state.get("messages") or [])[-12:]
+        prompt = render_prompt(
+            soul,
+            state.get("retrieved") or [],
+            state.get("failure") or "",
+            prior=_prior_spoken(history),
+        )
         response = model.invoke([SystemMessage(content=prompt), *history])
         return {"draft": _message_text(response), "actions": [], "settings": settings}
 
     def rewrite(state: DialogueState) -> dict:
-        prompt = render_prompt(soul, state.get("retrieved") or [], state.get("failure") or "")
         history = list(state.get("messages") or [])[-12:]
+        prompt = render_prompt(
+            soul,
+            state.get("retrieved") or [],
+            state.get("failure") or "",
+            prior=_prior_spoken(history),
+        )
         response = model.invoke([SystemMessage(content=prompt), *history])
         return {"draft": _message_text(response)}
 
@@ -187,6 +199,41 @@ def build_graph(model, soul: dict, index: LineIndex, checkpointer):
     builder.add_edge("rewrite", "inspect")
     builder.add_edge("fallback", END)
     return builder.compile(checkpointer=checkpointer)
+
+
+def remember_line(graph, thread_id: str, text: str) -> bool:
+    """把她已经说出口的语料句写进对话记忆。不调用模型。"""
+    cleaned = " ".join((text or "").split()).strip()
+    if not cleaned:
+        return False
+    if len(cleaned) > _REMEMBER_LIMIT:
+        cleaned = cleaned[:_REMEMBER_LIMIT].rstrip()
+    config = {"configurable": {"thread_id": thread_id or "jiayi"}}
+    snapshot = graph.get_state(config)
+    messages = list((snapshot.values or {}).get("messages") or [])
+    if messages and _message_text(messages[-1]) == cleaned:
+        return False
+    graph.update_state(config, {"messages": [AIMessage(content=cleaned)]}, as_node="inspect")
+    snapshot = graph.get_state(config)
+    messages = list((snapshot.values or {}).get("messages") or [])
+    if len(messages) > _MEMORY_LIMIT:
+        expired = [
+            RemoveMessage(id=message.id)
+            for message in messages[:-_MEMORY_LIMIT]
+            if getattr(message, "id", None)
+        ]
+        if expired:
+            graph.update_state(config, {"messages": expired}, as_node="trim")
+    return True
+
+
+def _prior_spoken(messages: list) -> str:
+    for message in reversed(messages):
+        if isinstance(message, HumanMessage):
+            continue
+        if isinstance(message, AIMessage):
+            return _message_text(message)
+    return ""
 
 
 def _invoke(model, messages, tools: bool, force: bool = False):

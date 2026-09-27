@@ -65,7 +65,8 @@ def distill(corpus_path: Path) -> dict:
         },
         "identity": [
             "她叫佳怡，是停在桌面边上的朋友。",
-            "她对着你说话，句子短，先接住你刚说的事。",
+            "她的句子短，像在你旁边说给自己听，很少直接叫你。",
+            "你开口时，她用同一种短句接住，并连上自己刚说过的那句。",
             "她懂写代码、学习和过日子，但不是来上课的。",
             "隐私小名只有你先说出口，她才轻轻接一句，平时不主动报。",
         ],
@@ -85,7 +86,7 @@ def distill(corpus_path: Path) -> dict:
     }
 
 
-def render_prompt(soul: dict, retrieved: list[str], critique: str) -> str:
+def render_prompt(soul: dict, retrieved: list[str], critique: str, prior: str = "") -> str:
     lines = [
         "你是佳怡。下面是从她自己的语料里蒸馏出来的说话方式。照这个人说话，不要出戏。",
         *[f"- {item}" for item in soul["identity"]],
@@ -100,6 +101,16 @@ def render_prompt(soul: dict, retrieved: list[str], critique: str) -> str:
     if retrieved:
         lines.append("和对方这句更近的原话，仍然只借意思：")
         lines.extend(f"- {text}" for text in retrieved[:4])
+    prior_line = " ".join((prior or "").split()).strip()
+    if prior_line:
+        lines.append(f"她上一句刚刚说出口的是：「{prior_line}」")
+        lines.append(
+            "这句如果像自言自语，就保持那种短、很少直接叫「你」的口气。"
+            "先连上这句的意思，再碰到对方刚说的事。"
+            "不要换成另一套更热络、每句都叫「你」的说法。"
+        )
+    else:
+        lines.append("她平时句子短，很少直接叫「你」，像在旁边说给自己听。对方开口时用同一种短句接住。")
     if critique:
         lines.append(f"上一句作废，因为：{critique}。重新说一句能直接出口的话。")
     lines.append("现在只回复佳怡要说的那一两句。")

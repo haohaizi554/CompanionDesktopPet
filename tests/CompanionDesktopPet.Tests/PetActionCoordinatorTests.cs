@@ -45,6 +45,21 @@ public sealed class PetActionCoordinatorTests
     }
 
     [Fact]
+    public void CancelDrag_ReturnsToIdleOrPausedWithoutLanding()
+    {
+        var coordinator = new PetActionCoordinator();
+
+        coordinator.BeginDrag();
+        coordinator.CancelDrag();
+        Assert.Equal(PetActionState.Idle, coordinator.State);
+
+        coordinator.Pause();
+        coordinator.BeginDrag();
+        coordinator.CancelDrag();
+        Assert.Equal(PetActionState.Paused, coordinator.State);
+    }
+
+    [Fact]
     public void ResumeDuringDrag_ClearsThePausedLandingDestination()
     {
         var coordinator = new PetActionCoordinator();

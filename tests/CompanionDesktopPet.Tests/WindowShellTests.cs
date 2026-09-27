@@ -3299,6 +3299,27 @@ public sealed class WindowShellTests
     }
 
     [Fact]
+    public void MainWindow_DragReleaseDoesNotStartANewLine()
+    {
+        RunOnStaThread(() =>
+        {
+            var settingsDirectory = CreateSettingsDirectory();
+            var window = CreateWindow(settingsDirectory);
+            window.Show();
+            window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+            var replyBeforeDrag = GetLastReply(window);
+
+            window.BeginDragGesture();
+            window.FinishDragOnce();
+            window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+
+            Assert.Same(replyBeforeDrag, GetLastReply(window));
+            window.Close();
+            DeleteSettingsDirectory(settingsDirectory);
+        });
+    }
+
+    [Fact]
     public void MainWindow_BubbleUsesIndependentPopupWithProtectedShadowAndDirectionalArrows()
     {
         var settingsDirectory = CreateSettingsDirectory();

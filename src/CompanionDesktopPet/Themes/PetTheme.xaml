@@ -682,4 +682,173 @@
       </Trigger>
     </Style.Triggers>
   </Style>
+
+  <Style x:Key="KawaiiComboBoxItemStyle" TargetType="ComboBoxItem">
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+    <Setter Property="FontFamily" Value="{StaticResource Pet.FontFamily.Ui}" />
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="Foreground" Value="{DynamicResource Pet.Brush.TextPrimary}" />
+    <Setter Property="Padding" Value="10,8" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ComboBoxItem">
+          <Border x:Name="Row"
+                  Margin="2,1"
+                  Padding="{TemplateBinding Padding}"
+                  CornerRadius="10"
+                  Background="Transparent"
+                  SnapsToDevicePixels="True">
+            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsHighlighted" Value="True">
+              <Setter TargetName="Row" Property="Background" Value="{DynamicResource Pet.Brush.MenuItemHover}" />
+            </Trigger>
+            <Trigger Property="IsSelected" Value="True">
+              <Setter TargetName="Row" Property="Background" Value="{DynamicResource Pet.Brush.PanelSelected}" />
+              <Setter Property="Foreground" Value="{DynamicResource Pet.Brush.MenuChecked}" />
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter TargetName="Row" Property="Opacity" Value="{DynamicResource Pet.Opacity.Disabled}" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style x:Key="KawaiiComboBoxToggleStyle" TargetType="ToggleButton">
+    <Setter Property="Focusable" Value="False" />
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+    <Setter Property="Background" Value="#FFFFFFF8" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Pet.Brush.AccentBorder}" />
+    <Setter Property="Foreground" Value="{DynamicResource Pet.Brush.HeartPrimary}" />
+    <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ToggleButton">
+          <Border x:Name="Box"
+                  MinHeight="40"
+                  CornerRadius="12"
+                  Background="{TemplateBinding Background}"
+                  BorderBrush="{TemplateBinding BorderBrush}"
+                  BorderThickness="1.5"
+                  SnapsToDevicePixels="True">
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="36" />
+              </Grid.ColumnDefinitions>
+              <ContentPresenter Margin="12,0,0,0"
+                                HorizontalAlignment="Left"
+                                VerticalAlignment="Center"
+                                Content="{Binding SelectionBoxItem, RelativeSource={RelativeSource AncestorType=ComboBox}}"
+                                ContentTemplate="{Binding SelectionBoxItemTemplate, RelativeSource={RelativeSource AncestorType=ComboBox}}"
+                                ContentTemplateSelector="{Binding ItemTemplateSelector, RelativeSource={RelativeSource AncestorType=ComboBox}}"
+                                ContentStringFormat="{Binding SelectionBoxItemStringFormat, RelativeSource={RelativeSource AncestorType=ComboBox}}"
+                                TextElement.Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ComboBox}}"
+                                TextElement.FontFamily="{Binding FontFamily, RelativeSource={RelativeSource AncestorType=ComboBox}}"
+                                TextElement.FontSize="{Binding FontSize, RelativeSource={RelativeSource AncestorType=ComboBox}}" />
+              <TextBlock x:Name="Chevron"
+                         Grid.Column="1"
+                         HorizontalAlignment="Center"
+                         VerticalAlignment="Center"
+                         FontSize="12"
+                         Foreground="{TemplateBinding Foreground}"
+                         Text="▾" />
+            </Grid>
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="Box" Property="Background" Value="#FFFFF7F9" />
+            </Trigger>
+            <Trigger Property="IsChecked" Value="True">
+              <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource Pet.Brush.HeartPrimary}" />
+              <Setter TargetName="Box" Property="BorderThickness" Value="2" />
+              <Setter TargetName="Chevron" Property="Text" Value="▴" />
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter TargetName="Box" Property="Opacity" Value="{DynamicResource Pet.Opacity.Disabled}" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style x:Key="KawaiiComboBoxStyle" TargetType="ComboBox">
+    <Style.Resources>
+      <Style TargetType="ScrollBar" BasedOn="{StaticResource KawaiiScrollBarStyle}" />
+    </Style.Resources>
+    <Setter Property="FontFamily" Value="{StaticResource Pet.FontFamily.Ui}" />
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="Foreground" Value="{DynamicResource Pet.Brush.TextPrimary}" />
+    <Setter Property="Background" Value="#FFFFFFF8" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Pet.Brush.AccentBorder}" />
+    <Setter Property="MinHeight" Value="40" />
+    <Setter Property="MaxDropDownHeight" Value="280" />
+    <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+    <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto" />
+    <Setter Property="ScrollViewer.CanContentScroll" Value="True" />
+    <Setter Property="ItemContainerStyle" Value="{StaticResource KawaiiComboBoxItemStyle}" />
+    <Setter Property="SnapsToDevicePixels" Value="True" />
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ComboBox">
+          <Grid>
+            <ToggleButton x:Name="Toggle"
+                          Style="{StaticResource KawaiiComboBoxToggleStyle}"
+                          Background="{TemplateBinding Background}"
+                          BorderBrush="{TemplateBinding BorderBrush}"
+                          IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                          ClickMode="Press" />
+            <Popup x:Name="PART_Popup"
+                   AllowsTransparency="True"
+                   Focusable="False"
+                   Placement="Bottom"
+                   PlacementTarget="{Binding ElementName=Toggle}"
+                   VerticalOffset="4"
+                   PopupAnimation="Fade"
+                   IsOpen="{TemplateBinding IsDropDownOpen}">
+              <Border Padding="10" Background="Transparent">
+                <Border MinWidth="{Binding ActualWidth, ElementName=Toggle}"
+                        MaxHeight="{TemplateBinding MaxDropDownHeight}"
+                        Padding="6,6,2,6"
+                        CornerRadius="16"
+                        BorderThickness="1.5"
+                        BorderBrush="{DynamicResource Pet.Brush.MenuBorder}"
+                        Background="{DynamicResource Pet.Brush.MenuSurface}"
+                        SnapsToDevicePixels="True">
+                  <Border.Effect>
+                    <DropShadowEffect Color="{DynamicResource Pet.Color.Shadow.Popup}"
+                                      BlurRadius="18"
+                                      ShadowDepth="3"
+                                      Opacity="{DynamicResource Pet.Opacity.Shadow.Popup}" />
+                  </Border.Effect>
+                  <ScrollViewer HorizontalScrollBarVisibility="{TemplateBinding ScrollViewer.HorizontalScrollBarVisibility}"
+                                VerticalScrollBarVisibility="{TemplateBinding ScrollViewer.VerticalScrollBarVisibility}"
+                                CanContentScroll="{TemplateBinding ScrollViewer.CanContentScroll}">
+                    <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained" />
+                  </ScrollViewer>
+                </Border>
+              </Border>
+            </Popup>
+          </Grid>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsKeyboardFocusWithin" Value="True">
+              <Setter TargetName="Toggle" Property="BorderBrush" Value="{DynamicResource Pet.Brush.HeartPrimary}" />
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter TargetName="Toggle" Property="Opacity" Value="{DynamicResource Pet.Opacity.Disabled}" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
 </ResourceDictionary>

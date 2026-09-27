@@ -64,8 +64,11 @@ public partial class MainWindow : Window
     private long _ambientScheduleGeneration;
     private long _armedAmbientGeneration;
     private long _ambientDueTimestamp;
+    private const double ClickSlopDips = 16;
     private System.Windows.Point _mouseDown;
     private ScreenPoint _dragGrabOffset;
+    private double _pressLeft;
+    private double _pressTop;
     private double _lastDragLeft;
     private bool _dragCompletionStarted;
     private BubblePlacementSide _bubbleSide = BubblePlacementSide.Above;
@@ -92,8 +95,10 @@ public partial class MainWindow : Window
     private VoiceLibraryWindow? _voiceLibraryWindow;
     private bool _voiceLibraryMenuBuilt;
     private readonly IVoiceSpeaker? _voice;
-    private readonly PersonaDialogueClient? _personaDialogue;
+    private PersonaDialogueClient? _personaDialogue;
+    private readonly SpokenLineBridge _spokenBridge = new();
     private readonly DialogueSendQueue _dialogueQueue = new();
+    private int _spokenFlush;
     private DialogueComposerWindow? _dialogueComposer;
     private int _personaDialogueSession;
     private int _dialoguePump;
@@ -101,6 +106,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _voiceProgressTimer;
     private SoundPlayer? _voicePlayer;
     private bool _voiceLineActive;
+    private string? _requestedVoiceText;
     private bool _voicePlaying;
     private DateTime _voicePhaseStarted;
     private TimeSpan _playbackDuration = TimeSpan.FromSeconds(4);
@@ -196,6 +202,7 @@ public partial class MainWindow : Window
         _voice = options.VoiceSpeaker;
         _personaDialogue = options.PersonaDialogue ?? PersonaDialogueClient.TryCreate();
         DialogueMenuItem.Click += ToggleDialogue_Click;
+        DialogueEndpointMenuItem.Click += ConfigureDialogueEndpoint_Click;
         if (_voice is not null)
         {
             VoiceMenuItem.IsEnabled = true;
@@ -778,6 +785,8 @@ public partial class MainWindow : Window
 
         CharacterStage.Focus();
         _mouseDown = e.GetPosition(this);
+        _pressLeft = Left;
+        _pressTop = Top;
         var grab = e.GetPosition(CharacterStage);
         _dragGrabOffset = new ScreenPoint(grab.X, grab.Y);
         _dragged = false;
@@ -795,8 +804,8 @@ public partial class MainWindow : Window
 
         var current = e.GetPosition(this);
         if (!_dragged
-            && Math.Abs(current.X - _mouseDown.X) <= 4
-            && Math.Abs(current.Y - _mouseDown.Y) <= 4)
+            && Math.Abs(current.X - _mouseDown.X) <= ClickSlopDips
+            && Math.Abs(current.Y - _mouseDown.Y) <= ClickSlopDips)
         {
             return;
         }
@@ -836,12 +845,6 @@ public partial class MainWindow : Window
             return;
         }
 
-        ShowEventBubble(CompanionEvent.DragReleased, LocalNow, ObserveFullscreen());
-        if (InteractionFrozen)
-        {
-            return;
-        }
-
         await SaveSettingsAsync(skipWhenExiting: true);
     }
 
@@ -860,12 +863,13 @@ public partial class MainWindow : Window
 
     private void PetImage_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        if (!InteractionFrozen && _dragged)
+        if (!InteractionFrozen && _dragged && PointerRepositioned())
         {
             FinishDragOnce();
         }
         else if (!InteractionFrozen)
         {
+            AbandonDragGesture();
             var clickPosition = e.GetPosition(PetImage);
             ReactAndSpeak(ResolveClickSide(clickPosition.X, PetImage.ActualWidth));
         }
@@ -875,8 +879,33 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    private void PetImage_LostMouseCapture(object sender, MouseEventArgs e) =>
-        FinishDragOnce();
+    private void PetImage_LostMouseCapture(object sender, MouseEventArgs e)
+    {
+        if (PointerRepositioned())
+        {
+            FinishDragOnce();
+            return;
+        }
+
+        AbandonDragGesture();
+    }
+
+    private bool PointerRepositioned() =>
+        Math.Abs(Left - _pressLeft) > ClickSlopDips
+        || Math.Abs(Top - _pressTop) > ClickSlopDips;
+
+    private void AbandonDragGesture()
+    {
+        if (!_dragged)
+        {
+            return;
+        }
+
+        _dragged = false;
+        _dragCompletionStarted = true;
+        _actionCoordinator.CancelDrag();
+        _animation.SetDragLean(0);
+    }
 
     internal void FinishDragOnce()
     {
@@ -972,10 +1001,11 @@ public partial class MainWindow : Window
 
         if (speak && _voice is { Enabled: true })
         {
+            _requestedVoiceText = text;
             _voice.Speak(text, tone, trigger, urgent);
             if (_isHiddenToTray)
             {
-                if (!_voiceLineActive)
+                if (!_voiceLineActive || urgent)
                 {
                     SpeechText.Text = text;
                     AutomationProperties.SetName(SpeechText, $"佳怡说：{text}");
@@ -987,9 +1017,16 @@ public partial class MainWindow : Window
                 return;
             }
 
-            if (_voiceLineActive)
+            if (_voiceLineActive && !urgent)
             {
                 return;
+            }
+
+            if (_voicePlaying)
+            {
+                _voicePlayer?.Stop();
+                _voicePlayer = null;
+                _voicePlaying = false;
             }
 
             SpeechText.Text = text;
@@ -1272,19 +1309,81 @@ public partial class MainWindow : Window
         }
     }
 
+    private void ConfigureDialogueEndpoint_Click(object sender, RoutedEventArgs e)
+    {
+        if (!PersonaDialoguePaths.RuntimeInstalled())
+        {
+            ShowBubble("对话运行时还没放好。");
+            return;
+        }
+
+        if (!OfferDialogueEndpoint())
+        {
+            return;
+        }
+
+        ReplaceDialogueClient();
+        DialogueMenuItem.IsChecked = true;
+        UpdateDialogueComposer();
+        _ = EnsurePersonaDialogueAsync();
+        _ = SaveSettingsAsync(skipWhenExiting: true);
+    }
+
+    private bool OfferDialogueEndpoint()
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            return Dispatcher.Invoke(OfferDialogueEndpoint);
+        }
+
+        var window = new DialogueEndpointWindow { Owner = this, Topmost = Topmost };
+        return window.ShowDialog() == true;
+    }
+
+    private void ReplaceDialogueClient()
+    {
+        _personaDialogueSession++;
+        _personaDialogue?.Stop();
+        _personaDialogue?.Dispose();
+        _personaDialogue = PersonaDialogueClient.TryCreate();
+    }
+
     private async Task EnsurePersonaDialogueAsync()
     {
         var session = ++_personaDialogueSession;
         if (_personaDialogue is null)
         {
-            DialogueMenuItem.IsChecked = false;
-            UpdateDialogueComposer();
-            ShowBubble("对话运行时还没放好。");
-            return;
+            if (!PersonaDialoguePaths.RuntimeInstalled())
+            {
+                DialogueMenuItem.IsChecked = false;
+                UpdateDialogueComposer();
+                ShowBubble("对话运行时还没放好。");
+                _ = SaveSettingsAsync(skipWhenExiting: true);
+                return;
+            }
+
+            if (PersonaDialoguePaths.ExistingConfigPath() is null && !OfferDialogueEndpoint())
+            {
+                DialogueMenuItem.IsChecked = false;
+                UpdateDialogueComposer();
+                _ = SaveSettingsAsync(skipWhenExiting: true);
+                return;
+            }
+
+            _personaDialogue = PersonaDialogueClient.TryCreate();
+            if (_personaDialogue is null)
+            {
+                DialogueMenuItem.IsChecked = false;
+                UpdateDialogueComposer();
+                ShowBubble("对话运行时还没放好。");
+                _ = SaveSettingsAsync(skipWhenExiting: true);
+                return;
+            }
         }
 
         if (_personaDialogue.IsReady)
         {
+            _ = FlushSpokenBridgeAsync();
             return;
         }
 
@@ -1302,6 +1401,65 @@ public partial class MainWindow : Window
                 ? "对话暂时没连上。"
                 : "对话暂时没连上。");
             _ = SaveSettingsAsync(skipWhenExiting: true);
+            return;
+        }
+
+        _ = FlushSpokenBridgeAsync();
+    }
+
+    private void NoteCorpusLine(string text)
+    {
+        _spokenBridge.Note(text);
+        if (_personaDialogue is { IsReady: true } && DialogueMenuItem.IsChecked)
+        {
+            _ = FlushSpokenBridgeAsync();
+        }
+    }
+
+    private async Task FlushSpokenBridgeAsync()
+    {
+        if (Interlocked.CompareExchange(ref _spokenFlush, 1, 0) != 0)
+        {
+            return;
+        }
+
+        var failed = false;
+        try
+        {
+            var client = _personaDialogue;
+            if (client is not { IsReady: true } || !DialogueMenuItem.IsChecked)
+            {
+                return;
+            }
+
+            var batch = _spokenBridge.Take();
+            for (var index = 0; index < batch.Count; index++)
+            {
+                if (client is not { IsReady: true } || !DialogueMenuItem.IsChecked)
+                {
+                    _spokenBridge.RestoreFront(batch.Skip(index).ToArray());
+                    failed = true;
+                    return;
+                }
+
+                if (!await client.RememberAsync(batch[index]))
+                {
+                    _spokenBridge.RestoreFront(batch.Skip(index).ToArray());
+                    failed = true;
+                    return;
+                }
+            }
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _spokenFlush, 0);
+            if (!failed
+                && _spokenBridge.HasPending
+                && _personaDialogue is { IsReady: true }
+                && DialogueMenuItem.IsChecked)
+            {
+                _ = FlushSpokenBridgeAsync();
+            }
         }
     }
 
@@ -1310,6 +1468,12 @@ public partial class MainWindow : Window
         if (!Dispatcher.CheckAccess())
         {
             Dispatcher.BeginInvoke(() => OnVoiceSynthesisStarted(text));
+            return;
+        }
+
+        if (_requestedVoiceText is not null
+            && !string.Equals(text, _requestedVoiceText, StringComparison.Ordinal))
+        {
             return;
         }
 
@@ -1372,6 +1536,12 @@ public partial class MainWindow : Window
         if (InteractionFrozen || _isHiddenToTray || _voice is not { Enabled: true })
         {
             StopVoicePlayback();
+            return;
+        }
+
+        if (_requestedVoiceText is not null
+            && !string.Equals(clip.Text, _requestedVoiceText, StringComparison.Ordinal))
+        {
             return;
         }
 
@@ -2112,6 +2282,10 @@ public partial class MainWindow : Window
                 tone: reply.SourceLine?.Tone,
                 trigger: reply.SourceLine?.Trigger.ToString(),
                 urgent: reply.Trigger == CompanionEvent.Click);
+            if (!InteractionFrozen)
+            {
+                NoteCorpusLine(reply.Text);
+            }
         }
         else if (reply.Trigger == CompanionEvent.Click)
         {

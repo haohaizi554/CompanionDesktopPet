@@ -1,0 +1,107 @@
+<Window x:Class="CompanionDesktopPet.UI.DialogueEndpointWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="接上对话"
+        Width="560"
+        Height="640"
+        MinWidth="480"
+        MinHeight="560"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        ShowInTaskbar="True"
+        FontFamily="{DynamicResource Pet.FontFamily.Ui}"
+        Foreground="{DynamicResource Pet.Brush.TextPrimary}"
+        TextOptions.TextFormattingMode="Display"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True">
+  <Window.Resources>
+    <Style TargetType="TextBox" BasedOn="{StaticResource KawaiiTextBoxStyle}" />
+    <Style TargetType="ComboBox" BasedOn="{StaticResource KawaiiComboBoxStyle}" />
+  </Window.Resources>
+  <Border Margin="18"
+          CornerRadius="28"
+          BorderThickness="2"
+          BorderBrush="{DynamicResource Pet.Brush.MenuBorder}"
+          Background="{DynamicResource Pet.Brush.MenuSurface}">
+    <Border.Effect>
+      <DropShadowEffect Color="{DynamicResource Pet.Color.Shadow.Popup}"
+                        BlurRadius="24"
+                        ShadowDepth="5"
+                        Opacity="{DynamicResource Pet.Opacity.Shadow.Popup}" />
+    </Border.Effect>
+    <Grid Margin="22,16,22,18">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="*" />
+        <RowDefinition Height="Auto" />
+      </Grid.RowDefinitions>
+
+      <Grid x:Name="TitleBar" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <TextBlock Margin="0,0,10,0"
+                   VerticalAlignment="Center"
+                   FontSize="18"
+                   Foreground="{DynamicResource Pet.Brush.HeartPrimary}"
+                   Text="♡" />
+        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+          <TextBlock FontSize="18" FontWeight="SemiBold" Text="接上对话" />
+          <TextBlock Style="{StaticResource KawaiiNoteStyle}"
+                     Margin="0,2,0,0"
+                     TextWrapping="Wrap"
+                     Text="文字走接口。语音仍在这台电脑上合成。" />
+        </StackPanel>
+        <Button Grid.Column="2"
+                Style="{StaticResource KawaiiCloseButtonStyle}"
+                Content="×"
+                Click="Cancel_Click" />
+      </Grid>
+
+      <StackPanel Grid.Row="1" Margin="0,16,0,0">
+        <TextBlock TextWrapping="Wrap"
+                   LineHeight="22"
+                   Text="选一种接法。模型可以跑在这台 Windows 上，也可以跑在另一台 Linux 或 macOS 上。同一台填 127.0.0.1，另一台填那台机器的地址。也可以直接用 OpenAI、DeepSeek 或其他兼容接口。" />
+
+        <TextBlock Margin="0,16,0,6" Text="接法" />
+        <ComboBox x:Name="PresetBox"
+                  SelectionChanged="PresetBox_SelectionChanged" />
+
+        <TextBlock Margin="0,14,0,6" Text="地址" />
+        <TextBox x:Name="BaseUrlBox" />
+
+        <TextBlock Margin="0,14,0,6" Text="模型名" />
+        <TextBox x:Name="ModelBox" />
+
+        <TextBlock Margin="0,14,0,6" Text="密钥" />
+        <TextBox x:Name="ApiKeyBox" />
+
+        <TextBlock x:Name="HintText"
+                   Style="{StaticResource KawaiiNoteStyle}"
+                   Margin="0,12,0,0"
+                   TextWrapping="Wrap" />
+        <TextBlock x:Name="ErrorText"
+                   Margin="0,8,0,0"
+                   Foreground="{DynamicResource Pet.Brush.HeartPrimary}"
+                   TextWrapping="Wrap" />
+      </StackPanel>
+
+      <Grid Grid.Row="2" Margin="0,16,0,0">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <Button Grid.Column="1"
+                MinWidth="140"
+                Style="{StaticResource KawaiiPrimaryButtonStyle}"
+                Content="保存并打开"
+                Click="Save_Click" />
+      </Grid>
+    </Grid>
+  </Border>
+</Window>

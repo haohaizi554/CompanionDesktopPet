@@ -15,7 +15,7 @@ public sealed class VoiceTurnQueueTests
         Assert.Equal("第一句", started?.Text);
         Assert.Null(queue.TryStartSynthesis());
 
-        queue.CompleteSynthesis("1.wav");
+        Assert.True(queue.CompleteSynthesis("1.wav"));
         var playing = queue.TryStartPlayback();
         Assert.Equal("1.wav", playing?.Path);
         Assert.Equal("第二句", queue.TryStartSynthesis()?.Text);
@@ -28,10 +28,10 @@ public sealed class VoiceTurnQueueTests
         queue.Enqueue(Turn("第一句"));
         queue.Enqueue(Turn("第二句"));
         queue.TryStartSynthesis();
-        queue.CompleteSynthesis("1.wav");
+        Assert.True(queue.CompleteSynthesis("1.wav"));
         queue.TryStartPlayback();
         queue.TryStartSynthesis();
-        queue.CompleteSynthesis("2.wav");
+        Assert.True(queue.CompleteSynthesis("2.wav"));
 
         Assert.Null(queue.TryStartPlayback());
         Assert.Null(queue.TryStartSynthesis());
@@ -77,12 +77,8 @@ public sealed class VoiceTurnQueueTests
         queue.Enqueue(new VoiceTurn("你点的", "calm", null, Urgent: true));
         queue.Enqueue(new VoiceTurn("又点一下", "calm", null, Urgent: true));
 
-        queue.CompleteSynthesis("1.wav");
-        queue.TryStartPlayback();
-        Assert.Equal("你点的", queue.TryStartSynthesis()?.Text);
-        queue.CompleteSynthesis("2.wav");
-        queue.CompletePlayback();
-        queue.TryStartPlayback();
+        Assert.False(queue.CompleteSynthesis("1.wav"));
+        Assert.Null(queue.TryStartPlayback());
         Assert.Equal("又点一下", queue.TryStartSynthesis()?.Text);
     }
 

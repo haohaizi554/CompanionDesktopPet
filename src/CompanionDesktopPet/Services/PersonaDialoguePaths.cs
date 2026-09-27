@@ -41,6 +41,42 @@ internal sealed record PersonaDialoguePaths(
             Path.Combine(DialogueDirectory(), "checkpoints.sqlite"));
     }
 
+    internal static string UserConfigPath => Path.Combine(DialogueDirectory(), "llm.runtime.json");
+
+    internal static bool RuntimeInstalled(string? startDirectory = null)
+    {
+        var root = FindRoot(startDirectory ?? AppContext.BaseDirectory);
+        if (root is null)
+        {
+            return false;
+        }
+
+        var python = FirstFile(
+            Path.Combine(root, "dialogue", "python", "Scripts", "python.exe"),
+            Path.Combine(root, "dialogue", "python", "python.exe"));
+        return python is not null
+            && File.Exists(Path.Combine(root, "dialogue", "serve.py"))
+            && File.Exists(Path.Combine(root, "data", "persona", "jiayi-soul.json"))
+            && File.Exists(Path.Combine(root, "data", "optimized", "persona-corpus-v2.tsv"));
+    }
+
+    internal static string? ExistingConfigPath(string? startDirectory = null)
+    {
+        if (File.Exists(UserConfigPath))
+        {
+            return UserConfigPath;
+        }
+
+        var root = FindRoot(startDirectory ?? AppContext.BaseDirectory);
+        if (root is null)
+        {
+            return null;
+        }
+
+        var installed = Path.Combine(root, "config", "llm.runtime.json");
+        return File.Exists(installed) ? installed : null;
+    }
+
     private static string DialogueDirectory()
     {
         var directory = Path.Combine(

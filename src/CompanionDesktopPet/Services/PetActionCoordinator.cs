@@ -50,6 +50,17 @@ public sealed class PetActionCoordinator
         }
     }
 
+    public void CancelDrag()
+    {
+        if (State != PetActionState.Dragging)
+        {
+            return;
+        }
+
+        State = _returnToPaused ? PetActionState.Paused : PetActionState.Idle;
+        _returnToPaused = false;
+    }
+
     public void Pause()
     {
         if (State is PetActionState.Dragging or PetActionState.Landing)

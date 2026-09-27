@@ -6,7 +6,7 @@ from langchain_core.messages import AIMessage
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from persona_dialogue.audit import audit, clean_reply
-from persona_dialogue.graph import build_graph
+from persona_dialogue.graph import build_graph, remember_line
 from persona_dialogue.retrieve import LineIndex
 
 SOUL = {
@@ -53,6 +53,24 @@ class GraphTests(unittest.TestCase):
                 self.assertEqual("那你就靠一会儿。", second["draft"])
                 contents = model.seen[-1]
                 self.assertTrue(any("我有点累" in item for item in contents))
+
+    def test_remembered_line_is_the_prior_sentence_on_the_next_reply(self) -> None:
+        model = ScriptedModel(["那你就靠一会儿。"])
+        index = LineIndex(["你先把杯子放下。"])
+        with tempfile.TemporaryDirectory() as directory:
+            with SqliteSaver.from_conn_string(str(Path(directory) / "memory.sqlite")) as saver:
+                graph = build_graph(model, SOUL, index, saver)
+                config = {"configurable": {"thread_id": "jiayi"}, "recursion_limit": 12}
+                self.assertTrue(remember_line(graph, "jiayi", "湿热的天气把树叶养得很绿。"))
+                self.assertFalse(remember_line(graph, "jiayi", "湿热的天气把树叶养得很绿。"))
+                self.assertEqual([], model.seen)
+                result = graph.invoke({"user_text": "我有点累"}, config)
+
+        self.assertEqual("那你就靠一会儿。", result["draft"])
+        prompt = model.seen[0][0]
+        self.assertIn("湿热的天气把树叶养得很绿。", prompt)
+        self.assertIn("很少直接叫", prompt)
+        self.assertIn("我有点累", model.seen[0][-1])
 
     def test_empty_input_does_not_call_the_model(self) -> None:
         model = ScriptedModel(["不该被叫到。"])

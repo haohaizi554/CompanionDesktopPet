@@ -356,7 +356,7 @@ internal sealed class JiayiVoiceSpeaker : IVoiceSpeaker
         {
             return process.HasExited;
         }
-        catch (InvalidOperationException)
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
             return true;
         }
@@ -374,7 +374,7 @@ internal sealed class JiayiVoiceSpeaker : IVoiceSpeaker
                     previous.Kill(entireProcessTree: true);
                 }
             }
-            catch (InvalidOperationException)
+            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
             {
                 // The previous process had already exited.
             }
@@ -548,8 +548,10 @@ internal sealed class JiayiVoiceSpeaker : IVoiceSpeaker
                     && File.Exists(path))
                 {
                     _retriedText = null;
-                    _queue.CompleteSynthesis(path);
-                    clip = _queue.TryStartPlayback();
+                    if (_queue.CompleteSynthesis(path))
+                    {
+                        clip = _queue.TryStartPlayback();
+                    }
                 }
                 else
                 {

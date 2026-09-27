@@ -172,6 +172,48 @@ internal sealed class PersonaDialogueClient : IDisposable
         }
     }
 
+    internal async Task<bool> RememberAsync(string text, CancellationToken cancellationToken = default)
+    {
+        if (!IsReady || _stdin is null || string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        var id = Interlocked.Increment(ref _nextId);
+        var pending = new TaskCompletionSource<PersonaDialogueReply>(TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (_gate)
+        {
+            _pending[id] = pending;
+        }
+
+        try
+        {
+            var json = JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["id"] = id,
+                ["type"] = "remember",
+                ["text"] = text,
+                ["thread_id"] = "jiayi"
+            });
+            lock (_gate)
+            {
+                _stdin.WriteLine(json);
+            }
+
+            var reply = await pending.Task.WaitAsync(TimeSpan.FromSeconds(50), cancellationToken);
+            return reply.Ok;
+        }
+        catch (Exception exception) when (exception is TimeoutException or IOException or ObjectDisposedException)
+        {
+            lock (_gate)
+            {
+                _pending.Remove(id);
+            }
+
+            return false;
+        }
+    }
+
     internal void Stop()
     {
         var process = _process;
@@ -252,6 +294,12 @@ internal sealed class PersonaDialogueClient : IDisposable
                     ready.TrySetResult(false);
                 }
 
+                return;
+            }
+
+            if (type == "remembered")
+            {
+                pending.TrySetResult(new PersonaDialogueReply(true, "", false));
                 return;
             }
 

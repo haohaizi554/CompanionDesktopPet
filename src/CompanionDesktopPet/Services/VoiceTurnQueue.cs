@@ -6,7 +6,7 @@ internal readonly record struct VoiceClip(string Text, string Path);
 
 /// <summary>
 /// One synthesis at a time, one finished clip waiting, and a short queue behind them.
-/// A new line waits. It does not cancel the line already on the GPU.
+/// A newer click replaces lines that have not started. The line already on the GPU runs to the end.
 /// </summary>
 internal sealed class VoiceTurnQueue
 {
@@ -28,12 +28,9 @@ internal sealed class VoiceTurnQueue
     {
         if (turn.Urgent)
         {
-            var kept = _pending.Where(item => item.Urgent).ToArray();
             _pending.Clear();
-            foreach (var item in kept)
-            {
-                _pending.Enqueue(item);
-            }
+            _buffered = null;
+            _playing = false;
         }
 
         while (_pending.Count >= Capacity)
@@ -90,11 +87,17 @@ internal sealed class VoiceTurnQueue
         return _synthesizing;
     }
 
-    public void CompleteSynthesis(string path)
+    public bool CompleteSynthesis(string path)
     {
         var text = _synthesizing?.Text ?? string.Empty;
         _synthesizing = null;
+        if (_pending.Count > 0 && _pending.Peek().Urgent)
+        {
+            return false;
+        }
+
         _buffered = new VoiceClip(text, path);
+        return true;
     }
 
     public VoiceClip? TryStartPlayback()
