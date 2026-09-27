@@ -18,6 +18,8 @@ public sealed record PetSettings(
 {
     public const double MaximumCoordinateMagnitude = 1_000_000;
 
+    public bool DialogueEnabled { get; init; }
+
     public static PetSettings Default { get; } =
         new(double.NaN, double.NaN, PetScale.Normal, false, true);
 

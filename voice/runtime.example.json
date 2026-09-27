@@ -1,0 +1,4 @@
+{
+  "layout": "voice/python/python.exe + voice/engine + voice/packs/jiayi",
+  "assemble": "scripts/Assemble-VoiceRuntime.ps1"
+}

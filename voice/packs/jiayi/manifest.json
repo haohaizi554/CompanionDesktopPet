@@ -1,0 +1,793 @@
+{
+  "id": "jiayi",
+  "name": "佳怡",
+  "engine": "gpt-sovits-v2pro",
+  "textLang": "zh",
+  "gpt": "weights/jiayi-e25.ckpt",
+  "sovits": "weights/jiayi-e8-s5264.pth",
+  "refs": [
+    {
+      "id": "r01",
+      "tones": [
+        "calm"
+      ],
+      "situations": [
+        "explain"
+      ],
+      "seconds": 7.0,
+      "audio": "refs/r01.wav",
+      "prompt": "先送小哥哥们进场啦，然后我们还会练习跳舞，然后拍进行拍摄。",
+      "promptLang": "zh",
+      "fallback": true
+    },
+    {
+      "id": "r02",
+      "tones": [
+        "calm"
+      ],
+      "situations": [
+        "explain"
+      ],
+      "seconds": 7.74,
+      "audio": "refs/r02.wav",
+      "prompt": "一加一等于二，今天又突破两百元的一天，马上就要发礼品和红包了，激不激动。大家有。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r03",
+      "tones": [
+        "calm"
+      ],
+      "situations": [
+        "explain"
+      ],
+      "seconds": 9.56,
+      "audio": "refs/r03.wav",
+      "prompt": "第三次全国时间利用调查报告来了，中国居民呢每天平均工作时间三点五个小时，睡觉，休息时间呢九个小时。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r04",
+      "tones": [
+        "calm"
+      ],
+      "situations": [
+        "explain"
+      ],
+      "seconds": 12.33,
+      "audio": "refs/r04.wav",
+      "prompt": "现在呢大环境都不好，如果说能坚持做，就坚持下来啊，可不可以做到，现在名额都是给你们争取来的哦，一定要坚持操作，到了说一声，做满一星期就可以兼职啊。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r05",
+      "tones": [
+        "calm"
+      ],
+      "situations": [
+        "explain"
+      ],
+      "seconds": 8.49,
+      "audio": "refs/r05.wav",
+      "prompt": "我们的厂里面的氛围很和谐，你看这里还有还有跑步机，所以要减肥，他可以在这里跑一下步。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r06",
+      "tones": [
+        "curious"
+      ],
+      "situations": [
+        "question"
+      ],
+      "seconds": 7.0,
+      "audio": "refs/r06.wav",
+      "prompt": "没有，为什么你也可以一起吃的，我不吃辣椒啊啊，你不吃辣椒，好吧。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r07",
+      "tones": [
+        "curious"
+      ],
+      "situations": [
+        "question"
+      ],
+      "seconds": 7.99,
+      "audio": "refs/r07.wav",
+      "prompt": "好的，我们在抓，谢谢你的配合啊，我勒个豆这个帅这个帅啊，小哥，你觉得你对自己的颜值。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r08",
+      "tones": [
+        "curious"
+      ],
+      "situations": [
+        "question"
+      ],
+      "seconds": 10.52,
+      "audio": "refs/r08.wav",
+      "prompt": "石心怡，你在干什么？你在跟我躲猫猫，完了我找不到你，我让你发照片，你也不发作围照片，我叫你往旁边拍一下，你不拍，你让我。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r09",
+      "tones": [
+        "curious"
+      ],
+      "situations": [
+        "question"
+      ],
+      "seconds": 13.26,
+      "audio": "refs/r09.wav",
+      "prompt": "给狗狗都不住，第二问，那厂区离宿舍多远呢？他要是说呃，没多远，几分钟就到了，直接给他来两电子，那火箭几分钟都从地球到火星了，就记住，直接问他直线距离。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r10",
+      "tones": [
+        "curious"
+      ],
+      "situations": [
+        "question"
+      ],
+      "seconds": 16.33,
+      "audio": "refs/r10.wav",
+      "prompt": "然后还有一个工友专门国庆放假来看，我给我带的小零食哦，差不多十一点半的时候，我们就会给工友们安排吃饭啦，给大家看一下，我们给工友安排吃的是什么？我们吃的和你们吃的是一样的。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r11",
+      "tones": [
+        "dry"
+      ],
+      "situations": [
+        "explain"
+      ],
+      "seconds": 7.27,
+      "audio": "refs/r11.wav",
+      "prompt": "今天一定要选一个豪才好好干下去啊，你看你在这里手机都那么欧在厂里面肯定是过得风生水起。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r12",
+      "tones": [
+        "dry"
+      ],
+      "situations": [
+        "explain"
+      ],
+      "seconds": 7.65,
+      "audio": "refs/r12.wav",
+      "prompt": "在小厂上班，别跟领导关系搞得太好，不然活着可能拉你干完，你想想啊，厂里就那么点人。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r13",
+      "tones": [
+        "dry"
+      ],
+      "situations": [
+        "explain"
+      ],
+      "seconds": 9.98,
+      "audio": "refs/r13.wav",
+      "prompt": "进厂跟主管吃夜宵就算了，但是你们不要去喝酒呀。我有个小姐姐，在工厂里面跟主管吃夜宵，后面喝醉了，跟主管那啥了。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r14",
+      "tones": [
+        "dry"
+      ],
+      "situations": [
+        "explain"
+      ],
+      "seconds": 12.11,
+      "audio": "refs/r14.wav",
+      "prompt": "只看到员工上厕所多了几分钟，像这样的厂接一个拉黑一个什么员工干不满七天没工资，有的都是厂里面规定的，这样的厂，你开不起，你就别开了呗。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r15",
+      "tones": [
+        "dry"
+      ],
+      "situations": [
+        "explain"
+      ],
+      "seconds": 16.43,
+      "audio": "refs/r15.wav",
+      "prompt": "那些十七八岁就开始出门打工，给家里赚钱的人，其实你已经很了不起了。很多同龄人现在还在靠着父母，他们明明知道自己没有读书的那个脑子，不是读书的料，却还要跟大刘走这条看不到希望的路，从来不考虑以后该干什么。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r16",
+      "tones": [
+        "gentle"
+      ],
+      "situations": [
+        "comfort"
+      ],
+      "seconds": 7.09,
+      "audio": "refs/r16.wav",
+      "prompt": "荤素搭配营养均衡，吃饱了就找工作啊，吃饱了，好跑路啊，没关系的。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r17",
+      "tones": [
+        "dry_sharp"
+      ],
+      "situations": [
+        "warning"
+      ],
+      "seconds": 8.18,
+      "audio": "refs/r17.wav",
+      "prompt": "你就算干五天，人家都不给你发工资。仔细想一想，说好了，中国人不骗中国人，但是往往国内的工厂哪个会遵守劳动法？",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r18",
+      "tones": [
+        "dry_sharp"
+      ],
+      "situations": [
+        "warning"
+      ],
+      "seconds": 9.43,
+      "audio": "refs/r18.wav",
+      "prompt": "逢年过节发的福利啊也是越来越少。这些二狗子干别的事不行，坑自己人呀，一个比一个会坑，为了证明自己的价值呀，伤害同胞。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r19",
+      "tones": [
+        "playful"
+      ],
+      "situations": [
+        "tease"
+      ],
+      "seconds": 11.2,
+      "audio": "refs/r19.wav",
+      "prompt": "好像是后面那个男的就跑路了，跑路了之后，他属于花心的那种，对不对？找别人找别的女孩子没得到，没得到，然后又继续找回那个女孩子，然后那个女孩子呢也愿意。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r20",
+      "tones": [
+        "dry_sharp"
+      ],
+      "situations": [
+        "warning"
+      ],
+      "seconds": 15.67,
+      "audio": "refs/r20.wav",
+      "prompt": "某工厂呀为了压榨员工都用上了变态的miss系统，什么意思呢？就是上厕所都得计时超过五分钟啊，直接发给人事扣工资。原本啊还以为这些都是电视剧里面的桥段，没想到啊现实比这个还要残酷。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r21",
+      "tones": [
+        "encouraging"
+      ],
+      "situations": [
+        "encourage"
+      ],
+      "seconds": 7.02,
+      "audio": "refs/r21.wav",
+      "prompt": "好扎心啊，老铁好吧，我不拍你了，下次给你安排一个轻松一点的啊。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r22",
+      "tones": [
+        "encouraging"
+      ],
+      "situations": [
+        "encourage"
+      ],
+      "seconds": 8.29,
+      "audio": "refs/r22.wav",
+      "prompt": "体验过吃不起饭、饿肚子的感受。所以说我们会给大家安排免费的午餐，让大家先吃饱了再说，吃饱了再找工作。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r23",
+      "tones": [
+        "encouraging"
+      ],
+      "situations": [
+        "encourage"
+      ],
+      "seconds": 8.99,
+      "audio": "refs/r23.wav",
+      "prompt": "啊，那你不要去玩那些啊，最好是踏踏实实的干，你看你赚来的钱又输出去了。三眼，他喵的变成几个眼了，现在手机。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r24",
+      "tones": [
+        "encouraging"
+      ],
+      "situations": [
+        "encourage"
+      ],
+      "seconds": 11.63,
+      "audio": "refs/r24.wav",
+      "prompt": "坐十个小时坐了这么久，那你要快点休息一下，我们不给你安排了免费的宿舍，你今晚上就好好休息一下，明天早上十点过来啊，好的。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r25",
+      "tones": [
+        "serious"
+      ],
+      "situations": [
+        "warning"
+      ],
+      "seconds": 17.38,
+      "audio": "refs/r25.wav",
+      "prompt": "女的长得还算可以，一去车间上班就被县长看上了，第一天安排了一个非常轻松的岗位，给她做干了三天之后，直接让她坐住了。县长没事的时候还各种语言调戏，甚至有时候还动手动脚。没办法，她男朋友实在是不放心，两个人只能离开那个厂。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r26",
+      "tones": [
+        "gentle"
+      ],
+      "situations": [
+        "comfort"
+      ],
+      "seconds": 7.2,
+      "audio": "refs/r26.wav",
+      "prompt": "如果说你目前遇到困难，没有工作，没有收入的话，都可以来家里这里免费吃一顿饭，咱们先吃饭，吃饱再说。",
+      "promptLang": "zh",
+      "fallback": true
+    },
+    {
+      "id": "r27",
+      "tones": [
+        "gentle"
+      ],
+      "situations": [
+        "comfort"
+      ],
+      "seconds": 7.74,
+      "audio": "refs/r27.wav",
+      "prompt": "什么叫做我一米五都没有，够不够吃，好不好吃好不好吃好吃一定要吃饱啊，吃饱了再找工作啊。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r28",
+      "tones": [
+        "gentle"
+      ],
+      "situations": [
+        "comfort"
+      ],
+      "seconds": 9.46,
+      "audio": "refs/r28.wav",
+      "prompt": "把他们也叫过来吃啊，广告你们平时扫地爱护卫生起，保护卫生都辛苦了啊，一定要吃饱。把他们也叫过来吃啊。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r29",
+      "tones": [
+        "gentle"
+      ],
+      "situations": [
+        "comfort"
+      ],
+      "seconds": 11.41,
+      "audio": "refs/r29.wav",
+      "prompt": "如果是夏天，我肯定会说夏日炎炎有你这甜，但是不是夏天你们面试辛苦了，来给你们一人准备一瓶水，你们自有哪，你们喜欢喝哪个，这个哪个喜欢喝，你喜欢喝给你们。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r30",
+      "tones": [
+        "dry"
+      ],
+      "situations": [
+        "explain"
+      ],
+      "seconds": 13.71,
+      "audio": "refs/r30.wav",
+      "prompt": "薪金是五万元，五万元，就是二十四块钱不到，比二十四块还少一点二十三块七，那就是十二小时，两班倒二十四块钱一个小时。我看了一下报道啊，他那个住宿呢是免费的，有住的地方就是吃的不行。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r31",
+      "tones": [
+        "dry"
+      ],
+      "situations": [
+        "explain"
+      ],
+      "seconds": 16.74,
+      "audio": "refs/r31.wav",
+      "prompt": "六号看回城，大聪明，堵在半路。七号在家看各路冤种冤气冲天，所以还是莫博山说的。对呀，钱包那么小，哪都去不了，路上那么堵，去哪都辛苦，景点那么贵，想想都心碎，我的窝囊废根本刺激不了消费，还是交给你们去刺激吧。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r32",
+      "tones": [
+        "playful"
+      ],
+      "situations": [
+        "tease"
+      ],
+      "seconds": 7.28,
+      "audio": "refs/r32.wav",
+      "prompt": "有啊，能不能去厂里找个女朋友回来，一个人进三个人出，可不可以？",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r33",
+      "tones": [
+        "encouraging"
+      ],
+      "situations": [
+        "encourage"
+      ],
+      "seconds": 7.69,
+      "audio": "refs/r33.wav",
+      "prompt": "行，希望你能够挑战成功。哦，好，希望你能在厂里面能够找到一个女朋友呀。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r34",
+      "tones": [
+        "intimate"
+      ],
+      "situations": [
+        "comfort",
+        "question"
+      ],
+      "seconds": 9.22,
+      "audio": "refs/r34.wav",
+      "prompt": "哎，我天你怎么这么漂亮，你是不是从来这么笑，我宝宝嗯，算是吧？哎呦，好好看啊，家人们我好喜欢你，有没有男朋友？",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r35",
+      "tones": [
+        "intimate"
+      ],
+      "situations": [
+        "comfort"
+      ],
+      "seconds": 11.51,
+      "audio": "refs/r35.wav",
+      "prompt": "谁讲叫他不爱不爱夫人的，他是你男朋友，他等一下怎么找女朋友哦，sorry,他不能一个人进三个人出就难难以问的的，知道吗？ Ok ok我走了，你不要对他做什么啊嗯。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r36",
+      "tones": [
+        "playful"
+      ],
+      "situations": [
+        "tease"
+      ],
+      "seconds": 17.0,
+      "audio": "refs/r36.wav",
+      "prompt": "兄弟们，干饭了，干饭了，总是说宝宝肚肚打雷了，那你还不快点吃饭。我们这里每天上午都有安排，不管找不找工作来吃，都没有关系，吃了不找工作，转身就走都可以的。如果你遇到困难，天天来吃都没有关系。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r37",
+      "tones": [
+        "serious"
+      ],
+      "situations": [
+        "warning"
+      ],
+      "seconds": 7.22,
+      "audio": "refs/r37.wav",
+      "prompt": "最后呀还是迫使工厂妥协了，还是按照以前的工作时间。所以越南打工者之所以能够理直气壮的去罢工。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r38",
+      "tones": [
+        "nostalgic"
+      ],
+      "situations": [
+        "explain"
+      ],
+      "seconds": 8.87,
+      "audio": "refs/r38.wav",
+      "prompt": "留恋故乡呢分为两种，一种是无论我身在何处，我都要回到我的故乡。还有一种就是我离不开这个生我养我的地方。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r39",
+      "tones": [
+        "calm"
+      ],
+      "situations": [
+        "explain"
+      ],
+      "seconds": 9.21,
+      "audio": "refs/r39.wav",
+      "prompt": "你看吧，右边直走直走就好啦。这个时候记得拿出你的乘车码哦，看你要从哪个出口出。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r40",
+      "tones": [
+        "dry"
+      ],
+      "situations": [
+        "explain"
+      ],
+      "seconds": 10.43,
+      "audio": "refs/r40.wav",
+      "prompt": "对，有些小孩子叫我们什么要压正？我昨天直播的时候，要被你们的小孩子给气死了，五星好评啊，记得给我。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r41",
+      "tones": [
+        "serious"
+      ],
+      "situations": [
+        "warning"
+      ],
+      "seconds": 7.06,
+      "audio": "refs/r41.wav",
+      "prompt": "第三，漂亮的女孩子刚进厂很多都会被选去。当文员，一定要小心。厂里面小领导很多都是有家庭的。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r42",
+      "tones": [
+        "playful"
+      ],
+      "situations": [
+        "tease"
+      ],
+      "seconds": 8.73,
+      "audio": "refs/r42.wav",
+      "prompt": "这个女生很漂亮，让我介绍给她，因为第一次进场嘛，我也不知道她人呢怎么样，谁知道。后来我发现她挺花心的，她认识了她。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r43",
+      "tones": [
+        "playful"
+      ],
+      "situations": [
+        "tease"
+      ],
+      "seconds": 9.92,
+      "audio": "refs/r43.wav",
+      "prompt": "冬瓜西瓜哈密瓜不来吃饭，你是小傻瓜，我们这里每天都有给大家提供免费的饭菜哦，不管找不找工作都可以来吃的。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r44",
+      "tones": [
+        "playful"
+      ],
+      "situations": [
+        "tease"
+      ],
+      "seconds": 13.17,
+      "audio": "refs/r44.wav",
+      "prompt": "啊，你看你看你看嗯帅哥，今天来送你敬场啊，给你安排了一个干活，轻松表妹妹子的好不好？好好呀，你要一个人进三个人出来行不行，能不能做到，那就这样。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r45",
+      "tones": [
+        "playful"
+      ],
+      "situations": [
+        "tease"
+      ],
+      "seconds": 15.18,
+      "audio": "refs/r45.wav",
+      "prompt": "那那我那我也要走了，别别别你别走，我带你去另一个厂，另一个厂也有很多帅哥，三五群群的都要给你左挑一个右挑一个冲，那我要三妻四妾可以做到吗？",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r46",
+      "tones": [
+        "serious"
+      ],
+      "situations": [
+        "warning"
+      ],
+      "seconds": 7.11,
+      "audio": "refs/r46.wav",
+      "prompt": "进厂打工呀，送你保面四件套电子厂呢不去广州三四十的高工价，就是跟你胡扯。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r47",
+      "tones": [
+        "serious"
+      ],
+      "situations": [
+        "warning"
+      ],
+      "seconds": 9.11,
+      "audio": "refs/r47.wav",
+      "prompt": "后面这些呢都是挑战我们物流高公价三十五一小时的哟，不用体检纹身喇叭通通安排左下角去报名素材，拿你本人联系你哦。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r48",
+      "tones": [
+        "serious"
+      ],
+      "situations": [
+        "warning"
+      ],
+      "seconds": 10.54,
+      "audio": "refs/r48.wav",
+      "prompt": "而且我看你这个合同写的还是补差价，补差价才多少钱？十七块，我们有成功价，十七十八十九、二十的，你不知道你要跟那个补差价十七块。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r49",
+      "tones": [
+        "serious"
+      ],
+      "situations": [
+        "warning"
+      ],
+      "seconds": 11.32,
+      "audio": "refs/r49.wav",
+      "prompt": "可能大型的招聘会才有对外招聘，那么怎么样才能招到好场呢？注意听啊，第一就是可以通过找熟人，也就是朋友的内部推荐啊，这个可能呢不是。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r50",
+      "tones": [
+        "serious"
+      ],
+      "situations": [
+        "warning"
+      ],
+      "seconds": 17.7,
+      "audio": "refs/r50.wav",
+      "prompt": "要不要穿无尘服住宿？要不要押金宿舍，几人间工资几号发不完，还把聊天记录保存，生怕我骗他似的，你说你都在厂里面上班了，那你就好好上班就行了。他不得他非要问我签好的合同，什么时候给他一份，还说我不给也没事。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r51",
+      "tones": [
+        "sleepy"
+      ],
+      "situations": [
+        "night"
+      ],
+      "seconds": 7.12,
+      "audio": "refs/r51.wav",
+      "prompt": "此时啊已经到了下午的五点钟，困得不行，无奈只能眯两个小时，等待着晚上七点的闹钟。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r52",
+      "tones": [
+        "sleepy"
+      ],
+      "situations": [
+        "night"
+      ],
+      "seconds": 7.49,
+      "audio": "refs/r52.wav",
+      "prompt": "下班的这条路上，环境好好看啊，很适合拍氛围感。哎，以后下班要坐这个地铁站回家啦。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r53",
+      "tones": [
+        "sleepy"
+      ],
+      "situations": [
+        "night"
+      ],
+      "seconds": 8.3,
+      "audio": "refs/r53.wav",
+      "prompt": "家人们爸爸下班回家啦。最后我希望屏幕前的小伙伴能够生活顺利找到好工作。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r54",
+      "tones": [
+        "sleepy"
+      ],
+      "situations": [
+        "night"
+      ],
+      "seconds": 9.56,
+      "audio": "refs/r54.wav",
+      "prompt": "嗯嗯嗯嗯，这里这个小哥哥和我闲聊了几句，说认识我耶，差不多一天就结束，下班回家啦。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r55",
+      "tones": [
+        "nostalgic"
+      ],
+      "situations": [
+        "explain"
+      ],
+      "seconds": 7.71,
+      "audio": "refs/r55.wav",
+      "prompt": "少数民族地区的人往往与故乡有着很深厚的感情，他们的生活方式、价值观和信仰都与这个故乡紧紧相连的。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r56",
+      "tones": [
+        "nostalgic"
+      ],
+      "situations": [
+        "explain"
+      ],
+      "seconds": 14.82,
+      "audio": "refs/r56.wav",
+      "prompt": "为什么经常打工的？没有内蒙古人？新疆人还有西藏人呢，有人说啊那边以放牧为主，一头牛，一个w一千头牛，就是一千个w人家不缺钱的，事实上真的是这样吗？我发现大家忽略了很重要的一点，就是留念故乡。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r57",
+      "tones": [
+        "dry_sharp"
+      ],
+      "situations": [
+        "warning"
+      ],
+      "seconds": 7.39,
+      "audio": "refs/r57.wav",
+      "prompt": "现在工厂真离谱，用十二小时两班倒的工作制度，疯狂运转的夺命流水线，一年的工资压榨员工。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r58",
+      "tones": [
+        "dry_sharp"
+      ],
+      "situations": [
+        "warning"
+      ],
+      "seconds": 8.69,
+      "audio": "refs/r58.wav",
+      "prompt": "为什么啊依旧有那么多的公司违反劳动法。因为劳动者呢被侵权之后啊，维权的权利和能力啊，几乎都不在劳动者的手里。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r59",
+      "tones": [
+        "dry_sharp"
+      ],
+      "situations": [
+        "warning"
+      ],
+      "seconds": 8.74,
+      "audio": "refs/r59.wav",
+      "prompt": "你犯任何错误，只要你工作中有任何失误，他第一时间不是找员工了解情况，而是第一时间拍照发到工作群里通报。",
+      "promptLang": "zh"
+    },
+    {
+      "id": "r60",
+      "tones": [
+        "intimate"
+      ],
+      "situations": [
+        "warning"
+      ],
+      "seconds": 9.43,
+      "audio": "refs/r60.wav",
+      "prompt": "我说你别被他骗了，不要因为人家请你吃几次夜宵，对你好一点，就跟别人走。哎，你真是服了，现在出来实习的女孩子要小心一点。",
+      "promptLang": "zh"
+    }
+  ]
+}

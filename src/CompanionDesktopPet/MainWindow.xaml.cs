@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Automation;
@@ -7,6 +8,8 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Interop;
+using System.Media;
+using System.Windows.Media;
 using System.Windows.Threading;
 using CompanionDesktopPet.Models;
 using CompanionDesktopPet.Services;
@@ -86,6 +89,19 @@ public partial class MainWindow : Window
     private readonly DeveloperTestParameters _developerParameters = DeveloperTestParameters.CreateDefault();
     private readonly DialogueScheduler _dialogueScheduler;
     private DeveloperModeWindow? _developerWindow;
+    private VoiceLibraryWindow? _voiceLibraryWindow;
+    private bool _voiceLibraryMenuBuilt;
+    private readonly IVoiceSpeaker? _voice;
+    private readonly PersonaDialogueClient? _personaDialogue;
+    private int _personaDialogueSession;
+    private int _personaDialogueBusy;
+    private readonly DispatcherTimer _voiceProgressTimer;
+    private SoundPlayer? _voicePlayer;
+    private bool _voiceLineActive;
+    private bool _voicePlaying;
+    private DateTime _voicePhaseStarted;
+    private TimeSpan _playbackDuration = TimeSpan.FromSeconds(4);
+    private string? _synthesizingText;
     private bool _isHiddenToTray;
     private FullscreenSnapshot _fullscreen;
 
@@ -112,6 +128,8 @@ public partial class MainWindow : Window
     {
         ArgumentNullException.ThrowIfNull(options);
         InitializeComponent();
+        _voiceProgressTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
+        _voiceProgressTimer.Tick += VoiceProgress_Tick;
         _settings = options.Settings;
         _settingsService = options.SettingsService;
         _saveAgentMemoryAsync = options.SaveAgentMemoryAsync
@@ -171,6 +189,21 @@ public partial class MainWindow : Window
         SpeechBubble.MouseEnter += BubbleHover_MouseEnter;
         SpeechBubble.MouseLeave += BubbleHover_MouseLeave;
         SayMenuItem.Click += SaySomething_Click;
+        _voice = options.VoiceSpeaker;
+        _personaDialogue = options.PersonaDialogue ?? PersonaDialogueClient.TryCreate();
+        DialogueMenuItem.Click += ToggleDialogue_Click;
+        if (_voice is not null)
+        {
+            VoiceMenuItem.IsEnabled = true;
+            VoiceMenuItem.IsChecked = _voice.Enabled;
+            AutomationProperties.SetHelpText(VoiceMenuItem, "打开后佳怡会把这句话念出来。句子会留到声音结束。点她时，先说你点的这句。");
+            _voice.SynthesisStarted += OnVoiceSynthesisStarted;
+            _voice.PlaybackReady += OnVoicePlaybackReady;
+            _voice.SynthesisContinuing += OnVoiceSynthesisContinuing;
+            _voice.VoiceIdle += OnVoiceIdle;
+        }
+
+        VoiceMenuItem.Click += ToggleVoice_Click;
         GreetingMenuItem.Click += Greeting_Click;
         PauseMenuItem.Click += ToggleAnimation_Click;
         SmallSizeMenuItem.Click += SetSize_Click;
@@ -187,6 +220,8 @@ public partial class MainWindow : Window
         ExitMenuItem.Click += Exit_Click;
         BrowseAllCorpusMenuItem.Click += BrowseAllCorpus_Click;
         CorpusMenuItem.SubmenuOpened += CorpusMenu_SubmenuOpened;
+        BrowseVoiceLibraryMenuItem.Click += BrowseVoiceLibrary_Click;
+        VoiceLibraryMenuItem.SubmenuOpened += VoiceLibraryMenu_SubmenuOpened;
         WriteDeveloperDraft(_developerParameters);
         UpdateTrayAvailabilityControls();
         _bubbleTimer.Tick += BubbleTimer_Tick;
@@ -207,6 +242,8 @@ public partial class MainWindow : Window
         _paused = _settings.AnimationPaused;
         Topmost = _settings.AlwaysOnTop;
         TopmostMenuItem.IsChecked = Topmost;
+        DialogueMenuItem.IsChecked = _settings.DialogueEnabled;
+        UpdateDialogueComposer();
         ApplyScale(_scale);
         PlaceOnScreen();
         _animation.StartIdle();
@@ -226,6 +263,11 @@ public partial class MainWindow : Window
         if (!startupDisplayed)
         {
             ArmAutomaticTimer(now, fullscreen);
+        }
+
+        if (DialogueMenuItem.IsChecked)
+        {
+            _ = EnsurePersonaDialogueAsync();
         }
     }
 
@@ -901,16 +943,56 @@ public partial class MainWindow : Window
         });
     }
 
-    internal void ShowBubble(string text)
+    internal void ShowBubble(string text, bool speak = false, string? tone = null, string? trigger = null, bool urgent = false)
     {
         if (InteractionFrozen)
         {
             return;
         }
 
+        if (speak && _voice is { Enabled: true })
+        {
+            _voice.Speak(text, tone, trigger, urgent);
+            if (_isHiddenToTray)
+            {
+                if (!_voiceLineActive)
+                {
+                    SpeechText.Text = text;
+                    AutomationProperties.SetName(SpeechText, $"佳怡说：{text}");
+                }
+
+                _bubbleSuspendedForWindowHide = true;
+                BubblePopup.IsOpen = false;
+                _bubbleTimer.Stop();
+                return;
+            }
+
+            if (_voiceLineActive)
+            {
+                return;
+            }
+
+            SpeechText.Text = text;
+            AutomationProperties.SetName(SpeechText, $"佳怡说：{text}");
+            SpeechBubble.Visibility = Visibility.Visible;
+            OpenSpeechPopup();
+            _bubbleCountdown.Show();
+            _bubbleCountdown.Suspend();
+            _bubbleTimer.Stop();
+            _voiceLineActive = true;
+            BeginVoiceWait(text);
+            return;
+        }
+
         SpeechText.Text = text;
         AutomationProperties.SetName(SpeechText, $"佳怡说：{text}");
         SpeechBubble.Visibility = Visibility.Visible;
+
+        if (_voiceLineActive)
+        {
+            StopVoicePlayback();
+        }
+
         _bubbleCountdown.Show();
         if (_isHiddenToTray)
         {
@@ -920,13 +1002,391 @@ public partial class MainWindow : Window
             return;
         }
 
+        OpenSpeechPopup();
+        _announceLiveRegionChanged(SpeechText);
+        SynchronizeBubbleTimer();
+    }
+
+    private void OpenSpeechPopup()
+    {
         BubblePopup.IsOpen = true;
         _bubbleSuspendedForWindowHide = false;
         SpeechBubble.UpdateLayout();
         PositionBubble();
         Dispatcher.BeginInvoke(PositionBubble, DispatcherPriority.Loaded);
         _announceLiveRegionChanged(SpeechText);
+    }
+
+    private void ToggleVoice_Click(object sender, RoutedEventArgs e)
+    {
+        if (_voice is null)
+        {
+            VoiceMenuItem.IsChecked = false;
+            return;
+        }
+
+        _voice.Enabled = VoiceMenuItem.IsChecked;
+        UpdateVoiceParameterPanel();
+        if (!_voice.Enabled)
+        {
+            StopVoicePlayback();
+        }
+    }
+
+    private void ToggleDialogue_Click(object sender, RoutedEventArgs e)
+    {
+        UpdateDialogueComposer();
+        if (DialogueMenuItem.IsChecked)
+        {
+            _ = EnsurePersonaDialogueAsync();
+        }
+        else
+        {
+            _personaDialogueSession++;
+            _personaDialogue?.Stop();
+        }
+
+        _ = SaveSettingsAsync(skipWhenExiting: true);
+    }
+
+    private void UpdateDialogueComposer()
+    {
+        DialogueComposer.Visibility = DialogueMenuItem.IsChecked
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
+    private async Task EnsurePersonaDialogueAsync()
+    {
+        var session = ++_personaDialogueSession;
+        if (_personaDialogue is null)
+        {
+            DialogueMenuItem.IsChecked = false;
+            UpdateDialogueComposer();
+            ShowBubble("对话运行时还没放好。");
+            return;
+        }
+
+        if (_personaDialogue.IsReady)
+        {
+            return;
+        }
+
+        var started = await _personaDialogue.StartAsync();
+        if (session != _personaDialogueSession || !DialogueMenuItem.IsChecked)
+        {
+            return;
+        }
+
+        if (!started)
+        {
+            DialogueMenuItem.IsChecked = false;
+            UpdateDialogueComposer();
+            ShowBubble(string.IsNullOrWhiteSpace(_personaDialogue.StartupError)
+                ? "对话暂时没连上。"
+                : "对话暂时没连上。");
+            _ = SaveSettingsAsync(skipWhenExiting: true);
+        }
+    }
+
+    private async void DialogueSend_Click(object sender, RoutedEventArgs e) =>
+        await SendPersonaDialogueAsync();
+
+    private async void DialogueInput_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        await SendPersonaDialogueAsync();
+    }
+
+    private async Task SendPersonaDialogueAsync()
+    {
+        if (InteractionFrozen || _personaDialogue is not { IsReady: true })
+        {
+            ShowBubble("我还在醒，等一下再说。");
+            return;
+        }
+
+        var text = DialogueInput.Text.Trim();
+        if (text.Length == 0)
+        {
+            return;
+        }
+
+        if (Interlocked.Exchange(ref _personaDialogueBusy, 1) == 1)
+        {
+            return;
+        }
+
+        DialogueInput.Clear();
+        try
+        {
+            ShowBubble("……");
+            var reply = await _personaDialogue.ReplyAsync(text);
+            if (InteractionFrozen)
+            {
+                return;
+            }
+
+            ShowBubble(
+                reply.Ok && !string.IsNullOrWhiteSpace(reply.Text) ? reply.Text : "这句话我没接住，你再说一次。",
+                speak: reply.Ok,
+                tone: "gentle",
+                urgent: true);
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _personaDialogueBusy, 0);
+        }
+    }
+
+    private void OnVoiceSynthesisStarted(string text)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(() => OnVoiceSynthesisStarted(text));
+            return;
+        }
+
+        _synthesizingText = text;
+        if (_voicePlaying || InteractionFrozen || _isHiddenToTray || _voice is not { Enabled: true })
+        {
+            return;
+        }
+
+        SpeechText.Text = text;
+        AutomationProperties.SetName(SpeechText, $"佳怡说：{text}");
+        BeginVoiceWait(text);
+    }
+
+    private void OnVoiceSynthesisContinuing()
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(OnVoiceSynthesisContinuing);
+            return;
+        }
+
+        _voicePlaying = false;
+        _voicePlayer?.Stop();
+        _voicePlayer = null;
+        if (!string.IsNullOrWhiteSpace(_synthesizingText))
+        {
+            SpeechText.Text = _synthesizingText;
+            AutomationProperties.SetName(SpeechText, $"佳怡说：{_synthesizingText}");
+        }
+
+        BeginVoiceWait(_synthesizingText ?? SpeechText.Text);
+    }
+
+    private void OnVoiceIdle()
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(OnVoiceIdle);
+            return;
+        }
+
+        if (!_voiceLineActive)
+        {
+            return;
+        }
+
+        FinishVoiceHold(linger: true);
+    }
+
+    private void OnVoicePlaybackReady(VoiceClip clip)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(() => OnVoicePlaybackReady(clip));
+            return;
+        }
+
+        if (InteractionFrozen || _isHiddenToTray || _voice is not { Enabled: true })
+        {
+            StopVoicePlayback();
+            return;
+        }
+
+        SpeechText.Text = clip.Text;
+        AutomationProperties.SetName(SpeechText, $"佳怡说：{clip.Text}");
+        if (!_voiceLineActive)
+        {
+            SpeechBubble.Visibility = Visibility.Visible;
+            OpenSpeechPopup();
+            _bubbleCountdown.Show();
+            _bubbleCountdown.Suspend();
+            _voiceLineActive = true;
+        }
+
+        try
+        {
+            _voicePlayer?.Stop();
+            _voicePlayer = new SoundPlayer(clip.Path);
+            _voicePlayer.Play();
+            _voicePlaying = true;
+            _playbackDuration = ReadWavDuration(clip.Path) + TimeSpan.FromMilliseconds(150);
+            _voicePhaseStarted = DateTime.UtcNow;
+            VoiceProgressRing.Visibility = Visibility.Visible;
+            _voiceProgressTimer.Start();
+        }
+        catch (Exception)
+        {
+            _voicePlayer = null;
+            _voicePlaying = false;
+            _voice?.NotifyPlaybackCompleted();
+        }
+    }
+
+    private void VoiceProgress_Tick(object? sender, EventArgs e)
+    {
+        if (!_voiceLineActive)
+        {
+            _voiceProgressTimer.Stop();
+            return;
+        }
+
+        if (_voicePlaying)
+        {
+            var fraction = (DateTime.UtcNow - _voicePhaseStarted).TotalMilliseconds
+                / Math.Max(1, _playbackDuration.TotalMilliseconds);
+            SetVoiceProgress(fraction);
+            if (fraction >= 1)
+            {
+                _voicePlaying = false;
+                _voicePlayer = null;
+                _voice?.NotifyPlaybackCompleted();
+            }
+
+            return;
+        }
+
+        var spin = ((DateTime.UtcNow - _voicePhaseStarted).TotalMilliseconds / 8d) % 360d;
+        SetVoiceSpinner(spin);
+    }
+
+    private void BeginVoiceWait(string text)
+    {
+        _voicePlaying = false;
+        _voicePhaseStarted = DateTime.UtcNow;
+        _synthesizingText = text;
+        VoiceProgressRing.Visibility = Visibility.Visible;
+        SetVoiceSpinner(0);
+        _voiceProgressTimer.Start();
+    }
+
+    private void FinishVoiceHold(bool linger)
+    {
+        _voiceLineActive = false;
+        _voicePlaying = false;
+        _voiceProgressTimer.Stop();
+        VoiceProgressRing.Visibility = Visibility.Collapsed;
+        if (!linger || _bubbleCountdown.State == BubbleCountdownState.Hidden)
+        {
+            HideBubble();
+            return;
+        }
+
+        _bubbleCountdown.Resume();
+        if (_bubbleCountdown.State == BubbleCountdownState.Hidden)
+        {
+            CollapseBubble();
+            return;
+        }
+
         SynchronizeBubbleTimer();
+    }
+
+    private void SetVoiceProgress(double fraction)
+    {
+        fraction = Math.Clamp(fraction, 0, 1);
+        var units = VoiceProgressUnits();
+        VoiceProgressRotate.Angle = -90;
+        VoiceProgressArc.StrokeDashArray = new DoubleCollection { units * fraction, units };
+    }
+
+    private void SetVoiceSpinner(double angle)
+    {
+        var units = VoiceProgressUnits();
+        VoiceProgressRotate.Angle = angle;
+        VoiceProgressArc.StrokeDashArray = new DoubleCollection { units * 0.22, units };
+    }
+
+    private static double VoiceProgressUnits()
+    {
+        const double thickness = 3;
+        const double diameter = 34;
+        return Math.PI * (diameter - thickness) / thickness;
+    }
+
+    private static TimeSpan ReadWavDuration(string path)
+    {
+        using var stream = File.OpenRead(path);
+        using var reader = new BinaryReader(stream);
+        if (stream.Length < 44)
+        {
+            return TimeSpan.FromSeconds(4);
+        }
+
+        reader.ReadBytes(4);
+        reader.ReadInt32();
+        reader.ReadBytes(4);
+        short channels = 1;
+        var sampleRate = 32000;
+        short bits = 16;
+        var dataLength = 0;
+        while (stream.Position + 8 <= stream.Length)
+        {
+            var id = new string(reader.ReadChars(4));
+            var size = reader.ReadInt32();
+            if (id == "fmt ")
+            {
+                reader.ReadInt16();
+                channels = reader.ReadInt16();
+                sampleRate = reader.ReadInt32();
+                reader.ReadInt32();
+                reader.ReadInt16();
+                bits = reader.ReadInt16();
+                var unread = size - 16;
+                if (unread > 0)
+                {
+                    reader.ReadBytes(unread);
+                }
+            }
+            else if (id == "data")
+            {
+                dataLength = size;
+                break;
+            }
+            else if (size > 0)
+            {
+                reader.ReadBytes(size);
+            }
+        }
+
+        var bytesPerSecond = sampleRate * Math.Max(1, (int)channels) * Math.Max(1, bits / 8);
+        if (bytesPerSecond <= 0 || dataLength <= 0)
+        {
+            return TimeSpan.FromSeconds(4);
+        }
+
+        return TimeSpan.FromSeconds(dataLength / (double)bytesPerSecond);
+    }
+
+    private void StopVoicePlayback()
+    {
+        _voice?.Stop();
+        _voicePlayer?.Stop();
+        _voicePlayer = null;
+        if (_voiceLineActive)
+        {
+            FinishVoiceHold(linger: false);
+        }
     }
 
     private void ShowLocalFeedbackWhenVisible(string text)
@@ -976,6 +1436,12 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (_voiceLineActive)
+        {
+            _bubbleTimer.Stop();
+            return;
+        }
+
         if (_bubbleCountdown.TryExpire())
         {
             CollapseBubble();
@@ -994,6 +1460,10 @@ public partial class MainWindow : Window
     private void CollapseBubble()
     {
         _bubbleTimer.Stop();
+        _voiceProgressTimer.Stop();
+        VoiceProgressRing.Visibility = Visibility.Collapsed;
+        _voiceLineActive = false;
+        _voicePlaying = false;
         SpeechText.Text = string.Empty;
         AutomationProperties.SetName(SpeechText, string.Empty);
         SpeechBubble.Visibility = Visibility.Collapsed;
@@ -1472,7 +1942,12 @@ public partial class MainWindow : Window
     {
         if (reply.ShouldDisplayText)
         {
-            ShowBubble(reply.Text);
+            ShowBubble(
+                reply.Text,
+                speak: true,
+                tone: reply.SourceLine?.Tone,
+                trigger: reply.SourceLine?.Trigger.ToString(),
+                urgent: reply.Trigger == CompanionEvent.Click);
         }
         else if (reply.Trigger == CompanionEvent.Click)
         {
@@ -1657,6 +2132,7 @@ public partial class MainWindow : Window
             _bubbleTimer.Stop();
             _bubbleSuspendedForWindowHide = BubblePopup.IsOpen;
             BubblePopup.IsOpen = false;
+            StopVoicePlayback();
             Hide();
         }
     }
@@ -2139,6 +2615,87 @@ public partial class MainWindow : Window
         window.Show();
     }
 
+    private void BrowseVoiceLibrary_Click(object sender, RoutedEventArgs e)
+    {
+        var library = VoiceLibraryIndex.TryLoad(AppContext.BaseDirectory);
+        if (library is null)
+        {
+            return;
+        }
+
+        Dispatcher.BeginInvoke(() => OpenVoiceLibrary(library), DispatcherPriority.Input);
+    }
+
+    private void VoiceLibraryMenu_SubmenuOpened(object sender, RoutedEventArgs e)
+    {
+        if (_voiceLibraryMenuBuilt || _isClosed)
+        {
+            return;
+        }
+
+        _voiceLibraryMenuBuilt = true;
+        var library = VoiceLibraryIndex.TryLoad(AppContext.BaseDirectory);
+        if (library is null)
+        {
+            BrowseVoiceLibraryMenuItem.Header = "旁边还没有语音库";
+            BrowseVoiceLibraryMenuItem.IsEnabled = false;
+            return;
+        }
+
+        BrowseVoiceLibraryMenuItem.Header = $"全部参考  {library.Clips.Length}";
+        foreach (var child in library.Children)
+        {
+            var folder = child;
+            var item = new MenuItem
+            {
+                Header = folder.Header,
+                Tag = "·",
+                Style = MenuItemStyle
+            };
+            item.Click += (_, _) => Dispatcher.BeginInvoke(
+                () => OpenVoiceLibrary(folder, library),
+                DispatcherPriority.Input);
+            VoiceLibraryMenuItem.Items.Add(item);
+        }
+
+        if (_controlMenuPlacementReady)
+        {
+            AlignSubmenuPopups(VoiceLibraryMenuItem, _controlMenuPlacement.SubmenuOpensRight);
+        }
+    }
+
+    private void OpenVoiceLibrary(VoiceLibraryFolder folder, VoiceLibraryFolder? root = null)
+    {
+        if (InteractionFrozen)
+        {
+            return;
+        }
+
+        root ??= folder;
+        if (_voiceLibraryWindow is { IsLoaded: true })
+        {
+            _voiceLibraryWindow.SelectFolder(folder);
+            _voiceLibraryWindow.Activate();
+            return;
+        }
+
+        var window = new VoiceLibraryWindow(root)
+        {
+            Owner = this,
+            Topmost = Topmost
+        };
+        window.Closed += (_, _) =>
+        {
+            if (ReferenceEquals(_voiceLibraryWindow, window))
+            {
+                _voiceLibraryWindow = null;
+            }
+        };
+        _voiceLibraryWindow = window;
+        window.SelectFolder(folder);
+        window.Show();
+    }
+
     private void SpeakDeveloperLine(DialogueLine line)
     {
         if (InteractionFrozen || string.IsNullOrWhiteSpace(line.Text))
@@ -2146,7 +2703,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        ShowBubble(line.Text);
+        ShowBubble(line.Text, speak: true, tone: line.Tone, trigger: line.Trigger.ToString(), urgent: true);
     }
 
     private void ApplyDeveloperParameters(DeveloperTestParameters draft)
@@ -2154,6 +2711,10 @@ public partial class MainWindow : Window
         _developerParameters.CopyFrom(draft);
         _dialogueScheduler.TestParameters = _developerParameters;
         _bubbleCountdown.ActiveDisplayDuration = TimeSpan.FromSeconds(_developerParameters.BubbleSeconds);
+        _voice?.ApplySpeech(
+            _developerParameters.SpeechSpeed,
+            _developerParameters.SpeechTemperature,
+            _developerParameters.SpeechRepetition);
         if (!PresentationSuspended)
         {
             ArmAutomaticTimer(LocalNow, ObserveFullscreen());
@@ -2179,9 +2740,14 @@ public partial class MainWindow : Window
 
         ParameterErrorText.Text = string.Empty;
         ApplyDeveloperParameters(draft);
+        var voiceOn = _voice is { Enabled: true };
         ParameterStatusText.Text = keepStatus
-            ? "已经回到原来的间隔和气泡时间。"
-            : "已经换成这组啦。";
+            ? voiceOn
+                ? "已经回到原来的间隔、气泡和语音。"
+                : "已经回到原来的间隔和气泡时间。"
+            : voiceOn
+                ? "已经换成这组啦，下一句按这个语速和语气。"
+                : "已经换成这组啦。";
     }
 
     private bool TryReadDeveloperDraft(out DeveloperTestParameters draft, out string error)
@@ -2197,7 +2763,7 @@ public partial class MainWindow : Window
             || !TryDeveloperInteger(FullscreenMaxBox, out var fullscreenMax)
             || !TryDeveloperInteger(BubbleBox, out var bubble))
         {
-            error = "这里要填整数。";
+            error = "间隔和气泡要填整数。";
             return false;
         }
 
@@ -2210,12 +2776,40 @@ public partial class MainWindow : Window
         draft.FullscreenMinimumMinutes = fullscreenMin;
         draft.FullscreenMaximumMinutes = fullscreenMax;
         draft.BubbleSeconds = bubble;
+        if (VoiceParameterPanel.Visibility == Visibility.Visible)
+        {
+            if (!TryDeveloperNumber(SpeechSpeedBox, out var speechSpeed)
+                || !TryDeveloperNumber(SpeechTemperatureBox, out var speechTemperature)
+                || !TryDeveloperNumber(SpeechRepetitionBox, out var speechRepetition))
+            {
+                error = "语音参数要填数字。";
+                return false;
+            }
+
+            draft.SpeechSpeed = speechSpeed;
+            draft.SpeechTemperature = speechTemperature;
+            draft.SpeechRepetition = speechRepetition;
+        }
+
         error = string.Empty;
         return true;
     }
 
     private static bool TryDeveloperInteger(TextBox box, out int value) =>
         int.TryParse(box.Text.Trim(), out value);
+
+    private static bool TryDeveloperNumber(TextBox box, out double value)
+    {
+        var text = box.Text.Trim().Replace('，', '.').Replace(',', '.');
+        return double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value);
+    }
+
+    private void UpdateVoiceParameterPanel()
+    {
+        VoiceParameterPanel.Visibility = _voice is { Enabled: true }
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
 
     private void WriteDeveloperDraft(DeveloperTestParameters parameters)
     {
@@ -2228,8 +2822,12 @@ public partial class MainWindow : Window
         FullscreenMinBox.Text = parameters.FullscreenMinimumMinutes.ToString();
         FullscreenMaxBox.Text = parameters.FullscreenMaximumMinutes.ToString();
         BubbleBox.Text = parameters.BubbleSeconds.ToString();
+        SpeechSpeedBox.Text = parameters.SpeechSpeed.ToString("0.##", CultureInfo.InvariantCulture);
+        SpeechTemperatureBox.Text = parameters.SpeechTemperature.ToString("0.##", CultureInfo.InvariantCulture);
+        SpeechRepetitionBox.Text = parameters.SpeechRepetition.ToString("0.##", CultureInfo.InvariantCulture);
         ParameterErrorText.Text = string.Empty;
         ParameterStatusText.Text = string.Empty;
+        UpdateVoiceParameterPanel();
     }
 
     private Style MenuItemStyle => (Style)ControlMenu.FindResource(typeof(MenuItem));
@@ -2462,7 +3060,10 @@ public partial class MainWindow : Window
                 return;
             }
 
-            _settings = new PetSettings(Left, Top, _scale, _paused, Topmost);
+            _settings = new PetSettings(Left, Top, _scale, _paused, Topmost)
+            {
+                DialogueEnabled = DialogueMenuItem.IsChecked
+            };
             await _saveSettingsAsync(_settings);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
@@ -2491,6 +3092,9 @@ public partial class MainWindow : Window
         DisarmAutomaticTimer();
         _bubbleCountdown.Close();
         _bubbleTimer.Stop();
+        StopVoicePlayback();
+        _voice?.Dispose();
+        _personaDialogue?.Dispose();
         _memoryTimer.Stop();
         _eventTimer.Stop();
         if (!_suppressApplicationShutdownOnClose && !_shutdownRequested)

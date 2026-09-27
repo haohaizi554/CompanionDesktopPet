@@ -38,4 +38,23 @@
     <Using Remove="System.Drawing" />
     <Using Remove="System.Windows.Forms" />
   </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="..\..\voice\infer_stdio.py"
+             Link="voice\infer_stdio.py"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\voice\packs\jiayi\manifest.json"
+             Link="voice\packs\jiayi\manifest.json"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\voice\packs\jiayi\refs\*.wav"
+             Link="voice\packs\jiayi\refs\%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\voice\packs\jiayi\weights\*"
+             Link="voice\packs\jiayi\weights\%(Filename)%(Extension)"
+             CopyToOutputDirectory="Never"
+             CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

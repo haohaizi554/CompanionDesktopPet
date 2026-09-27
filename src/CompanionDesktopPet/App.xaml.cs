@@ -58,7 +58,10 @@ public partial class App : System.Windows.Application
             {
                 AgentMemoryService = agentMemoryService,
                 AgentMemory = agentMemory,
-                AutoStartService = _autoStartService
+                AutoStartService = _autoStartService,
+                VoiceSpeaker = _smokeTest
+                    ? null
+                    : JiayiVoiceSpeaker.TryCreate(AppContext.BaseDirectory)
             }.Build());
             if (_smokeTest)
             {

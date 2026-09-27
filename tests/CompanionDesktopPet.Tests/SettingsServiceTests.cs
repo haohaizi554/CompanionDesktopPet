@@ -136,6 +136,18 @@ public sealed class SettingsServiceTests : IDisposable
             await new SettingsService(_directory).LoadAsync());
     }
 
+    [Fact]
+    public async Task DialogueSwitch_DefaultsOffAndRoundTripsWhenEnabled()
+    {
+        Assert.False(PetSettings.Default.DialogueEnabled);
+        var service = new SettingsService(_directory);
+        var enabled = new PetSettings(12, 24, PetScale.Normal, false, true) { DialogueEnabled = true };
+
+        await service.SaveAsync(enabled);
+
+        Assert.Equal(enabled, await service.LoadAsync());
+    }
+
     private async Task WriteSettingsAsync(string json)
     {
         Directory.CreateDirectory(_directory);

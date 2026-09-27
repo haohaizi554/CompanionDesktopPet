@@ -35,6 +35,8 @@ internal sealed class MainWindowOptions
     internal DialogueWarmupCoordinator? WarmupCoordinator { get; init; }
     internal Action<FrameworkElement>? AnnounceLiveRegionChanged { get; init; }
     internal IPetAnimationController? AnimationController { get; init; }
+    internal IVoiceSpeaker? VoiceSpeaker { get; init; }
+    internal PersonaDialogueClient? PersonaDialogue { get; init; }
 }
 
 /// <summary>
@@ -69,6 +71,8 @@ internal sealed class MainWindowOptionsBuilder
     internal DialogueWarmupCoordinator? WarmupCoordinator { get; init; }
     internal Action<FrameworkElement>? AnnounceLiveRegionChanged { get; init; }
     internal IPetAnimationController? AnimationController { get; init; }
+    internal IVoiceSpeaker? VoiceSpeaker { get; init; }
+    internal PersonaDialogueClient? PersonaDialogue { get; init; }
 
     internal MainWindowOptions Build() => new(_settings, _settingsService)
     {
@@ -87,6 +91,8 @@ internal sealed class MainWindowOptionsBuilder
         DialogueScheduler = DialogueScheduler,
         WarmupCoordinator = WarmupCoordinator,
         AnnounceLiveRegionChanged = AnnounceLiveRegionChanged,
-        AnimationController = AnimationController
+        AnimationController = AnimationController,
+        VoiceSpeaker = VoiceSpeaker,
+        PersonaDialogue = PersonaDialogue
     };
 }

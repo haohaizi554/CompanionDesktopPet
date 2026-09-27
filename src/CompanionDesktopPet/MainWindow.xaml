@@ -34,7 +34,7 @@
                 StrokeThickness="2"
                 Visibility="Collapsed"
                 Data="M 0,12 L 20,12 L 10,0 Z" />
-          <Border Padding="18,13"
+            <Border Padding="18,13"
                   CornerRadius="25"
                   Background="{DynamicResource Pet.Brush.BubbleSurface}"
                   BorderBrush="{DynamicResource Pet.Brush.AccentBorder}"
@@ -45,14 +45,43 @@
                                 ShadowDepth="3"
                                 Opacity="{DynamicResource Pet.Opacity.Shadow.Bubble}" />
             </Border.Effect>
-            <TextBlock x:Name="SpeechText"
-                       Foreground="{DynamicResource Pet.Brush.TextPrimary}"
-                       FontFamily="{StaticResource Pet.FontFamily.Ui}"
-                       FontSize="15"
-                       FontWeight="SemiBold"
-                       TextWrapping="Wrap"
-                       TextAlignment="Center"
-                       AutomationProperties.LiveSetting="Polite" />
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
+              <Grid x:Name="VoiceProgressRing"
+                    Width="34"
+                    Height="34"
+                    Margin="0,0,12,0"
+                    VerticalAlignment="Center"
+                    Visibility="Collapsed"
+                    IsHitTestVisible="False">
+                <Ellipse Stroke="{DynamicResource Pet.Brush.AccentBorder}"
+                         StrokeThickness="3"
+                         Opacity="0.28" />
+                <Ellipse x:Name="VoiceProgressArc"
+                         Stroke="{DynamicResource Pet.Brush.AccentBorder}"
+                         StrokeThickness="3"
+                         StrokeStartLineCap="Round"
+                         StrokeEndLineCap="Round"
+                         RenderTransformOrigin="0.5,0.5">
+                  <Ellipse.RenderTransform>
+                    <RotateTransform x:Name="VoiceProgressRotate" Angle="-90" />
+                  </Ellipse.RenderTransform>
+                </Ellipse>
+              </Grid>
+              <TextBlock x:Name="SpeechText"
+                         Grid.Column="1"
+                         Foreground="{DynamicResource Pet.Brush.TextPrimary}"
+                         FontFamily="{StaticResource Pet.FontFamily.Ui}"
+                         FontSize="15"
+                         FontWeight="SemiBold"
+                         TextWrapping="Wrap"
+                         TextAlignment="Center"
+                         VerticalAlignment="Center"
+                         AutomationProperties.LiveSetting="Polite" />
+            </Grid>
           </Border>
           <Path x:Name="BubbleArrowDown"
                 Width="20"
@@ -65,6 +94,35 @@
         </StackPanel>
       </Border>
     </Popup>
+
+    <Border x:Name="DialogueComposer"
+            Visibility="Collapsed"
+            Width="300"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Bottom"
+            Margin="0,0,0,336"
+            Padding="8,6"
+            CornerRadius="18"
+            Background="{DynamicResource Pet.Brush.BubbleSurface}"
+            BorderBrush="{DynamicResource Pet.Brush.AccentBorder}"
+            BorderThickness="2"
+            Panel.ZIndex="2">
+      <DockPanel LastChildFill="True">
+        <Button x:Name="DialogueSendButton"
+                DockPanel.Dock="Right"
+                Margin="8,0,0,0"
+                MinWidth="56"
+                MinHeight="30"
+                Content="发送"
+                Click="DialogueSend_Click" />
+        <TextBox x:Name="DialogueInput"
+                 MinHeight="30"
+                 FontSize="14"
+                 Style="{StaticResource KawaiiTextBoxStyle}"
+                 ToolTip="跟佳怡说一句。语音开着时，她用本地声音念出来。"
+                 KeyDown="DialogueInput_KeyDown" />
+      </DockPanel>
+    </Border>
 
     <Grid x:Name="CharacterStage"
             Width="320"
@@ -106,6 +164,19 @@
                     Header="说句话 ♡"
                     Tag="✦"
                     AutomationProperties.HelpText="让佳怡说一句话。" />
+          <MenuItem x:Name="VoiceMenuItem"
+                    Header="语音开关"
+                    Tag="♪"
+                    IsCheckable="True"
+                    IsChecked="False"
+                    IsEnabled="False"
+                    AutomationProperties.HelpText="打开后佳怡会把这句话念出来。句子会留到声音结束。点她时，先说你点的这句，正在合成的那句不会被打断。" />
+          <MenuItem x:Name="DialogueMenuItem"
+                    Header="对话开关"
+                    Tag="✎"
+                    IsCheckable="True"
+                    IsChecked="False"
+                    AutomationProperties.HelpText="默认关闭。打开后可以打字跟佳怡说话。回答由大模型生成，如果语音开着，仍用本地声音念出来。" />
           <MenuItem x:Name="GreetingMenuItem" Header="打个招呼♡" Tag="♡" />
           <MenuItem x:Name="PauseMenuItem" Header="暂停动画" Tag="☾" />
           <Separator />
@@ -131,7 +202,7 @@
                     Tag="⚙"
                     Style="{StaticResource KawaiiDeveloperMenuStyle}"
                     SubmenuOpened="DeveloperModeMenu_SubmenuOpened"
-                    AutomationProperties.HelpText="打开语料库，或从测试参数再进一层改这一次的间隔。">
+                    AutomationProperties.HelpText="打开语料库和语音库，或从测试参数再进一层改这一次的间隔。">
             <MenuItem.Resources>
               <Style TargetType="ScrollBar" BasedOn="{StaticResource KawaiiScrollBarStyle}" />
             </MenuItem.Resources>
@@ -143,12 +214,20 @@
                         Header="全库语句…"
                         Tag="☰" />
             </MenuItem>
+            <MenuItem x:Name="VoiceLibraryMenuItem"
+                      Header="语音库"
+                      Tag="♪"
+                      AutomationProperties.HelpText="查看参考原声和对应原文，点一条就能听这段录音。">
+              <MenuItem x:Name="BrowseVoiceLibraryMenuItem"
+                        Header="全部参考…"
+                        Tag="♪" />
+            </MenuItem>
             <MenuItem x:Name="TestParametersMenuItem"
                       Header="测试参数"
                       Tag="⌁"
                       Style="{StaticResource KawaiiDeveloperMenuStyle}"
                       SubmenuOpened="DeveloperModeMenu_SubmenuOpened"
-                      AutomationProperties.HelpText="再展开一层，手改自动台词间隔和气泡停留时间。">
+                      AutomationProperties.HelpText="再展开一层，手改自动台词间隔、气泡停留，语音开着时还能改语速和语气。">
               <MenuItem Style="{StaticResource KawaiiMenuPanelStyle}" StaysOpenOnClick="True">
                 <MenuItem.Header>
                 <StackPanel Width="248" Margin="4,2,4,6">
@@ -200,6 +279,34 @@
                       <TextBlock Margin="6,0,0,0" VerticalAlignment="Center" FontSize="11" Foreground="{DynamicResource Pet.Brush.TextDisabled}" Text="秒" />
                     </StackPanel>
                   </Grid>
+                  <StackPanel x:Name="VoiceParameterPanel" Visibility="Collapsed">
+                    <TextBlock Margin="0,2,0,8"
+                               FontSize="11"
+                               TextWrapping="Wrap"
+                               Foreground="{DynamicResource Pet.Brush.TextDisabled}"
+                               Text="语音开着。语速 1 是原速，语气越高越活，重复越高越少绕。下一句生效。" />
+                    <Grid Margin="0,0,0,6">
+                      <TextBlock VerticalAlignment="Center" FontSize="12" Text="语速" />
+                      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                        <TextBox x:Name="SpeechSpeedBox" Width="64" MinHeight="26" FontSize="12" Padding="2,2" HorizontalContentAlignment="Center" Style="{StaticResource KawaiiTextBoxStyle}" PreviewMouseLeftButtonDown="ParameterBox_PreviewMouseLeftButtonDown" />
+                        <TextBlock Margin="6,0,0,0" Width="22" VerticalAlignment="Center" FontSize="11" Foreground="{DynamicResource Pet.Brush.TextDisabled}" Text="倍" />
+                      </StackPanel>
+                    </Grid>
+                    <Grid Margin="0,0,0,6">
+                      <TextBlock VerticalAlignment="Center" FontSize="12" Text="语气" />
+                      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                        <TextBox x:Name="SpeechTemperatureBox" Width="64" MinHeight="26" FontSize="12" Padding="2,2" HorizontalContentAlignment="Center" Style="{StaticResource KawaiiTextBoxStyle}" PreviewMouseLeftButtonDown="ParameterBox_PreviewMouseLeftButtonDown" />
+                        <TextBlock Margin="6,0,0,0" Width="22" />
+                      </StackPanel>
+                    </Grid>
+                    <Grid Margin="0,0,0,8">
+                      <TextBlock VerticalAlignment="Center" FontSize="12" Text="重复" />
+                      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                        <TextBox x:Name="SpeechRepetitionBox" Width="64" MinHeight="26" FontSize="12" Padding="2,2" HorizontalContentAlignment="Center" Style="{StaticResource KawaiiTextBoxStyle}" PreviewMouseLeftButtonDown="ParameterBox_PreviewMouseLeftButtonDown" />
+                        <TextBlock Margin="6,0,0,0" Width="22" />
+                      </StackPanel>
+                    </Grid>
+                  </StackPanel>
                   <TextBlock x:Name="ParameterErrorText"
                              Margin="0,0,0,6"
                              FontSize="11"

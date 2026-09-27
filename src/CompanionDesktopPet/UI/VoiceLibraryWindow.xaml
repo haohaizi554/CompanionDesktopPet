@@ -1,0 +1,199 @@
+<Window x:Class="CompanionDesktopPet.UI.VoiceLibraryWindow"
+        x:ClassModifier="internal"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="语音库"
+        Width="980"
+        Height="680"
+        MinWidth="820"
+        MinHeight="520"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="CanResize"
+        ShowInTaskbar="True"
+        FontFamily="{DynamicResource Pet.FontFamily.Ui}"
+        Foreground="{DynamicResource Pet.Brush.TextPrimary}"
+        TextOptions.TextFormattingMode="Display"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True">
+  <Window.Resources>
+    <Style TargetType="ScrollBar" BasedOn="{StaticResource KawaiiScrollBarStyle}" />
+    <Style TargetType="TextBox" BasedOn="{StaticResource KawaiiTextBoxStyle}" />
+  </Window.Resources>
+  <Border Margin="18"
+          CornerRadius="28"
+          BorderThickness="2"
+          BorderBrush="{DynamicResource Pet.Brush.MenuBorder}"
+          Background="{DynamicResource Pet.Brush.MenuSurface}"
+          SnapsToDevicePixels="True">
+    <Border.Effect>
+      <DropShadowEffect Color="{DynamicResource Pet.Color.Shadow.Popup}"
+                        BlurRadius="24"
+                        ShadowDepth="5"
+                        Opacity="{DynamicResource Pet.Opacity.Shadow.Popup}" />
+    </Border.Effect>
+    <Grid Margin="18,14,18,16">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="*" />
+      </Grid.RowDefinitions>
+
+      <Grid x:Name="TitleBar"
+            Margin="4,0,0,12"
+            MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <TextBlock Margin="0,0,10,0"
+                   VerticalAlignment="Center"
+                   FontSize="18"
+                   Foreground="{DynamicResource Pet.Brush.HeartPrimary}"
+                   Text="♡" />
+        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+          <TextBlock FontSize="18" FontWeight="SemiBold" Text="语音库" />
+          <TextBlock Style="{StaticResource KawaiiNoteStyle}"
+                     Margin="0,2,0,0"
+                     Text="参考原声和对应原文。点一条，或者双击，就能听这段录音。" />
+        </StackPanel>
+        <Button Grid.Column="2"
+                Style="{StaticResource KawaiiCloseButtonStyle}"
+                Content="×"
+                ToolTip="先关上"
+                Click="Close_Click" />
+      </Grid>
+
+      <Grid Grid.Row="1">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition x:Name="DirectoryColumn" Width="200" MinWidth="160" />
+          <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <Border Grid.Column="0"
+                Margin="0,0,12,0"
+                Padding="12,12,8,12"
+                CornerRadius="22"
+                BorderThickness="1.5"
+                BorderBrush="{DynamicResource Pet.Brush.PanelCardBorder}"
+                Background="{DynamicResource Pet.Brush.PanelCard}">
+          <DockPanel>
+            <TextBlock DockPanel.Dock="Top"
+                       Style="{StaticResource KawaiiCaptionStyle}"
+                       Margin="6,0,0,8"
+                       Text="语气" />
+            <TreeView x:Name="LibraryTree"
+                      BorderThickness="0"
+                      Background="Transparent"
+                      Padding="0"
+                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                      ItemContainerStyle="{StaticResource KawaiiTreeViewItemStyle}"
+                      SelectedItemChanged="LibraryTree_SelectedItemChanged">
+              <TreeView.ItemTemplate>
+                <HierarchicalDataTemplate ItemsSource="{Binding Children}">
+                  <TextBlock Text="{Binding Header}" TextWrapping="NoWrap" />
+                </HierarchicalDataTemplate>
+              </TreeView.ItemTemplate>
+            </TreeView>
+          </DockPanel>
+        </Border>
+
+        <Border Grid.Column="1"
+                Padding="14,12"
+                CornerRadius="22"
+                BorderThickness="1.5"
+                BorderBrush="{DynamicResource Pet.Brush.PanelCardBorder}"
+                Background="{DynamicResource Pet.Brush.PanelCard}">
+          <DockPanel>
+            <Grid DockPanel.Dock="Top" Margin="2,0,2,10">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+              </Grid.ColumnDefinitions>
+              <StackPanel VerticalAlignment="Center">
+                <TextBlock x:Name="FolderTitleText"
+                           FontSize="16"
+                           FontWeight="SemiBold"
+                           Text="全部" />
+                <TextBlock Style="{StaticResource KawaiiNoteStyle}"
+                           Margin="0,2,0,0"
+                           Text="拿来对照的原声，原文和录音是同一段" />
+              </StackPanel>
+              <Border Grid.Column="1"
+                      MinWidth="72"
+                      Height="28"
+                      Padding="10,0"
+                      VerticalAlignment="Center"
+                      CornerRadius="14"
+                      Background="#FFFFE4EC">
+                <TextBlock x:Name="ClipCountText"
+                           VerticalAlignment="Center"
+                           HorizontalAlignment="Center"
+                           FontWeight="SemiBold"
+                           Foreground="{DynamicResource Pet.Brush.MenuChecked}"
+                           Text="0 条" />
+              </Border>
+            </Grid>
+
+            <Grid DockPanel.Dock="Top" Margin="2,0,2,10">
+              <TextBox x:Name="SearchBox"
+                       MinHeight="36"
+                       ToolTip="按原文或编号筛选。"
+                       TextChanged="SearchBox_TextChanged" />
+              <TextBlock x:Name="SearchHint"
+                         Margin="14,0,12,0"
+                         VerticalAlignment="Center"
+                         IsHitTestVisible="False"
+                         Foreground="{DynamicResource Pet.Brush.PanelHint}"
+                         Text="找原文或编号" />
+            </Grid>
+
+            <DockPanel DockPanel.Dock="Bottom" Margin="2,10,2,0">
+              <Button x:Name="PlayClipButton"
+                      DockPanel.Dock="Right"
+                      MinWidth="148"
+                      Style="{StaticResource KawaiiPrimaryButtonStyle}"
+                      Content="听这段参考"
+                      Click="PlayClip_Click" />
+              <TextBlock x:Name="ClipDetailText"
+                         Margin="0,0,12,0"
+                         VerticalAlignment="Center"
+                         Style="{StaticResource KawaiiNoteStyle}"
+                         TextWrapping="Wrap"
+                         Text="选中一条，这里会记下编号、语气和原文。" />
+            </DockPanel>
+
+            <ListView x:Name="ClipList"
+                      Style="{StaticResource KawaiiListViewStyle}"
+                      SelectionChanged="ClipList_SelectionChanged"
+                      MouseDoubleClick="ClipList_MouseDoubleClick">
+              <ListView.ItemTemplate>
+                <DataTemplate>
+                  <StackPanel>
+                    <TextBlock Text="{Binding Prompt}"
+                               TextWrapping="Wrap"
+                               FontSize="14" />
+                    <TextBlock Text="{Binding Meta}"
+                               Margin="0,3,0,0"
+                               FontSize="11"
+                               Foreground="{DynamicResource Pet.Brush.PanelHint}" />
+                  </StackPanel>
+                </DataTemplate>
+              </ListView.ItemTemplate>
+            </ListView>
+          </DockPanel>
+        </Border>
+      </Grid>
+
+      <ResizeGrip Grid.RowSpan="2"
+                  Width="16"
+                  Height="16"
+                  Margin="0,0,2,2"
+                  HorizontalAlignment="Right"
+                  VerticalAlignment="Bottom"
+                  Opacity="0.55" />
+    </Grid>
+  </Border>
+</Window>
