@@ -115,6 +115,27 @@ public sealed class CharacterAssetTests
     }
 
     [Fact]
+    public void MouthOverlays_MatchThePortraitAndStayInsideTheLips()
+    {
+        var baseFrame = DecodePackResource("character.png");
+        var mid = DecodePackResource("mouth-mid.png");
+        var open = DecodePackResource("mouth-open.png");
+
+        Assert.Equal(baseFrame.PixelWidth, mid.PixelWidth);
+        Assert.Equal(baseFrame.PixelHeight, mid.PixelHeight);
+        Assert.Equal(baseFrame.PixelWidth, open.PixelWidth);
+        Assert.Equal(baseFrame.PixelHeight, open.PixelHeight);
+
+        var midPixels = VisibleCount(mid, out var midOutside);
+        var openPixels = VisibleCount(open, out var openOutside);
+        Assert.InRange(midPixels, 2_000, 12_000);
+        Assert.InRange(openPixels, 2_000, 12_000);
+        Assert.Equal(0, midOutside);
+        Assert.Equal(0, openOutside);
+        Assert.True(openPixels > midPixels);
+    }
+
+    [Fact]
     public void CharacterPng_ContainsVisibleAndTransparentPixels()
     {
         var path = Path.Combine(AppContext.BaseDirectory, "Assets", "character.png");
@@ -140,6 +161,36 @@ public sealed class CharacterAssetTests
 
         Assert.True(bytes.Length > 1_000);
         Assert.Equal(new byte[] { 0, 0, 1, 0 }, bytes[..4]);
+    }
+
+    private static int VisibleCount(BitmapSource source, out int outsideMouth)
+    {
+        var converted = new FormatConvertedBitmap(source, PixelFormats.Bgra32, null, 0);
+        var pixels = new byte[converted.PixelWidth * converted.PixelHeight * 4];
+        converted.CopyPixels(pixels, converted.PixelWidth * 4, 0);
+        var visible = 0;
+        outsideMouth = 0;
+        for (var y = 0; y < converted.PixelHeight; y++)
+        {
+            for (var x = 0; x < converted.PixelWidth; x++)
+            {
+                if (pixels[((y * converted.PixelWidth) + x) * 4 + 3] < 8)
+                {
+                    continue;
+                }
+
+                visible++;
+                var normalizedX = x / (double)converted.PixelWidth;
+                var normalizedY = y / (double)converted.PixelHeight;
+                if (normalizedX < 0.40 || normalizedX > 0.58 ||
+                    normalizedY < 0.44 || normalizedY > 0.56)
+                {
+                    outsideMouth++;
+                }
+            }
+        }
+
+        return visible;
     }
 
     private static BitmapFrame DecodePackResource(string fileName)

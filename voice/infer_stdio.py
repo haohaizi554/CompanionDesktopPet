@@ -22,6 +22,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--bert", required=True)
     parser.add_argument("--hubert", required=True)
     parser.add_argument("--device", default="cuda")
+    parser.add_argument("--warmup-ref", default="")
+    parser.add_argument("--warmup-prompt", default="")
     return parser.parse_args()
 
 
@@ -100,6 +102,12 @@ def main() -> int:
         protocol.write(json.dumps(payload, ensure_ascii=False) + "\n")
         protocol.flush()
 
+    if str(args.device).startswith("cuda"):
+        import torch
+
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        torch.set_float32_matmul_precision("high")
     _ignore_missing_japanese_dictionary()
     TTS, TTS_Config = _prepare_imports(args.root)
     _allow_long_references(TTS)
@@ -122,7 +130,6 @@ def main() -> int:
     temp_config.close()
     config.configs_path = temp_config.name
     pipeline = TTS(config)
-    emit({"ready": True})
 
     pending: dict | None = None
     stopped = False
@@ -161,6 +168,13 @@ def main() -> int:
             gate.notify()
 
     threading.Thread(target=reader, name="voice-requests", daemon=True).start()
+    emit({"ready": True})
+    with gate:
+        if pending is None and not stopped:
+            gate.wait(timeout=0.8)
+        busy = pending is not None or stopped
+    if not busy:
+        _warmup(pipeline, args.warmup_ref, args.warmup_prompt)
 
     while True:
         with gate:
@@ -217,13 +231,24 @@ def _audible(audio) -> bool:
     return audio.size > 0 and int(np.max(np.abs(audio))) >= 32
 
 
-def _long_enough(text: str, audio, sample_rate: int, speed: float) -> bool:
+def _duration_floor(text: str, speed: float) -> float:
     chars = _content_chars(text)
-    if chars <= 0 or not sample_rate:
+    if chars <= 0:
+        return 0.0
+    return max(0.45, chars * 0.055 / max(speed, 0.5))
+
+
+def _keeps_first_take(text: str, sample_count: int, sample_rate: int, speed: float) -> bool:
+    """A slightly short clip is kept. Only a swallowed take is synthesized again."""
+    floor = _duration_floor(text, speed)
+    if floor <= 0 or sample_rate <= 0 or sample_count <= 0:
         return True
-    duration = float(audio.size) / float(sample_rate)
-    floor = max(0.45, chars * 0.055 / max(speed, 0.5))
-    return duration + 1e-6 >= floor
+    duration = sample_count / float(sample_rate)
+    return duration + 1e-6 >= floor * 0.62
+
+
+def _long_enough(text: str, audio, sample_rate: int, speed: float) -> bool:
+    return _keeps_first_take(text, int(getattr(audio, "size", 0) or 0), sample_rate, speed)
 
 
 def _collect(generator):
@@ -243,6 +268,65 @@ def _collect(generator):
     if len(pieces) == 1:
         return int(sample_rate), pieces[0]
     return int(sample_rate), np.concatenate(pieces)
+
+
+def _trim_edges(audio, sample_rate: int):
+    """Drop the dead air a leading pause leaves, and the tail after the last word.
+
+    Piper and Kokoro do the same before playback. A short pad stays so the
+    attack is not cut off. A clip that is quiet all the way through is kept.
+    """
+    import numpy as np
+
+    samples = np.asarray(audio).reshape(-1)
+    if samples.size == 0 or sample_rate <= 0:
+        return samples
+    level = 0.004 if np.issubdtype(samples.dtype, np.floating) else 128
+    loud = np.flatnonzero(np.abs(samples) >= level)
+    if loud.size == 0:
+        return samples
+    pad = int(sample_rate * 0.03)
+    start = max(0, int(loud[0]) - pad)
+    end = min(int(samples.size), int(loud[-1]) + 1 + pad)
+    if end - start < int(sample_rate * 0.05):
+        return samples
+    return samples[start:end]
+
+
+def _warmup(pipeline, ref_path: str, prompt: str) -> None:
+    """One discarded line fills the reference cache and the CUDA kernels.
+
+    CosyVoice warms the speaker cache the same way. A line already waiting
+    skips this, so waking the process to speak does not synthesize twice.
+    """
+    if not ref_path or not os.path.isfile(ref_path):
+        return
+    try:
+        generator = pipeline.run(
+            {
+                "text": _prepare_text("嗯"),
+                "text_lang": "zh",
+                "ref_audio_path": ref_path,
+                "prompt_text": prompt or "",
+                "prompt_lang": "zh",
+                "text_split_method": "cut0",
+                "batch_size": 1,
+                "split_bucket": False,
+                "speed_factor": 1.0,
+                "temperature": 1.0,
+                "top_k": 15,
+                "top_p": 1.0,
+                "repetition_penalty": 1.35,
+                "seed": 1,
+                "parallel_infer": True,
+                "streaming_mode": False,
+                "return_fragment": False,
+            }
+        )
+        for _sample_rate, _audio in generator:
+            pass
+    except Exception as error:
+        print(f"warmup skipped: {error}", file=sys.stderr)
 
 
 def _synthesize(pipeline, request: dict) -> bool:
@@ -278,7 +362,7 @@ def _synthesize(pipeline, request: dict) -> bool:
                 "top_p": top_p,
                 "repetition_penalty": repetition,
                 "seed": seed,
-                "parallel_infer": False,
+                "parallel_infer": True,
                 "streaming_mode": False,
                 "return_fragment": False,
             }
@@ -293,8 +377,9 @@ def _synthesize(pipeline, request: dict) -> bool:
             best_audio = audio
         if _long_enough(raw, audio, sample_rate, speed):
             break
-    if best_audio is None:
+    if best_audio is None or best_rate is None:
         raise RuntimeError("合成结果没有声音")
+    best_audio = _trim_edges(best_audio, int(best_rate))
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     sf.write(out_path, best_audio, int(best_rate))
     return True

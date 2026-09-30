@@ -43,14 +43,19 @@ internal sealed class JiayiVoiceSpeaker : IVoiceSpeaker
     private StreamWriter? _stdin;
     private Thread? _thread;
     private readonly VoiceTurnQueue _queue = new();
+    private readonly SpeechClipCache _cache;
     private int _requestId;
     private int _activeId;
     private int _started;
     private int _disposed;
     private int _ready;
+    private int _parked;
     private int _cancel;
+    private DateTime _lastInferenceUtc = DateTime.UtcNow;
+    private static readonly TimeSpan InferenceParkAfter = TimeSpan.FromMinutes(8);
     private string? _lastReferenceId;
     private string? _retriedText;
+    private string? _activeCacheKey;
     private double _speechSpeed = 1;
     private double _speechTemperature = 1;
     private double _speechRepetition = 1.35;
@@ -69,6 +74,7 @@ internal sealed class JiayiVoiceSpeaker : IVoiceSpeaker
         Directory.CreateDirectory(directory);
         _outputDirectory = directory;
         _logPath = Path.Combine(directory, "voice.log");
+        _cache = new SpeechClipCache(Path.Combine(directory, "cache"));
     }
 
     public bool Enabled { get; set; } = true;
@@ -109,13 +115,15 @@ internal sealed class JiayiVoiceSpeaker : IVoiceSpeaker
             return null;
         }
 
-        return new JiayiVoiceSpeaker(runtime, pack, scriptPath).Warmup();
+        return new JiayiVoiceSpeaker(runtime, pack, scriptPath);
     }
 
-    private JiayiVoiceSpeaker Warmup()
+    internal void Prepare() => StartSession();
+
+    internal void ParkWhenQuiet()
     {
-        StartSession();
-        return this;
+        _lastInferenceUtc = DateTime.UtcNow - InferenceParkAfter;
+        _work.Set();
     }
 
     public void Speak(string text, string? tone, string? trigger = null, bool urgent = false)
@@ -125,9 +133,19 @@ internal sealed class JiayiVoiceSpeaker : IVoiceSpeaker
             return;
         }
 
+        var pieces = SpeechFragments.SplitForSpeech(text);
+        if (pieces.Count == 0)
+        {
+            return;
+        }
+
         lock (_pendingGate)
         {
-            _queue.Enqueue(new VoiceTurn(text.Trim(), tone, trigger, urgent));
+            _queue.Enqueue(new VoiceTurn(pieces[0], tone, trigger, urgent));
+            foreach (var piece in pieces.Skip(1))
+            {
+                _queue.Enqueue(new VoiceTurn(piece, tone, trigger));
+            }
         }
 
         StartSession();
@@ -236,15 +254,15 @@ internal sealed class JiayiVoiceSpeaker : IVoiceSpeaker
         {
             while (Volatile.Read(ref _disposed) == 0)
             {
-                if (!EnsureProcess())
+                if (Volatile.Read(ref _parked) == 1)
                 {
-                    _work.WaitOne(1000);
-                    continue;
-                }
+                    _work.WaitOne();
+                    if (Volatile.Read(ref _disposed) != 0)
+                    {
+                        break;
+                    }
 
-                if (Interlocked.Exchange(ref _cancel, 0) == 1)
-                {
-                    TryWrite("{\"cmd\":\"cancel\"}");
+                    Interlocked.Exchange(ref _parked, 0);
                 }
 
                 VoiceTurn? turn = null;
@@ -261,7 +279,7 @@ internal sealed class JiayiVoiceSpeaker : IVoiceSpeaker
                     repetition = _speechRepetition;
                     topK = _topK;
                     topP = _topP;
-                    if (Volatile.Read(ref _ready) == 1 && Enabled)
+                    if (Enabled)
                     {
                         turn = _queue.TryStartSynthesis();
                         if (turn is not null)
@@ -272,18 +290,112 @@ internal sealed class JiayiVoiceSpeaker : IVoiceSpeaker
                     }
                 }
 
+                VoiceReference? reference = null;
+                if (turn is not null)
+                {
+                    reference = _pack.Select(
+                        turn.Value.Tone,
+                        turn.Value.Text,
+                        turn.Value.Trigger,
+                        _lastReferenceId);
+                    _lastReferenceId = reference.Id;
+                    var cacheKey = SpeechClipCache.Key(
+                        turn.Value.Text,
+                        reference.Id,
+                        speed,
+                        temperature,
+                        repetition,
+                        topK,
+                        topP);
+                    var cached = _cache.Find(cacheKey);
+                    if (cached is not null)
+                    {
+                        var copy = Path.Combine(_outputDirectory, $"{id}.wav");
+                        try
+                        {
+                            File.Copy(cached, copy, overwrite: true);
+                            SynthesisStarted?.Invoke(turn.Value.Text);
+                            DeliverSynthesized(copy);
+                            continue;
+                        }
+                        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+                        {
+                            Log(error.Message);
+                        }
+                    }
+
+                    if (Volatile.Read(ref _ready) != 1)
+                    {
+                        lock (_pendingGate)
+                        {
+                            _queue.ReleaseSynthesisToFront();
+                            _activeId = -1;
+                        }
+
+                        if (!EnsureProcess())
+                        {
+                            _work.WaitOne(1000);
+                        }
+                        else
+                        {
+                            _work.WaitOne(TimeSpan.FromSeconds(30));
+                        }
+
+                        continue;
+                    }
+
+                    lock (_pendingGate)
+                    {
+                        _activeCacheKey = cacheKey;
+                    }
+                }
+
                 if (turn is null)
                 {
-                    _work.WaitOne();
+                    if (Interlocked.Exchange(ref _cancel, 0) == 1)
+                    {
+                        TryWrite("{\"cmd\":\"cancel\"}");
+                    }
+
+                    var idle = false;
+                    lock (_pendingGate)
+                    {
+                        idle = _queue.IsIdle;
+                    }
+
+                    var quietFor = DateTime.UtcNow - _lastInferenceUtc;
+                    if (idle && quietFor >= InferenceParkAfter && !ProcessAlive())
+                    {
+                        Interlocked.Exchange(ref _parked, 1);
+                        continue;
+                    }
+
+                    if (!EnsureProcess())
+                    {
+                        _work.WaitOne(1000);
+                        continue;
+                    }
+
+                    if (ShouldParkInference(
+                            Volatile.Read(ref _ready) == 1,
+                            idle,
+                            quietFor,
+                            InferenceParkAfter))
+                    {
+                        ParkInference();
+                        continue;
+                    }
+
+                    _work.WaitOne(TimeSpan.FromSeconds(30));
                     continue;
                 }
 
-                var reference = _pack.Select(
-                    turn.Value.Tone,
-                    turn.Value.Text,
-                    turn.Value.Trigger,
-                    _lastReferenceId);
-                _lastReferenceId = reference.Id;
+                _lastInferenceUtc = DateTime.UtcNow;
+                if (reference is null)
+                {
+                    continue;
+                }
+
                 var outPath = Path.Combine(_outputDirectory, $"{id}.wav");
                 var request = JsonSerializer.Serialize(new
                 {
@@ -308,6 +420,7 @@ internal sealed class JiayiVoiceSpeaker : IVoiceSpeaker
                     {
                         RequeueOnce(_queue.FailSynthesis());
                         _activeId = -1;
+                        _activeCacheKey = null;
                         idle = _queue.IsIdle;
                     }
 
@@ -328,6 +441,7 @@ internal sealed class JiayiVoiceSpeaker : IVoiceSpeaker
             {
                 RequeueOnce(_queue.FailSynthesis());
                 _activeId = -1;
+                _activeCacheKey = null;
             }
         }
         finally
@@ -337,6 +451,41 @@ internal sealed class JiayiVoiceSpeaker : IVoiceSpeaker
                 Interlocked.Exchange(ref _started, 0);
             }
         }
+    }
+
+    private bool ProcessAlive()
+    {
+        var process = _process;
+        return process is not null && !HasExited(process);
+    }
+
+    private void DeliverSynthesized(string path)
+    {
+        VoiceClip? clip = null;
+        var idle = false;
+        lock (_pendingGate)
+        {
+            _activeId = -1;
+            _activeCacheKey = null;
+            _retriedText = null;
+            if (_queue.CompleteSynthesis(path))
+            {
+                clip = _queue.TryStartPlayback();
+            }
+
+            idle = clip is null && _queue.IsIdle;
+        }
+
+        if (clip is not null)
+        {
+            PlaybackReady?.Invoke(clip.Value);
+        }
+        else if (idle)
+        {
+            VoiceIdle?.Invoke();
+        }
+
+        _work.Set();
     }
 
     private bool EnsureProcess()
@@ -406,6 +555,15 @@ internal sealed class JiayiVoiceSpeaker : IVoiceSpeaker
         start.ArgumentList.Add(_runtime.BertPath);
         start.ArgumentList.Add("--hubert");
         start.ArgumentList.Add(_runtime.HubertPath);
+        var warmup = _pack.References.FirstOrDefault(reference => reference.Fallback)
+            ?? _pack.References[0];
+        if (File.Exists(warmup.AudioPath))
+        {
+            start.ArgumentList.Add("--warmup-ref");
+            start.ArgumentList.Add(warmup.AudioPath);
+            start.ArgumentList.Add("--warmup-prompt");
+            start.ArgumentList.Add(warmup.Prompt);
+        }
         start.Environment["PYTHONUTF8"] = "1";
         start.Environment["PYTHONIOENCODING"] = "utf-8";
 
@@ -445,10 +603,46 @@ internal sealed class JiayiVoiceSpeaker : IVoiceSpeaker
         return true;
     }
 
+    internal static bool ShouldParkInference(bool ready, bool queueIdle, TimeSpan quietFor, TimeSpan limit) =>
+        ready && queueIdle && quietFor >= limit;
+
+    private void ParkInference()
+    {
+        if (Interlocked.Exchange(ref _parked, 1) != 0)
+        {
+            return;
+        }
+
+        Volatile.Write(ref _ready, 0);
+        TryWrite("{\"cmd\":\"exit\"}");
+        var process = _process;
+        _process = null;
+        _stdin = null;
+        if (process is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (!process.HasExited && !process.WaitForExit(1500))
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            // The process had already exited.
+        }
+
+        process.Dispose();
+    }
+
     private void OnProcessExited()
     {
-        if (Volatile.Read(ref _disposed) != 0)
+        if (Volatile.Read(ref _disposed) != 0 || Volatile.Read(ref _parked) == 1)
         {
+            Volatile.Write(ref _ready, 0);
             return;
         }
 
@@ -547,7 +741,14 @@ internal sealed class JiayiVoiceSpeaker : IVoiceSpeaker
                     && pathElement.GetString() is { Length: > 0 } path
                     && File.Exists(path))
                 {
+                    var cacheKey = _activeCacheKey;
+                    _activeCacheKey = null;
                     _retriedText = null;
+                    if (cacheKey is not null)
+                    {
+                        _cache.Store(cacheKey, path);
+                    }
+
                     if (_queue.CompleteSynthesis(path))
                     {
                         clip = _queue.TryStartPlayback();
@@ -555,6 +756,7 @@ internal sealed class JiayiVoiceSpeaker : IVoiceSpeaker
                 }
                 else
                 {
+                    _activeCacheKey = null;
                     RequeueOnce(_queue.FailSynthesis());
                     if (root.TryGetProperty("error", out var error))
                     {
@@ -629,6 +831,18 @@ internal sealed class JiayiVoiceSpeaker : IVoiceSpeaker
     {
         try
         {
+            var info = new FileInfo(_logPath);
+            if (info.Exists && info.Length > 256 * 1024)
+            {
+                var tail = File.ReadAllText(_logPath, _utf8);
+                if (tail.Length > 32 * 1024)
+                {
+                    tail = tail[^ (32 * 1024)..];
+                }
+
+                File.WriteAllText(_logPath, tail, _utf8);
+            }
+
             File.AppendAllText(_logPath, $"{DateTime.Now:HH:mm:ss} {message}{Environment.NewLine}", _utf8);
         }
         catch (IOException)

@@ -21,6 +21,7 @@ internal interface IPetAnimationController : IDisposable
     void PlayLanding(Action? completed);
     void PlayBlink(bool doubleBlink, Action completed);
     void PlayGreeting(Action completed);
+    void SetSpeechMotion(bool speaking);
     void CancelAmbientAction();
     void Suspend();
     void Resume();
@@ -43,6 +44,7 @@ public sealed class AnimationController : IPetAnimationController
     private readonly TranslateTransform _greetingBadgeOffset;
     private bool _started;
     private bool _disposed;
+    private bool _speechMotion;
     private int _ambientAnimationVersion;
 
     public AnimationController(
@@ -112,13 +114,39 @@ public sealed class AnimationController : IPetAnimationController
             return;
         }
 
-        RemoveIdleAnimations();
-        ApplyIdle(breathingScale, ScaleTransform.ScaleXProperty, 1.0, 1.015, 2.0);
-        ApplyIdle(breathingScale, ScaleTransform.ScaleYProperty, 0.985, 1.015, 2.0);
-        ApplyIdle(swayRotation, RotateTransform.AngleProperty, -1.2, 1.2, 3.0);
-        ApplyIdle(floatingOffset, TranslateTransform.YProperty, 3.0, -3.0, 2.5);
+        ApplyIdleMotion();
         _started = true;
         IsPaused = false;
+    }
+
+    public void SetSpeechMotion(bool speaking)
+    {
+        if (_disposed || _speechMotion == speaking)
+        {
+            return;
+        }
+
+        _speechMotion = speaking;
+        if (!_started)
+        {
+            return;
+        }
+
+        ApplyIdleMotion();
+    }
+
+    private void ApplyIdleMotion()
+    {
+        RemoveIdleAnimations();
+        RemoveAnimation(breathingScale, ScaleTransform.ScaleXProperty);
+        RemoveAnimation(breathingScale, ScaleTransform.ScaleYProperty);
+        breathingScale.ScaleX = 1;
+        breathingScale.ScaleY = 1;
+        var sway = _speechMotion ? 0.3 : 0.6;
+        var lift = _speechMotion ? 0.8 : 1.5;
+        var seconds = _speechMotion ? 5.0 : 4.0;
+        ApplyIdle(swayRotation, RotateTransform.AngleProperty, -sway, sway, seconds);
+        ApplyIdle(floatingOffset, TranslateTransform.YProperty, lift, -lift, seconds);
     }
 
     public void PauseIdle()
@@ -252,14 +280,14 @@ public sealed class AnimationController : IPetAnimationController
         var frames = doubleBlink
             ? new (int Milliseconds, double Value)[]
             {
-                (0, 0), (95, 1), (150, 1), (300, 0),
-                (420, 0), (515, 1), (570, 1), (720, 0)
+                (0, 0), (1, 1), (50, 1), (51, 0),
+                (131, 0), (132, 1), (182, 1), (183, 0)
             }
             : new (int Milliseconds, double Value)[]
             {
-                (0, 0), (95, 1), (150, 1), (300, 0)
+                (0, 0), (1, 1), (55, 1), (56, 0)
             };
-        var blink = CreateBoundedFrames(frames[^1].Milliseconds, frames);
+        var blink = CreateFrames(doubleBlink ? 260 : 160, discrete: true, frames, allowOvershoot: false);
         ApplyAnimation(
             _blinkOverlay,
             UIElement.OpacityProperty,
@@ -284,15 +312,15 @@ public sealed class AnimationController : IPetAnimationController
             RotateTransform.AngleProperty,
             1100,
             (0, 0),
-            (360, -3.0),
-            (760, -1.0),
+            (360, -2.2),
+            (760, -0.6),
             (1100, 0));
         var greetingOffset = CreateFrames(
             1100,
             false,
             (0, 0),
-            (360, -4.0),
-            (760, -2.0),
+            (360, -3.0),
+            (760, -1.0),
             (1100, 0));
         ApplyAnimation(
             actionOffset,
@@ -300,14 +328,6 @@ public sealed class AnimationController : IPetAnimationController
             greetingOffset,
             isIdle: false,
             () => CompleteAction(version, completed));
-        BeginBoundedFrames(
-            actionScale,
-            ScaleTransform.ScaleYProperty,
-            1100,
-            (0, 1),
-            (360, 0.988),
-            (760, 1.006),
-            (1100, 1));
         BeginBoundedFrames(
             _greetingBadge,
             UIElement.OpacityProperty,

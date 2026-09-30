@@ -122,6 +122,17 @@ internal sealed class VoiceTurnQueue
         return turn;
     }
 
+    public void ReleaseSynthesisToFront()
+    {
+        if (_synthesizing is not { } turn)
+        {
+            return;
+        }
+
+        _synthesizing = null;
+        EnqueueFront(turn);
+    }
+
     public void Clear()
     {
         _pending.Clear();
