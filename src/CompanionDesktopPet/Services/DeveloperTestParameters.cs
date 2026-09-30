@@ -4,10 +4,16 @@ namespace CompanionDesktopPet.Services;
 
 public sealed class DeveloperTestParameters
 {
-    public const int MinimumMinutes = 0;
-    public const int MaximumMinutes = 24 * 60;
-    public const int MinimumBubbleSeconds = 1;
-    public const int MaximumBubbleSeconds = 120;
+    public const int MinimumDayMinutes = 1;
+    public const int MaximumDayMinutes = 30;
+    public const int MinimumEveningMinutes = 5;
+    public const int MaximumEveningMinutes = 45;
+    public const int MinimumLateNightMinutes = 15;
+    public const int MaximumLateNightMinutes = 120;
+    public const int MinimumFullscreenMinutes = 30;
+    public const int MaximumFullscreenMinutes = 180;
+    public const int MinimumBubbleSeconds = 2;
+    public const int MaximumBubbleSeconds = 60;
     public const double MinimumSpeechSpeed = 0.5;
     public const double MaximumSpeechSpeed = 2;
     public const double MinimumSpeechTemperature = 0.2;
@@ -18,6 +24,8 @@ public sealed class DeveloperTestParameters
     public const int MaximumTopK = 50;
     public const double MinimumTopP = 0.1;
     public const double MaximumTopP = 1;
+    public const int MinimumReplyChars = 50;
+    public const int MaximumReplyChars = 200;
 
     public int DayMinimumMinutes { get; set; } = 5;
     public int DayMaximumMinutes { get; set; } = 15;
@@ -33,6 +41,7 @@ public sealed class DeveloperTestParameters
     public double SpeechRepetition { get; set; } = 1.35;
     public int TopK { get; set; } = 15;
     public double TopP { get; set; } = 1;
+    public int ReplyMaxChars { get; set; } = 80;
 
     public static DeveloperTestParameters CreateDefault() => new();
 
@@ -51,7 +60,8 @@ public sealed class DeveloperTestParameters
         SpeechTemperature = SpeechTemperature,
         SpeechRepetition = SpeechRepetition,
         TopK = TopK,
-        TopP = TopP
+        TopP = TopP,
+        ReplyMaxChars = ReplyMaxChars
     };
 
     public void CopyFrom(DeveloperTestParameters source)
@@ -71,26 +81,50 @@ public sealed class DeveloperTestParameters
         SpeechRepetition = source.SpeechRepetition;
         TopK = source.TopK;
         TopP = source.TopP;
+        ReplyMaxChars = source.ReplyMaxChars;
     }
 
     public bool TryCopyTuning(PetTuning tuning)
     {
         ArgumentNullException.ThrowIfNull(tuning);
         var draft = Clone();
-        draft.DayMinimumMinutes = tuning.DayMinimumMinutes;
-        draft.DayMaximumMinutes = tuning.DayMaximumMinutes;
-        draft.EveningMinimumMinutes = tuning.EveningMinimumMinutes;
-        draft.EveningMaximumMinutes = tuning.EveningMaximumMinutes;
-        draft.LateNightMinimumMinutes = tuning.LateNightMinimumMinutes;
-        draft.LateNightMaximumMinutes = tuning.LateNightMaximumMinutes;
-        draft.FullscreenMinimumMinutes = tuning.FullscreenMinimumMinutes;
-        draft.FullscreenMaximumMinutes = tuning.FullscreenMaximumMinutes;
-        draft.BubbleSeconds = tuning.BubbleSeconds;
-        draft.SpeechSpeed = tuning.SpeechSpeed;
-        draft.SpeechTemperature = tuning.SpeechTemperature;
-        draft.SpeechRepetition = tuning.SpeechRepetition;
-        draft.TopK = tuning.TopK;
-        draft.TopP = tuning.TopP;
+        (draft.DayMinimumMinutes, draft.DayMaximumMinutes) = OrderedBand(
+            tuning.DayMinimumMinutes,
+            tuning.DayMaximumMinutes,
+            MinimumDayMinutes,
+            MaximumDayMinutes);
+        (draft.EveningMinimumMinutes, draft.EveningMaximumMinutes) = OrderedBand(
+            tuning.EveningMinimumMinutes,
+            tuning.EveningMaximumMinutes,
+            MinimumEveningMinutes,
+            MaximumEveningMinutes);
+        (draft.LateNightMinimumMinutes, draft.LateNightMaximumMinutes) = OrderedBand(
+            tuning.LateNightMinimumMinutes,
+            tuning.LateNightMaximumMinutes,
+            MinimumLateNightMinutes,
+            MaximumLateNightMinutes);
+        (draft.FullscreenMinimumMinutes, draft.FullscreenMaximumMinutes) = OrderedBand(
+            tuning.FullscreenMinimumMinutes,
+            tuning.FullscreenMaximumMinutes,
+            MinimumFullscreenMinutes,
+            MaximumFullscreenMinutes);
+        draft.BubbleSeconds = int.Clamp(tuning.BubbleSeconds, MinimumBubbleSeconds, MaximumBubbleSeconds);
+        draft.SpeechSpeed = FiniteBand(tuning.SpeechSpeed, draft.SpeechSpeed, MinimumSpeechSpeed, MaximumSpeechSpeed);
+        draft.SpeechTemperature = FiniteBand(
+            tuning.SpeechTemperature,
+            draft.SpeechTemperature,
+            MinimumSpeechTemperature,
+            MaximumSpeechTemperature);
+        draft.SpeechRepetition = FiniteBand(
+            tuning.SpeechRepetition,
+            draft.SpeechRepetition,
+            MinimumSpeechRepetition,
+            MaximumSpeechRepetition);
+        draft.TopK = int.Clamp(tuning.TopK, MinimumTopK, MaximumTopK);
+        draft.TopP = FiniteBand(tuning.TopP, draft.TopP, MinimumTopP, MaximumTopP);
+        draft.ReplyMaxChars = tuning.ReplyMaxChars == 0
+            ? 80
+            : int.Clamp(tuning.ReplyMaxChars, MinimumReplyChars, MaximumReplyChars);
         if (draft.Validate() is not null)
         {
             return false;
@@ -116,6 +150,7 @@ public sealed class DeveloperTestParameters
         SpeechRepetition = SpeechRepetition,
         TopK = TopK,
         TopP = TopP,
+        ReplyMaxChars = ReplyMaxChars,
         VoiceEnabled = voiceEnabled
     };
 
@@ -130,21 +165,21 @@ public sealed class DeveloperTestParameters
 
     public string? Validate()
     {
-        var ranges = new (string Name, int Minimum, int Maximum)[]
+        var ranges = new (string Name, int Minimum, int Maximum, int Low, int High)[]
         {
-            ("白天", DayMinimumMinutes, DayMaximumMinutes),
-            ("傍晚", EveningMinimumMinutes, EveningMaximumMinutes),
-            ("深夜", LateNightMinimumMinutes, LateNightMaximumMinutes),
-            ("全屏", FullscreenMinimumMinutes, FullscreenMaximumMinutes)
+            ("白天", DayMinimumMinutes, DayMaximumMinutes, MinimumDayMinutes, MaximumDayMinutes),
+            ("傍晚", EveningMinimumMinutes, EveningMaximumMinutes, MinimumEveningMinutes, MaximumEveningMinutes),
+            ("深夜", LateNightMinimumMinutes, LateNightMaximumMinutes, MinimumLateNightMinutes, MaximumLateNightMinutes),
+            ("全屏", FullscreenMinimumMinutes, FullscreenMaximumMinutes, MinimumFullscreenMinutes, MaximumFullscreenMinutes)
         };
         foreach (var range in ranges)
         {
-            if (range.Minimum < MinimumMinutes
-                || range.Maximum < MinimumMinutes
-                || range.Minimum > MaximumMinutes
-                || range.Maximum > MaximumMinutes)
+            if (range.Minimum < range.Low
+                || range.Maximum < range.Low
+                || range.Minimum > range.High
+                || range.Maximum > range.High)
             {
-                return $"{range.Name}间隔要在 {MinimumMinutes} 到 {MaximumMinutes} 分钟之间。";
+                return $"{range.Name}间隔要在 {range.Low} 到 {range.High} 分钟之间。";
             }
 
             if (range.Minimum > range.Maximum)
@@ -183,8 +218,30 @@ public sealed class DeveloperTestParameters
             return $"采样范围要在 {MinimumTopP:0.#} 到 {MaximumTopP:0.#} 之间。";
         }
 
+        if (ReplyMaxChars < MinimumReplyChars || ReplyMaxChars > MaximumReplyChars)
+        {
+            return $"输出要在 {MinimumReplyChars} 到 {MaximumReplyChars} 字之间。";
+        }
+
         return null;
     }
+
+    private static (int Minimum, int Maximum) OrderedBand(int minimum, int maximum, int low, int high)
+    {
+        minimum = int.Clamp(minimum, low, high);
+        maximum = int.Clamp(maximum, low, high);
+        if (minimum > maximum)
+        {
+            maximum = minimum;
+        }
+
+        return (minimum, maximum);
+    }
+
+    private static double FiniteBand(double value, double fallback, double minimum, double maximum) =>
+        double.IsNaN(value) || double.IsInfinity(value)
+            ? fallback
+            : double.Clamp(value, minimum, maximum);
 
     private static bool InSpeechRange(double value, double minimum, double maximum) =>
         !double.IsNaN(value) && !double.IsInfinity(value) && value >= minimum && value <= maximum;

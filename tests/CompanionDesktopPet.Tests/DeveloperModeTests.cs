@@ -60,6 +60,15 @@ public sealed class DeveloperModeTests
     }
 
     [Fact]
+    public void DeveloperParameters_RejectReplyLengthOutsideTheReadableRange()
+    {
+        var parameters = DeveloperTestParameters.CreateDefault();
+        parameters.ReplyMaxChars = 2000;
+
+        Assert.Equal("输出要在 50 到 200 字之间。", parameters.Validate());
+    }
+
+    [Fact]
     public void VoiceLibrary_PublishesEveryReferenceWithItsPromptAndChineseTone()
     {
         var root = VoiceLibraryIndex.Load(RepoVoicePack());

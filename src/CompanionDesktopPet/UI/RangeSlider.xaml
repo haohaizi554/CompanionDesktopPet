@@ -1,0 +1,115 @@
+<UserControl x:Class="CompanionDesktopPet.UI.RangeSlider"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Height="32"
+             SnapsToDevicePixels="True"
+             UseLayoutRounding="True"
+             SizeChanged="OnSizeChanged"
+             IsEnabledChanged="OnEnabledChanged">
+  <UserControl.Resources>
+    <Style x:Key="RangeThumbFocus" TargetType="Control">
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate>
+            <Ellipse Margin="-3"
+                     Stroke="{DynamicResource Pet.Brush.HeartPrimary}"
+                     StrokeThickness="1.25"
+                     StrokeDashArray="1.2 1.2"
+                     IsHitTestVisible="False" />
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="RangeThumbStyle" TargetType="Thumb">
+      <Setter Property="Width" Value="28" />
+      <Setter Property="Height" Value="28" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="FocusVisualStyle" Value="{StaticResource RangeThumbFocus}" />
+      <Setter Property="Background" Value="{DynamicResource Pet.Brush.HeartPrimary}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Thumb">
+            <Grid Width="28" Height="28" Background="Transparent">
+              <Ellipse Width="22"
+                       Height="22"
+                       Fill="{TemplateBinding Background}"
+                       Opacity="0.22"
+                       IsHitTestVisible="False">
+                <Ellipse.Effect>
+                  <DropShadowEffect x:Name="Glow"
+                                    BlurRadius="7"
+                                    ShadowDepth="0"
+                                    Color="#FFFF6F91"
+                                    Opacity="0.45" />
+                </Ellipse.Effect>
+              </Ellipse>
+              <Ellipse Width="20"
+                       Height="20"
+                       Fill="White"
+                       IsHitTestVisible="False">
+                <Ellipse.Effect>
+                  <DropShadowEffect BlurRadius="5"
+                                    ShadowDepth="1"
+                                    Color="#66E56F91"
+                                    Opacity="0.55" />
+                </Ellipse.Effect>
+              </Ellipse>
+              <Ellipse Width="15"
+                       Height="15"
+                       Fill="{TemplateBinding Background}"
+                       IsHitTestVisible="False" />
+              <Ellipse Width="5"
+                       Height="3"
+                       Margin="0,-5,0,0"
+                       Fill="#99FFFFFF"
+                       IsHitTestVisible="False" />
+            </Grid>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Background" Value="{DynamicResource Pet.Brush.HeartSecondary}" />
+              </Trigger>
+              <Trigger Property="IsDragging" Value="True">
+                <Setter Property="Background" Value="{DynamicResource Pet.Brush.HeartPrimary}" />
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Cursor" Value="Arrow" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+  </UserControl.Resources>
+  <Canvas x:Name="Host" Height="32">
+    <Border x:Name="TrackHit"
+            Height="28"
+            Background="Transparent"
+            Canvas.Left="9"
+            Canvas.Top="2" />
+    <Border x:Name="Track"
+            Height="5"
+            CornerRadius="2.5"
+            Background="{DynamicResource Pet.Brush.RangeTrack}"
+            Canvas.Left="9"
+            Canvas.Top="13.5"
+            IsHitTestVisible="False" />
+    <Border x:Name="Selected"
+            Height="5"
+            CornerRadius="2.5"
+            Background="{DynamicResource Pet.Brush.HeartPrimary}"
+            Canvas.Top="13.5"
+            IsHitTestVisible="False" />
+    <Thumb x:Name="LowerThumb"
+           Style="{StaticResource RangeThumbStyle}"
+           DragStarted="Thumb_DragStarted"
+           DragDelta="Thumb_DragDelta"
+           DragCompleted="Thumb_DragCompleted"
+           PreviewKeyDown="Thumb_PreviewKeyDown" />
+    <Thumb x:Name="UpperThumb"
+           Style="{StaticResource RangeThumbStyle}"
+           DragStarted="Thumb_DragStarted"
+           DragDelta="Thumb_DragDelta"
+           DragCompleted="Thumb_DragCompleted"
+           PreviewKeyDown="Thumb_PreviewKeyDown" />
+  </Canvas>
+</UserControl>

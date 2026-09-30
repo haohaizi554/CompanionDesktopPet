@@ -8,7 +8,6 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Interop;
-using System.Media;
 using System.Windows.Media;
 using System.Windows.Threading;
 using CompanionDesktopPet.Models;
@@ -31,6 +30,8 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _automaticTimer = new();
     private readonly DispatcherTimer _bubbleTimer = new() { Interval = TimeSpan.FromSeconds(5) };
     private readonly DispatcherTimer _memoryTimer = new() { Interval = TimeSpan.FromSeconds(2) };
+    private readonly DispatcherTimer _reminderTimer = new() { Interval = TimeSpan.FromSeconds(15) };
+    private PetReminderStore? _reminders;
     private readonly DispatcherTimer _eventTimer = new() { Interval = TimeSpan.FromSeconds(30) };
     private readonly DispatcherTimer _ambientTimer = new();
     private readonly BubbleCountdownController _bubbleCountdown = new();
@@ -102,9 +103,10 @@ public partial class MainWindow : Window
     private DialogueComposerWindow? _dialogueComposer;
     private int _personaDialogueSession;
     private int _dialoguePump;
-    private TaskCompletionSource<bool>? _dialogueSpoken;
     private readonly DispatcherTimer _voiceProgressTimer;
-    private SoundPlayer? _voicePlayer;
+    private MediaPlayer? _voicePlayer;
+    private byte[] _mouthLevels = [];
+    private string? _playedWavPath;
     private bool _voiceLineActive;
     private string? _requestedVoiceText;
     private bool _voicePlaying;
@@ -253,6 +255,7 @@ public partial class MainWindow : Window
         _bubbleTimer.Tick += BubbleTimer_Tick;
         _automaticTimer.Tick += AutomaticTimer_Tick;
         _memoryTimer.Tick += MemoryTimer_Tick;
+        _reminderTimer.Tick += ReminderTimer_Tick;
         _eventTimer.Tick += EventTimer_Tick;
         _ambientTimer.Tick += AmbientTimer_Tick;
     }
@@ -295,6 +298,8 @@ public partial class MainWindow : Window
         {
             _ = EnsurePersonaDialogueAsync();
         }
+
+        _reminderTimer.Start();
     }
 
     private void Window_ContentRendered(object? sender, EventArgs e) =>
@@ -309,6 +314,10 @@ public partial class MainWindow : Window
 
         ObserveDialogueWarmup(replayStartupWhenReady: true);
         ScheduleNextAmbientAction();
+        if (_voice is JiayiVoiceSpeaker speaker)
+        {
+            speaker.Prepare();
+        }
     }
 
     private void AmbientTimer_Tick(object? sender, EventArgs e) =>
@@ -1024,8 +1033,7 @@ public partial class MainWindow : Window
 
             if (_voicePlaying)
             {
-                _voicePlayer?.Stop();
-                _voicePlayer = null;
+                ReleaseVoicePlayer();
                 _voicePlaying = false;
             }
 
@@ -1087,6 +1095,10 @@ public partial class MainWindow : Window
         if (!_voice.Enabled)
         {
             StopVoicePlayback();
+            if (_voice is JiayiVoiceSpeaker speaker)
+            {
+                speaker.ParkWhenQuiet();
+            }
         }
     }
 
@@ -1281,22 +1293,7 @@ public partial class MainWindow : Window
                     ? reply.Text
                     : "这句话我没接住，你再说一次。";
                 var speak = reply.Ok && _voice is { Enabled: true };
-                var spoken = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-                if (speak)
-                {
-                    _dialogueSpoken = spoken;
-                }
-
                 ShowBubble(answer, speak: speak, tone: "gentle", urgent: true);
-                if (speak && _voiceLineActive)
-                {
-                    await Task.WhenAny(spoken.Task, Task.Delay(TimeSpan.FromSeconds(90)));
-                }
-
-                if (ReferenceEquals(_dialogueSpoken, spoken))
-                {
-                    _dialogueSpoken = null;
-                }
             }
         }
         finally
@@ -1471,8 +1468,13 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (!SpeechFragments.BelongsTo(text, _requestedVoiceText))
+        {
+            return;
+        }
+
         if (_requestedVoiceText is not null
-            && !string.Equals(text, _requestedVoiceText, StringComparison.Ordinal))
+            && SpeechFragments.SplitForSpeech(_requestedVoiceText).Count > 1)
         {
             return;
         }
@@ -1497,8 +1499,7 @@ public partial class MainWindow : Window
         }
 
         _voicePlaying = false;
-        _voicePlayer?.Stop();
-        _voicePlayer = null;
+        ReleaseVoicePlayer();
         if (!string.IsNullOrWhiteSpace(_synthesizingText))
         {
             SpeechText.Text = _synthesizingText;
@@ -1522,7 +1523,6 @@ public partial class MainWindow : Window
         }
 
         FinishVoiceHold(linger: true);
-        _dialogueSpoken?.TrySetResult(true);
     }
 
     private void OnVoicePlaybackReady(VoiceClip clip)
@@ -1539,14 +1539,19 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (_requestedVoiceText is not null
-            && !string.Equals(clip.Text, _requestedVoiceText, StringComparison.Ordinal))
+        if (!SpeechFragments.BelongsTo(clip.Text, _requestedVoiceText))
         {
+            _voice?.NotifyPlaybackCompleted();
             return;
         }
 
-        SpeechText.Text = clip.Text;
-        AutomationProperties.SetName(SpeechText, $"佳怡说：{clip.Text}");
+        var wholeReply = _requestedVoiceText is not null
+            && SpeechFragments.SplitForSpeech(_requestedVoiceText).Count > 1;
+        if (!wholeReply)
+        {
+            SpeechText.Text = clip.Text;
+            AutomationProperties.SetName(SpeechText, $"佳怡说：{clip.Text}");
+        }
         if (!_voiceLineActive)
         {
             SpeechBubble.Visibility = Visibility.Visible;
@@ -1558,18 +1563,24 @@ public partial class MainWindow : Window
 
         try
         {
-            _voicePlayer?.Stop();
-            _voicePlayer = new SoundPlayer(clip.Path);
-            _voicePlayer.Play();
+            ReleaseVoicePlayer();
+            _mouthLevels = SpeechMouthTimeline.FromWav(clip.Path);
+            _playedWavPath = clip.Path;
+            var player = new MediaPlayer { Volume = 1 };
+            player.MediaEnded += VoicePlayback_Ended;
+            player.Open(new Uri(clip.Path, UriKind.Absolute));
+            player.Play();
+            _voicePlayer = player;
+            _animation.SetSpeechMotion(true);
             _voicePlaying = true;
-            _playbackDuration = ReadWavDuration(clip.Path) + TimeSpan.FromMilliseconds(150);
+            _playbackDuration = ReadWavDuration(clip.Path);
             _voicePhaseStarted = DateTime.UtcNow;
             VoiceProgressRing.Visibility = Visibility.Visible;
             _voiceProgressTimer.Start();
         }
         catch (Exception)
         {
-            _voicePlayer = null;
+            ReleaseVoicePlayer();
             _voicePlaying = false;
             _voice?.NotifyPlaybackCompleted();
         }
@@ -1585,14 +1596,17 @@ public partial class MainWindow : Window
 
         if (_voicePlaying)
         {
-            var fraction = (DateTime.UtcNow - _voicePhaseStarted).TotalMilliseconds
-                / Math.Max(1, _playbackDuration.TotalMilliseconds);
+            var position = _voicePlayer?.Position ?? TimeSpan.Zero;
+            ShowMouth(SpeechMouthTimeline.LevelAt(_mouthLevels, position));
+            var elapsed = position > TimeSpan.Zero
+                ? position
+                : DateTime.UtcNow - _voicePhaseStarted;
+            var fraction = elapsed.TotalMilliseconds / Math.Max(1, _playbackDuration.TotalMilliseconds);
             SetVoiceProgress(fraction);
-            if (fraction >= 1)
+            if (position >= _playbackDuration
+                || elapsed > _playbackDuration + TimeSpan.FromMilliseconds(400))
             {
-                _voicePlaying = false;
-                _voicePlayer = null;
-                _voice?.NotifyPlaybackCompleted();
+                CompleteVoicePlayback();
             }
 
             return;
@@ -1610,6 +1624,76 @@ public partial class MainWindow : Window
         VoiceProgressRing.Visibility = Visibility.Visible;
         SetVoiceSpinner(0);
         _voiceProgressTimer.Start();
+    }
+
+    private void VoicePlayback_Ended(object? sender, EventArgs e)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(CompleteVoicePlayback);
+            return;
+        }
+
+        CompleteVoicePlayback();
+    }
+
+    private void CompleteVoicePlayback()
+    {
+        if (!_voicePlaying)
+        {
+            return;
+        }
+
+        _voicePlaying = false;
+        ReleaseVoicePlayer();
+        _voice?.NotifyPlaybackCompleted();
+    }
+
+    private void ReleaseVoicePlayer()
+    {
+        if (_voicePlayer is not null)
+        {
+            _voicePlayer.MediaEnded -= VoicePlayback_Ended;
+            _voicePlayer.Stop();
+            _voicePlayer.Close();
+            _voicePlayer = null;
+        }
+
+        HideMouth();
+        _animation.SetSpeechMotion(false);
+        if (_playedWavPath is null)
+        {
+            return;
+        }
+
+        var path = _playedWavPath;
+        _playedWavPath = null;
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+    }
+
+    private void ShowMouth(byte level)
+    {
+        MouthMid.Opacity = level == 1 ? 1 : 0;
+        MouthOpen.Opacity = level == 2 ? 1 : 0;
+    }
+
+    private void HideMouth()
+    {
+        _mouthLevels = [];
+        MouthMid.Opacity = 0;
+        MouthOpen.Opacity = 0;
     }
 
     private void FinishVoiceHold(bool linger)
@@ -1713,8 +1797,7 @@ public partial class MainWindow : Window
     private void StopVoicePlayback()
     {
         _voice?.Stop();
-        _voicePlayer?.Stop();
-        _voicePlayer = null;
+        ReleaseVoicePlayer();
         if (_voiceLineActive)
         {
             FinishVoiceHold(linger: false);
@@ -2795,13 +2878,16 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ParameterBox_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    private bool _writingDeveloperSliders;
+
+    private void DeveloperRange_Changed(object? sender, EventArgs e)
     {
-        if (sender is TextBox box && !box.IsKeyboardFocusWithin)
+        if (_writingDeveloperSliders)
         {
-            box.Focus();
-            e.Handled = true;
+            return;
         }
+
+        RefreshDeveloperSliderLabels();
     }
 
     private void ApplyParameters_Click(object sender, RoutedEventArgs e) => ApplyDeveloperDraft(keepStatus: false);
@@ -3053,10 +3139,28 @@ public partial class MainWindow : Window
         }
 
         ShowBubble(line.Text, speak: true, tone: line.Tone, trigger: line.Trigger.ToString(), urgent: true);
+        NoteCorpusLine(line.Text);
+    }
+
+    private PetReminderStore Reminders => _reminders ??= new PetReminderStore();
+
+    private void ReminderTimer_Tick(object? sender, EventArgs e)
+    {
+        if (InteractionFrozen)
+        {
+            return;
+        }
+
+        var line = Reminders.TakeDue(DateTime.UtcNow);
+        if (!string.IsNullOrWhiteSpace(line))
+        {
+            ShowBubble(line, speak: true, tone: "gentle");
+        }
     }
 
     private void ApplyDialogueActions(string actionsJson)
     {
+        Reminders.Accept(actionsJson, DateTime.UtcNow);
         if (!DialogueSkills.TryApply(
                 actionsJson,
                 _developerParameters,
@@ -3195,63 +3299,39 @@ public partial class MainWindow : Window
                 ? "已经回到原来的间隔、气泡和语音。"
                 : "已经回到原来的间隔和气泡时间。"
             : voiceOn
-                ? "已经换成这组啦，下一句按这个语速和语气。"
-                : "已经换成这组啦。";
+                ? "已经换成这组啦，下一句按这个语速、语气和字数。"
+                : "已经换成这组啦，输出按这个字数。";
     }
 
     private bool TryReadDeveloperDraft(out DeveloperTestParameters draft, out string error)
     {
         draft = _developerParameters.Clone();
-        if (!TryDeveloperInteger(DayMinBox, out var dayMin)
-            || !TryDeveloperInteger(DayMaxBox, out var dayMax)
-            || !TryDeveloperInteger(EveningMinBox, out var eveningMin)
-            || !TryDeveloperInteger(EveningMaxBox, out var eveningMax)
-            || !TryDeveloperInteger(LateMinBox, out var lateMin)
-            || !TryDeveloperInteger(LateMaxBox, out var lateMax)
-            || !TryDeveloperInteger(FullscreenMinBox, out var fullscreenMin)
-            || !TryDeveloperInteger(FullscreenMaxBox, out var fullscreenMax)
-            || !TryDeveloperInteger(BubbleBox, out var bubble))
-        {
-            error = "间隔和气泡要填整数。";
-            return false;
-        }
-
-        draft.DayMinimumMinutes = dayMin;
-        draft.DayMaximumMinutes = dayMax;
-        draft.EveningMinimumMinutes = eveningMin;
-        draft.EveningMaximumMinutes = eveningMax;
-        draft.LateNightMinimumMinutes = lateMin;
-        draft.LateNightMaximumMinutes = lateMax;
-        draft.FullscreenMinimumMinutes = fullscreenMin;
-        draft.FullscreenMaximumMinutes = fullscreenMax;
-        draft.BubbleSeconds = bubble;
+        draft.DayMinimumMinutes = ReadSliderInt(DayRange.LowerValue);
+        draft.DayMaximumMinutes = ReadSliderInt(DayRange.UpperValue);
+        draft.EveningMinimumMinutes = ReadSliderInt(EveningRange.LowerValue);
+        draft.EveningMaximumMinutes = ReadSliderInt(EveningRange.UpperValue);
+        draft.LateNightMinimumMinutes = ReadSliderInt(LateRange.LowerValue);
+        draft.LateNightMaximumMinutes = ReadSliderInt(LateRange.UpperValue);
+        draft.FullscreenMinimumMinutes = ReadSliderInt(FullscreenRange.LowerValue);
+        draft.FullscreenMaximumMinutes = ReadSliderInt(FullscreenRange.UpperValue);
+        draft.BubbleSeconds = ReadSliderInt(BubbleSlider.LowerValue);
+        draft.ReplyMaxChars = ReadSliderInt(ReplyMaxCharsSlider.LowerValue);
         if (VoiceParameterPanel.Visibility == Visibility.Visible)
         {
-            if (!TryDeveloperNumber(SpeechSpeedBox, out var speechSpeed)
-                || !TryDeveloperNumber(SpeechTemperatureBox, out var speechTemperature)
-                || !TryDeveloperNumber(SpeechRepetitionBox, out var speechRepetition))
-            {
-                error = "语音参数要填数字。";
-                return false;
-            }
-
-            draft.SpeechSpeed = speechSpeed;
-            draft.SpeechTemperature = speechTemperature;
-            draft.SpeechRepetition = speechRepetition;
+            draft.SpeechSpeed = ReadSliderNumber(SpeechSpeedSlider.LowerValue);
+            draft.SpeechTemperature = ReadSliderNumber(SpeechTemperatureSlider.LowerValue);
+            draft.SpeechRepetition = ReadSliderNumber(SpeechRepetitionSlider.LowerValue);
         }
 
         error = string.Empty;
         return true;
     }
 
-    private static bool TryDeveloperInteger(TextBox box, out int value) =>
-        int.TryParse(box.Text.Trim(), out value);
+    private static int ReadSliderInt(double value) =>
+        (int)Math.Round(value, MidpointRounding.AwayFromZero);
 
-    private static bool TryDeveloperNumber(TextBox box, out double value)
-    {
-        var text = box.Text.Trim().Replace('，', '.').Replace(',', '.');
-        return double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value);
-    }
+    private static double ReadSliderNumber(double value) =>
+        Math.Round(value, 2, MidpointRounding.AwayFromZero);
 
     private void UpdateVoiceParameterPanel()
     {
@@ -3262,21 +3342,63 @@ public partial class MainWindow : Window
 
     private void WriteDeveloperDraft(DeveloperTestParameters parameters)
     {
-        DayMinBox.Text = parameters.DayMinimumMinutes.ToString();
-        DayMaxBox.Text = parameters.DayMaximumMinutes.ToString();
-        EveningMinBox.Text = parameters.EveningMinimumMinutes.ToString();
-        EveningMaxBox.Text = parameters.EveningMaximumMinutes.ToString();
-        LateMinBox.Text = parameters.LateNightMinimumMinutes.ToString();
-        LateMaxBox.Text = parameters.LateNightMaximumMinutes.ToString();
-        FullscreenMinBox.Text = parameters.FullscreenMinimumMinutes.ToString();
-        FullscreenMaxBox.Text = parameters.FullscreenMaximumMinutes.ToString();
-        BubbleBox.Text = parameters.BubbleSeconds.ToString();
-        SpeechSpeedBox.Text = parameters.SpeechSpeed.ToString("0.##", CultureInfo.InvariantCulture);
-        SpeechTemperatureBox.Text = parameters.SpeechTemperature.ToString("0.##", CultureInfo.InvariantCulture);
-        SpeechRepetitionBox.Text = parameters.SpeechRepetition.ToString("0.##", CultureInfo.InvariantCulture);
+        _writingDeveloperSliders = true;
+        try
+        {
+            DayRange.SetBounds(DeveloperTestParameters.MinimumDayMinutes, DeveloperTestParameters.MaximumDayMinutes, parameters.DayMinimumMinutes, parameters.DayMaximumMinutes, 1);
+            EveningRange.SetBounds(DeveloperTestParameters.MinimumEveningMinutes, DeveloperTestParameters.MaximumEveningMinutes, parameters.EveningMinimumMinutes, parameters.EveningMaximumMinutes, 1);
+            LateRange.SetBounds(DeveloperTestParameters.MinimumLateNightMinutes, DeveloperTestParameters.MaximumLateNightMinutes, parameters.LateNightMinimumMinutes, parameters.LateNightMaximumMinutes, 1);
+            FullscreenRange.SetBounds(DeveloperTestParameters.MinimumFullscreenMinutes, DeveloperTestParameters.MaximumFullscreenMinutes, parameters.FullscreenMinimumMinutes, parameters.FullscreenMaximumMinutes, 1);
+            BubbleSlider.SetBounds(DeveloperTestParameters.MinimumBubbleSeconds, DeveloperTestParameters.MaximumBubbleSeconds, parameters.BubbleSeconds, parameters.BubbleSeconds, 1);
+            ReplyMaxCharsSlider.SetBounds(DeveloperTestParameters.MinimumReplyChars, DeveloperTestParameters.MaximumReplyChars, parameters.ReplyMaxChars, parameters.ReplyMaxChars, 1);
+            SpeechSpeedSlider.SetBounds(DeveloperTestParameters.MinimumSpeechSpeed, DeveloperTestParameters.MaximumSpeechSpeed, parameters.SpeechSpeed, parameters.SpeechSpeed, 0.1);
+            SpeechTemperatureSlider.SetBounds(DeveloperTestParameters.MinimumSpeechTemperature, DeveloperTestParameters.MaximumSpeechTemperature, parameters.SpeechTemperature, parameters.SpeechTemperature, 0.1);
+            SpeechRepetitionSlider.SetBounds(DeveloperTestParameters.MinimumSpeechRepetition, DeveloperTestParameters.MaximumSpeechRepetition, parameters.SpeechRepetition, parameters.SpeechRepetition, 0.1);
+        }
+        finally
+        {
+            _writingDeveloperSliders = false;
+        }
+
+        RefreshDeveloperSliderLabels();
         ParameterErrorText.Text = string.Empty;
         ParameterStatusText.Text = string.Empty;
         UpdateVoiceParameterPanel();
+    }
+
+    private void RefreshDeveloperSliderLabels()
+    {
+        if (DayRangeText is null
+            || EveningRangeText is null
+            || LateRangeText is null
+            || FullscreenRangeText is null
+            || BubbleValueText is null
+            || ReplyValueText is null
+            || SpeechSpeedValueText is null
+            || SpeechTemperatureValueText is null
+            || SpeechRepetitionValueText is null
+            || DayRange is null
+            || EveningRange is null
+            || LateRange is null
+            || FullscreenRange is null
+            || BubbleSlider is null
+            || ReplyMaxCharsSlider is null
+            || SpeechSpeedSlider is null
+            || SpeechTemperatureSlider is null
+            || SpeechRepetitionSlider is null)
+        {
+            return;
+        }
+
+        DayRangeText.Text = $"{ReadSliderInt(DayRange.LowerValue)} 到 {ReadSliderInt(DayRange.UpperValue)} 分钟";
+        EveningRangeText.Text = $"{ReadSliderInt(EveningRange.LowerValue)} 到 {ReadSliderInt(EveningRange.UpperValue)} 分钟";
+        LateRangeText.Text = $"{ReadSliderInt(LateRange.LowerValue)} 到 {ReadSliderInt(LateRange.UpperValue)} 分钟";
+        FullscreenRangeText.Text = $"{ReadSliderInt(FullscreenRange.LowerValue)} 到 {ReadSliderInt(FullscreenRange.UpperValue)} 分钟";
+        BubbleValueText.Text = $"{ReadSliderInt(BubbleSlider.LowerValue)} 秒";
+        ReplyValueText.Text = $"{ReadSliderInt(ReplyMaxCharsSlider.LowerValue)} 字";
+        SpeechSpeedValueText.Text = $"{ReadSliderNumber(SpeechSpeedSlider.LowerValue).ToString("0.##", CultureInfo.InvariantCulture)} 倍";
+        SpeechTemperatureValueText.Text = ReadSliderNumber(SpeechTemperatureSlider.LowerValue).ToString("0.##", CultureInfo.InvariantCulture);
+        SpeechRepetitionValueText.Text = ReadSliderNumber(SpeechRepetitionSlider.LowerValue).ToString("0.##", CultureInfo.InvariantCulture);
     }
 
     private Style MenuItemStyle => (Style)ControlMenu.FindResource(typeof(MenuItem));
@@ -3466,6 +3588,7 @@ public partial class MainWindow : Window
         DisarmAutomaticTimer();
         _eventTimer.Stop();
         _memoryTimer.Stop();
+        _reminderTimer.Stop();
         _bubbleTimer.Stop();
         _bubbleCountdown.Close();
         PreserveScheduledStartupGreeting();

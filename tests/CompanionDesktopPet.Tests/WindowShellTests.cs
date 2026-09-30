@@ -3782,9 +3782,22 @@ public sealed class WindowShellTests
     [Fact]
     public void MainWindow_DeveloperModeShowsTheCorpusAndAppliesHandEditedParameters()
     {
-        RunOnStaThread(() =>
+        var settingsDirectory = CreateSettingsDirectory();
+        try
         {
-            var settingsDirectory = CreateSettingsDirectory();
+            RunOnStaThread(() => ShowDeveloperParameterPanel(settingsDirectory));
+        }
+        finally
+        {
+            SpinWait.SpinUntil(
+                () => !HasPendingSettingsWrite(settingsDirectory),
+                TimeSpan.FromSeconds(5));
+            DeleteSettingsDirectory(settingsDirectory);
+        }
+    }
+
+    private static void ShowDeveloperParameterPanel(string settingsDirectory)
+    {
             var window = CreateWindow(settingsDirectory);
             ContextMenu? menu = null;
             DeveloperModeWindow? tool = null;
@@ -3841,10 +3854,13 @@ public sealed class WindowShellTests
 
                 developer.IsSubmenuOpen = true;
                 window.Dispatcher.Invoke(() => { }, DispatcherPriority.ContextIdle);
-                var dayMin = Assert.IsType<TextBox>(window.FindName("DayMinBox"));
-                var dayMax = Assert.IsType<TextBox>(window.FindName("DayMaxBox"));
-                dayMin.Text = "1";
-                dayMax.Text = "2";
+                var day = Assert.IsType<RangeSlider>(window.FindName("DayRange"));
+                var fullscreenText = Assert.IsType<TextBlock>(window.FindName("FullscreenRangeText"));
+                Assert.Equal("60 到 120 分钟", fullscreenText.Text);
+                fullscreenText.Measure(new Size(double.PositiveInfinity, 40));
+                Assert.True(fullscreenText.DesiredSize.Width <= 110, $"范围文字宽 {fullscreenText.DesiredSize.Width}，徽章放不下。");
+                day.LowerValue = 1;
+                day.UpperValue = 2;
                 var apply = Assert.IsType<Button>(window.FindName("ApplyParametersButton"));
                 apply.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                 Assert.Equal(1, window.DialogueSchedulerForTests.TestParameters!.DayMinimumMinutes);
@@ -3872,9 +3888,7 @@ public sealed class WindowShellTests
                 }
 
                 window.Close();
-                DeleteSettingsDirectory(settingsDirectory);
             }
-        });
     }
 
     [Fact]
@@ -4392,6 +4406,10 @@ public sealed class WindowShellTests
         public void PlayGreeting(Action completed)
         {
             _ambientCompletion = completed;
+        }
+
+        public void SetSpeechMotion(bool speaking)
+        {
         }
 
         public void CancelAmbientAction()

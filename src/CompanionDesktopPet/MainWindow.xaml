@@ -1,6 +1,7 @@
 <Window x:Class="CompanionDesktopPet.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="clr-namespace:CompanionDesktopPet.UI"
         Title="角色桌宠"
         Width="420"
         Height="520"
@@ -13,6 +14,29 @@
         SnapsToDevicePixels="True"
         UseLayoutRounding="True"
         AutomationProperties.Name="佳怡桌宠">
+  <Window.Resources>
+    <Style x:Key="ParameterNameText" TargetType="TextBlock">
+      <Setter Property="FontFamily" Value="{DynamicResource Pet.FontFamily.Ui}" />
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="Foreground" Value="{DynamicResource Pet.Brush.TextPrimary}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style x:Key="ParameterValueBadge" TargetType="Border">
+      <Setter Property="Background" Value="{DynamicResource Pet.Brush.PanelSelected}" />
+      <Setter Property="CornerRadius" Value="10" />
+      <Setter Property="Padding" Value="8,3" />
+      <Setter Property="MinWidth" Value="118" />
+      <Setter Property="Margin" Value="8,0,0,0" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style x:Key="ParameterValueText" TargetType="TextBlock">
+      <Setter Property="FontFamily" Value="{DynamicResource Pet.FontFamily.Ui}" />
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="Foreground" Value="{DynamicResource Pet.Brush.TextDisabled}" />
+      <Setter Property="HorizontalAlignment" Value="Center" />
+      <Setter Property="TextAlignment" Value="Center" />
+    </Style>
+  </Window.Resources>
   <Grid x:Name="InteractionSurface">
     <Popup x:Name="BubblePopup"
            AllowsTransparency="True"
@@ -71,16 +95,20 @@
                   </Ellipse.RenderTransform>
                 </Ellipse>
               </Grid>
-              <TextBlock x:Name="SpeechText"
-                         Grid.Column="1"
-                         Foreground="{DynamicResource Pet.Brush.TextPrimary}"
-                         FontFamily="{StaticResource Pet.FontFamily.Ui}"
-                         FontSize="15"
-                         FontWeight="SemiBold"
-                         TextWrapping="Wrap"
-                         TextAlignment="Center"
-                         VerticalAlignment="Center"
-                         AutomationProperties.LiveSetting="Polite" />
+              <ScrollViewer Grid.Column="1"
+                            MaxHeight="240"
+                            VerticalScrollBarVisibility="Auto"
+                            HorizontalScrollBarVisibility="Disabled">
+                <TextBlock x:Name="SpeechText"
+                           Foreground="{DynamicResource Pet.Brush.TextPrimary}"
+                           FontFamily="{StaticResource Pet.FontFamily.Ui}"
+                           FontSize="15"
+                           FontWeight="SemiBold"
+                           TextWrapping="Wrap"
+                           TextAlignment="Center"
+                           VerticalAlignment="Center"
+                           AutomationProperties.LiveSetting="Polite" />
+              </ScrollViewer>
             </Grid>
           </Border>
           <Path x:Name="BubbleArrowDown"
@@ -202,84 +230,130 @@
                       Tag="⌁"
                       Style="{StaticResource KawaiiDeveloperMenuStyle}"
                       SubmenuOpened="DeveloperModeMenu_SubmenuOpened"
-                      AutomationProperties.HelpText="再展开一层，手改自动台词间隔、气泡停留，语音开着时还能改语速和语气。">
+                      AutomationProperties.HelpText="再展开一层，手改自动台词间隔、气泡停留和一次最多说多少字。语音开着时还能改语速和语气。">
               <MenuItem Style="{StaticResource KawaiiMenuPanelStyle}" StaysOpenOnClick="True">
                 <MenuItem.Header>
-                <StackPanel Width="248" Margin="4,2,4,6">
+                <StackPanel Width="356" Margin="4,2,4,6">
                   <TextBlock Margin="0,2,0,8"
                              FontSize="11"
+                             FontFamily="{DynamicResource Pet.FontFamily.Ui}"
                              TextWrapping="Wrap"
                              Foreground="{DynamicResource Pet.Brush.TextDisabled}"
-                             Text="只改这一次，不会动语料本。" />
+                             Text="只改这一次，不会动语料本。拖动停在可用范围内。" />
                   <Grid Margin="0,0,0,6">
-                    <TextBlock VerticalAlignment="Center" FontSize="12" Text="白天" />
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                      <TextBox x:Name="DayMinBox" Width="42" MinHeight="26" FontSize="12" Padding="4,2" HorizontalContentAlignment="Center" Style="{StaticResource KawaiiTextBoxStyle}" PreviewMouseLeftButtonDown="ParameterBox_PreviewMouseLeftButtonDown" />
-                      <TextBlock Width="22" VerticalAlignment="Center" HorizontalAlignment="Center" FontSize="12" Foreground="{DynamicResource Pet.Brush.PanelHint}" Text="到" />
-                      <TextBox x:Name="DayMaxBox" Width="42" MinHeight="26" FontSize="12" Padding="4,2" HorizontalContentAlignment="Center" Style="{StaticResource KawaiiTextBoxStyle}" PreviewMouseLeftButtonDown="ParameterBox_PreviewMouseLeftButtonDown" />
-                      <TextBlock Margin="6,0,0,0" VerticalAlignment="Center" FontSize="11" Foreground="{DynamicResource Pet.Brush.TextDisabled}" Text="分钟" />
-                    </StackPanel>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="48" />
+                      <ColumnDefinition Width="*" />
+                      <ColumnDefinition Width="126" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Style="{StaticResource ParameterNameText}" Text="白天" />
+                    <ui:RangeSlider x:Name="DayRange" Grid.Column="1" RangeChanged="DeveloperRange_Changed" AutomationProperties.Name="白天间隔" />
+                    <Border Grid.Column="2" Style="{StaticResource ParameterValueBadge}">
+                      <TextBlock x:Name="DayRangeText" Style="{StaticResource ParameterValueText}" />
+                    </Border>
                   </Grid>
                   <Grid Margin="0,0,0,6">
-                    <TextBlock VerticalAlignment="Center" FontSize="12" Text="傍晚" />
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                      <TextBox x:Name="EveningMinBox" Width="42" MinHeight="26" FontSize="12" Padding="4,2" HorizontalContentAlignment="Center" Style="{StaticResource KawaiiTextBoxStyle}" PreviewMouseLeftButtonDown="ParameterBox_PreviewMouseLeftButtonDown" />
-                      <TextBlock Width="22" VerticalAlignment="Center" HorizontalAlignment="Center" FontSize="12" Foreground="{DynamicResource Pet.Brush.PanelHint}" Text="到" />
-                      <TextBox x:Name="EveningMaxBox" Width="42" MinHeight="26" FontSize="12" Padding="4,2" HorizontalContentAlignment="Center" Style="{StaticResource KawaiiTextBoxStyle}" PreviewMouseLeftButtonDown="ParameterBox_PreviewMouseLeftButtonDown" />
-                      <TextBlock Margin="6,0,0,0" VerticalAlignment="Center" FontSize="11" Foreground="{DynamicResource Pet.Brush.TextDisabled}" Text="分钟" />
-                    </StackPanel>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="48" />
+                      <ColumnDefinition Width="*" />
+                      <ColumnDefinition Width="126" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Style="{StaticResource ParameterNameText}" Text="傍晚" />
+                    <ui:RangeSlider x:Name="EveningRange" Grid.Column="1" RangeChanged="DeveloperRange_Changed" AutomationProperties.Name="傍晚间隔" />
+                    <Border Grid.Column="2" Style="{StaticResource ParameterValueBadge}">
+                      <TextBlock x:Name="EveningRangeText" Style="{StaticResource ParameterValueText}" />
+                    </Border>
                   </Grid>
                   <Grid Margin="0,0,0,6">
-                    <TextBlock VerticalAlignment="Center" FontSize="12" Text="深夜" />
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                      <TextBox x:Name="LateMinBox" Width="42" MinHeight="26" FontSize="12" Padding="4,2" HorizontalContentAlignment="Center" Style="{StaticResource KawaiiTextBoxStyle}" PreviewMouseLeftButtonDown="ParameterBox_PreviewMouseLeftButtonDown" />
-                      <TextBlock Width="22" VerticalAlignment="Center" HorizontalAlignment="Center" FontSize="12" Foreground="{DynamicResource Pet.Brush.PanelHint}" Text="到" />
-                      <TextBox x:Name="LateMaxBox" Width="42" MinHeight="26" FontSize="12" Padding="4,2" HorizontalContentAlignment="Center" Style="{StaticResource KawaiiTextBoxStyle}" PreviewMouseLeftButtonDown="ParameterBox_PreviewMouseLeftButtonDown" />
-                      <TextBlock Margin="6,0,0,0" VerticalAlignment="Center" FontSize="11" Foreground="{DynamicResource Pet.Brush.TextDisabled}" Text="分钟" />
-                    </StackPanel>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="48" />
+                      <ColumnDefinition Width="*" />
+                      <ColumnDefinition Width="126" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Style="{StaticResource ParameterNameText}" Text="深夜" />
+                    <ui:RangeSlider x:Name="LateRange" Grid.Column="1" RangeChanged="DeveloperRange_Changed" AutomationProperties.Name="深夜间隔" />
+                    <Border Grid.Column="2" Style="{StaticResource ParameterValueBadge}">
+                      <TextBlock x:Name="LateRangeText" Style="{StaticResource ParameterValueText}" />
+                    </Border>
                   </Grid>
                   <Grid Margin="0,0,0,6">
-                    <TextBlock VerticalAlignment="Center" FontSize="12" Text="全屏" />
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                      <TextBox x:Name="FullscreenMinBox" Width="42" MinHeight="26" FontSize="12" Padding="4,2" HorizontalContentAlignment="Center" Style="{StaticResource KawaiiTextBoxStyle}" PreviewMouseLeftButtonDown="ParameterBox_PreviewMouseLeftButtonDown" />
-                      <TextBlock Width="22" VerticalAlignment="Center" HorizontalAlignment="Center" FontSize="12" Foreground="{DynamicResource Pet.Brush.PanelHint}" Text="到" />
-                      <TextBox x:Name="FullscreenMaxBox" Width="42" MinHeight="26" FontSize="12" Padding="4,2" HorizontalContentAlignment="Center" Style="{StaticResource KawaiiTextBoxStyle}" PreviewMouseLeftButtonDown="ParameterBox_PreviewMouseLeftButtonDown" />
-                      <TextBlock Margin="6,0,0,0" VerticalAlignment="Center" FontSize="11" Foreground="{DynamicResource Pet.Brush.TextDisabled}" Text="分钟" />
-                    </StackPanel>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="48" />
+                      <ColumnDefinition Width="*" />
+                      <ColumnDefinition Width="126" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Style="{StaticResource ParameterNameText}" Text="全屏" />
+                    <ui:RangeSlider x:Name="FullscreenRange" Grid.Column="1" RangeChanged="DeveloperRange_Changed" AutomationProperties.Name="全屏间隔" />
+                    <Border Grid.Column="2" Style="{StaticResource ParameterValueBadge}">
+                      <TextBlock x:Name="FullscreenRangeText" Style="{StaticResource ParameterValueText}" />
+                    </Border>
+                  </Grid>
+                  <Grid Margin="0,0,0,6">
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="48" />
+                      <ColumnDefinition Width="*" />
+                      <ColumnDefinition Width="126" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Style="{StaticResource ParameterNameText}" Text="气泡" />
+                    <ui:RangeSlider x:Name="BubbleSlider" Grid.Column="1" IsRange="False" RangeChanged="DeveloperRange_Changed" AutomationProperties.Name="气泡停留秒数" />
+                    <Border Grid.Column="2" Style="{StaticResource ParameterValueBadge}">
+                      <TextBlock x:Name="BubbleValueText" Style="{StaticResource ParameterValueText}" />
+                    </Border>
                   </Grid>
                   <Grid Margin="0,0,0,8">
-                    <TextBlock VerticalAlignment="Center" FontSize="12" Text="气泡" />
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                      <TextBox x:Name="BubbleBox" Width="42" MinHeight="26" FontSize="12" Padding="4,2" HorizontalContentAlignment="Center" Style="{StaticResource KawaiiTextBoxStyle}" PreviewMouseLeftButtonDown="ParameterBox_PreviewMouseLeftButtonDown" />
-                      <TextBlock Margin="6,0,0,0" VerticalAlignment="Center" FontSize="11" Foreground="{DynamicResource Pet.Brush.TextDisabled}" Text="秒" />
-                    </StackPanel>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="48" />
+                      <ColumnDefinition Width="*" />
+                      <ColumnDefinition Width="126" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Style="{StaticResource ParameterNameText}" Text="输出" />
+                    <ui:RangeSlider x:Name="ReplyMaxCharsSlider" Grid.Column="1" IsRange="False" RangeChanged="DeveloperRange_Changed" AutomationProperties.Name="一次最多输出字数" />
+                    <Border Grid.Column="2" Style="{StaticResource ParameterValueBadge}">
+                      <TextBlock x:Name="ReplyValueText" Style="{StaticResource ParameterValueText}" />
+                    </Border>
                   </Grid>
                   <StackPanel x:Name="VoiceParameterPanel" Visibility="Collapsed">
                     <TextBlock Margin="0,2,0,8"
                                FontSize="11"
+                               FontFamily="{DynamicResource Pet.FontFamily.Ui}"
                                TextWrapping="Wrap"
                                Foreground="{DynamicResource Pet.Brush.TextDisabled}"
                                Text="语音开着。语速 1 是原速，语气越高越活，重复越高越少绕。下一句生效。" />
                     <Grid Margin="0,0,0,6">
-                      <TextBlock VerticalAlignment="Center" FontSize="12" Text="语速" />
-                      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                        <TextBox x:Name="SpeechSpeedBox" Width="64" MinHeight="26" FontSize="12" Padding="2,2" HorizontalContentAlignment="Center" Style="{StaticResource KawaiiTextBoxStyle}" PreviewMouseLeftButtonDown="ParameterBox_PreviewMouseLeftButtonDown" />
-                        <TextBlock Margin="6,0,0,0" Width="22" VerticalAlignment="Center" FontSize="11" Foreground="{DynamicResource Pet.Brush.TextDisabled}" Text="倍" />
-                      </StackPanel>
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="48" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="126" />
+                      </Grid.ColumnDefinitions>
+                      <TextBlock Style="{StaticResource ParameterNameText}" Text="语速" />
+                      <ui:RangeSlider x:Name="SpeechSpeedSlider" Grid.Column="1" IsRange="False" RangeChanged="DeveloperRange_Changed" AutomationProperties.Name="语速" />
+                      <Border Grid.Column="2" Style="{StaticResource ParameterValueBadge}">
+                        <TextBlock x:Name="SpeechSpeedValueText" Style="{StaticResource ParameterValueText}" />
+                      </Border>
                     </Grid>
                     <Grid Margin="0,0,0,6">
-                      <TextBlock VerticalAlignment="Center" FontSize="12" Text="语气" />
-                      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                        <TextBox x:Name="SpeechTemperatureBox" Width="64" MinHeight="26" FontSize="12" Padding="2,2" HorizontalContentAlignment="Center" Style="{StaticResource KawaiiTextBoxStyle}" PreviewMouseLeftButtonDown="ParameterBox_PreviewMouseLeftButtonDown" />
-                        <TextBlock Margin="6,0,0,0" Width="22" />
-                      </StackPanel>
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="48" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="126" />
+                      </Grid.ColumnDefinitions>
+                      <TextBlock Style="{StaticResource ParameterNameText}" Text="语气" />
+                      <ui:RangeSlider x:Name="SpeechTemperatureSlider" Grid.Column="1" IsRange="False" RangeChanged="DeveloperRange_Changed" AutomationProperties.Name="语气" />
+                      <Border Grid.Column="2" Style="{StaticResource ParameterValueBadge}">
+                        <TextBlock x:Name="SpeechTemperatureValueText" Style="{StaticResource ParameterValueText}" />
+                      </Border>
                     </Grid>
                     <Grid Margin="0,0,0,8">
-                      <TextBlock VerticalAlignment="Center" FontSize="12" Text="重复" />
-                      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                        <TextBox x:Name="SpeechRepetitionBox" Width="64" MinHeight="26" FontSize="12" Padding="2,2" HorizontalContentAlignment="Center" Style="{StaticResource KawaiiTextBoxStyle}" PreviewMouseLeftButtonDown="ParameterBox_PreviewMouseLeftButtonDown" />
-                        <TextBlock Margin="6,0,0,0" Width="22" />
-                      </StackPanel>
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="48" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="126" />
+                      </Grid.ColumnDefinitions>
+                      <TextBlock Style="{StaticResource ParameterNameText}" Text="重复" />
+                      <ui:RangeSlider x:Name="SpeechRepetitionSlider" Grid.Column="1" IsRange="False" RangeChanged="DeveloperRange_Changed" AutomationProperties.Name="重复" />
+                      <Border Grid.Column="2" Style="{StaticResource ParameterValueBadge}">
+                        <TextBlock x:Name="SpeechRepetitionValueText" Style="{StaticResource ParameterValueText}" />
+                      </Border>
                     </Grid>
                   </StackPanel>
                   <TextBlock x:Name="ParameterErrorText"
@@ -336,6 +410,18 @@
 
       <Image x:Name="BlinkOverlay"
              Source="pack://application:,,,/CompanionDesktopPet;component/Assets/character-blink-closed.png"
+             Stretch="Uniform"
+             Opacity="0"
+             IsHitTestVisible="False" />
+
+      <Image x:Name="MouthMid"
+             Source="pack://application:,,,/CompanionDesktopPet;component/Assets/mouth-mid.png"
+             Stretch="Uniform"
+             Opacity="0"
+             IsHitTestVisible="False" />
+
+      <Image x:Name="MouthOpen"
+             Source="pack://application:,,,/CompanionDesktopPet;component/Assets/mouth-open.png"
              Stretch="Uniform"
              Opacity="0"
              IsHitTestVisible="False" />

@@ -232,7 +232,7 @@
               <Grid Margin="12">
                 <Border Padding="8"
                         MinWidth="250"
-                        MaxWidth="280"
+                        MaxWidth="420"
                         CornerRadius="20"
                         BorderThickness="2"
                         BorderBrush="{DynamicResource Pet.Brush.MenuBorder}"
@@ -301,6 +301,7 @@
   <SolidColorBrush x:Key="Pet.Brush.PanelCard" Color="#F7FFFFFF" />
   <SolidColorBrush x:Key="Pet.Brush.PanelCardBorder" Color="#99F3B7C4" />
   <SolidColorBrush x:Key="Pet.Brush.PanelSelected" Color="#FFFFE4EC" />
+  <SolidColorBrush x:Key="Pet.Brush.RangeTrack" Color="#FFF3D6E1" />
   <SolidColorBrush x:Key="Pet.Brush.PanelHint" Color="#FFB08990" />
 
   <Style x:Key="KawaiiCaptionStyle" TargetType="TextBlock">
