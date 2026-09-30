@@ -315,7 +315,19 @@ try {
         Get-DotNetTrxEvidence -TrxPaths @($missingCounterTrx) -ExpectedDiscoveredTests 3 | Out-Null
     }
 
-    $workflow = Get-Content -LiteralPath (Join-Path $repoRoot '.github\workflows\ci-cd.yml') -Raw -Encoding utf8
+    $utf8 = [Text.UTF8Encoding]::new($false)
+    $workflow = [IO.File]::ReadAllText((Join-Path $repoRoot '.github\workflows\ci-cd.yml'), $utf8)
+    $readme = [IO.File]::ReadAllText((Join-Path $repoRoot 'README.md'), $utf8)
+    $dialogueDefaultOff = -join @(
+        [char]0x5BF9, [char]0x8BDD, [char]0x5F00, [char]0x5173,
+        [char]0x9ED8, [char]0x8BA4, [char]0x5173, [char]0x95ED
+    )
+    $offlineBoundary = -join @(
+        [char]0x4E0D, [char]0x8BFB, [char]0x53D6, [char]0x8F93, [char]0x5165,
+        [char]0x5185, [char]0x5BB9, [char]0x3001, [char]0x526A, [char]0x8D34,
+        [char]0x677F, [char]0x3001, [char]0x7A97, [char]0x53E3, [char]0x6807,
+        [char]0x9898
+    )
     foreach ($requiredHybridEvidence in @(
         '82,132'
         '15,000/15,000'
@@ -325,6 +337,32 @@ try {
     )) {
         if (-not $workflow.Contains($requiredHybridEvidence)) {
             throw "CI workflow is missing v1.4.0 hybrid release evidence: $requiredHybridEvidence"
+        }
+    }
+    foreach ($requiredDialogueGate in @(
+        '.github/requirements-dialogue.txt'
+        'dialogue/requirements.txt'
+        'Push-Location dialogue'
+        $dialogueDefaultOff
+    )) {
+        if (-not $workflow.Contains($requiredDialogueGate)) {
+            throw "CI workflow is missing the dialogue gate: $requiredDialogueGate"
+        }
+    }
+
+    foreach ($requiredReadmeFact in @(
+        'https://github.com/haohaizi554/CompanionDesktopPet/releases/tag/v1.6.0'
+        'https://github.com/haohaizi554/CompanionDesktopPet/releases/tag/v1.5.0'
+        '6d8eebf1487c4bd08121dc71165e785cf39ba95e'
+        '780d4b97354268b2a1f956e93c2605e15d4d6855'
+        '1cd5ed1a5627bd414ea305cca3f32ebba502bc92cf8d8c412e3f60887eb9f1c0'
+        'ccb4a6416b7ad4d8ecfd42ff23b81a37094a72f2d064109d2b869cbcd38ec4c7'
+        $dialogueDefaultOff
+        '.github/requirements-dialogue.txt'
+        $offlineBoundary
+    )) {
+        if (-not $readme.Contains($requiredReadmeFact)) {
+            throw "README.md is missing the current release fact: $requiredReadmeFact"
         }
     }
 }

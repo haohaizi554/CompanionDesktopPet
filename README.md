@@ -1,34 +1,55 @@
 # 佳怡桌宠（CompanionDesktopPet）
 
-一个完全离线的 Windows x64 WPF 桌宠，以及配套的可审计中文角色语料系统。她不读取输入内容、剪贴板、窗口标题，也不枚举或读取用户文件名、用户目录内容，不依赖网络、数据库或在线模型，也没有热更新、自动更新或联网下载代码的机制；升级版本时由用户手动下载并替换 EXE。正常运行时，角色偏好、冷却历史和剧情状态保存在 `%LOCALAPPDATA%\CompanionDesktopPet`；只有用户主动启用开机自启动时，才会另在当前用户的 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 项保存桌宠自身的 EXE 路径。`--smoke-test` 发布验证使用系统临时目录中的独立状态，并在退出时清理。
+Windows x64 WPF 桌宠，以及配套的可审计中文角色语料系统。自动台词、点击、拖动、菜单和托盘不读取输入内容、剪贴板、窗口标题，也不枚举或读取用户文件名、用户目录内容。没有热更新、自动更新或联网下载代码的机制；升级时由用户手动下载并替换程序。正常运行时，角色偏好、冷却历史和剧情状态保存在 `%LOCALAPPDATA%\CompanionDesktopPet`；只有用户主动启用开机自启动时，才会另在当前用户的 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 项保存桌宠自身的 EXE 路径。`--smoke-test` 发布验证使用系统临时目录中的独立状态，并在退出时清理。
+
+对话开关默认关闭。打开之后，用户写下的句子会发给用户自己填写的 OpenAI 兼容接口，可以是本机的 Ollama、LM Studio、llama.cpp、vLLM，也可以是另一台电脑，或 OpenAI、DeepSeek 及其他兼容服务。语音仍在本机用 GPT-SoVITS 合成，不把声音交给那个接口。不打开对话时，桌宠不发起这些请求。
 
 自动台词使用四个精确的随机间隔窗口：本地时间 `06:00–17:59:59` 为 `5–15` 分钟，`18:00–22:59:59` 为 `10–20` 分钟，`23:00–05:59:59` 为 `30–60` 分钟；当前台前窗口明确检测为全屏时，不分时段改用 `60–120` 分钟。上下界均可被取到。全屏探测失败或台前 HWND 在读取期间变化时，原始观测保持 `unknown`，不会伪造为“非全屏”；有效安静模式会保留最近一次明确观测，直到后续明确结果更新它。
 
 全屏探测只读取台前 HWND 及其有效性、可见/最小化状态和窗口样式，DWM 的 cloaked 状态与扩展边框几何，以及相交显示器的完整边界。它不读取窗口标题、进程名称或进程内容，不读取键鼠输入、剪贴板、用户文件、屏幕像素或网络数据。该探测只改变自动台词频率，不理解屏幕内容或用户正在做什么。
 
-> v1.4.0 将 30,000 条逐条 authored 文案与 v1.2.1 已审计的 52,132 条 legacy 运行时合并为 82,132 条统一运行库，共 1,723 个语义场景。调度器先执行全部安全门禁，再以最近 100 次播放为窗口把 legacy 暴露稳定在约 30%；库存更大不会让 legacy 主导人格。
+> 运行库仍是 v1.4.0 合并后的结果：30,000 条逐条 authored 文案与 v1.2.1 已审计的 52,132 条 legacy 运行时，合计 82,132 条、1,723 个语义场景，SHA-256 为 `339358c524785db30badf420a3bdc2b89c7753486e907ff1a5216f68ca5d7ece`。v1.5.0 与 v1.6.0 都沿用这份库。调度器先执行全部安全门禁，再以最近 100 次播放为窗口把 legacy 暴露稳定在约 30%；库存更大不会让 legacy 主导人格。
 
 左键点击会显示爱心、按点击位置向相反方向轻轻倾斜，并给出一句回复。点击回复有长期运行兜底：即使冷却历史逐渐累积，或从旧版容易陷入静默的本地记忆恢复，后续点击也不会永久失声。桌宠保留自然单次/偶发双次眨眼，启动后会显示一次本地“嗨♡”，也可从右键面板选择 `打个招呼♡`；这些都是纯本地 UI 动作，不由语料驱动。
 
 窗口先显示，再在后台异步加载记忆、语料和场景。完整语料尚未就绪时，启动与点击立即使用短小的内置本地 fallback，不阻塞 UI；自动播报可以保持安静。预热成功后切换到完整场景，瞬态失败按 1、5、30 秒退避重试，结构或隐私契约错误则保持 fallback 并阻止发布烟测把它误判为“完整语料已就绪”。
 
-## 最终交付
+## 当前公开版本
+
+最新 Release 是 [v1.6.0](https://github.com/haohaizi554/CompanionDesktopPet/releases/tag/v1.6.0)，2026-09-27 发布。标签指向 `6d8eebf1487c4bd08121dc71165e785cf39ba95e`，主程序 `ProductVersion` 为 `1.6.0+6d8eebf1487c4bd08121dc71165e785cf39ba95e`。这是带本地语音的安装版：装完后同一目录里有主程序、语音运行时和对话程序。安装包由本机 Inno Setup 6.7.3 从当时的 `outputs\standalone` 打出，不由下面的单 EXE 流水线生成。安装程序和主程序都没有 Authenticode 签名，从网络下载时 Windows SmartScreen 或安全软件可能提示信誉不足。
+
+GitHub 单个附件不能超过 2GB，所以安装包分成四段。四段都要下到同一个文件夹，再运行 `Jiayi-Desktop-Pet-Setup.exe`。缺任何一段都装不完。`SHA256SUMS.txt` 中的哈希是：
+
+```text
+1cd5ed1a5627bd414ea305cca3f32ebba502bc92cf8d8c412e3f60887eb9f1c0  Jiayi-Desktop-Pet-Setup.exe
+f9dc4b6030bfadb58fc87ab05768c33bf4d159e303729e254ec217415fbb6a35  Jiayi-Desktop-Pet-Setup-1.bin
+6b03aaa854e2de9198cecae09f9e011b299137cdb8a7185766add4d3256717ff  Jiayi-Desktop-Pet-Setup-2.bin
+741102f361755e0a988a6a6e2a84b75939e6996aeea6c6116a8f618109bcb1ab  Jiayi-Desktop-Pet-Setup-3.bin
+```
+
+上一版 [v1.5.0](https://github.com/haohaizi554/CompanionDesktopPet/releases/tag/v1.5.0) 仍是离线单 EXE，2026-09-24 发布，提交 `780d4b97354268b2a1f956e93c2605e15d4d6855`。`ProductVersion=1.5.0+780d4b97354268b2a1f956e93c2605e15d4d6855`，大小为 `84,063,826` 字节，SHA-256 为 `ccb4a6416b7ad4d8ecfd42ff23b81a37094a72f2d064109d2b869cbcd38ec4c7`。这一版把右键菜单放到人物旁边，开发者模式可以按分类查看语料，测试参数放在「开发者模式 → 测试参数」里，只影响这一次运行，不改语料文件。
+
+[v1.4.0](https://github.com/haohaizi554/CompanionDesktopPet/releases/tag/v1.4.0) 是这份 82,132 条运行库的混合运行时发布。EXE 从提交 `d30e0102a3896b173ce1554b6769a705158effbe` 使用 .NET SDK `9.0.301` 构建，`ProductVersion=1.4.0+d30e0102a3896b173ce1554b6769a705158effbe`，大小为 `84,047,575` 字节，SHA-256 为 `19472bed0ea847b90cd73274b66c00d420cf4884ea2ae32ad4984029b3247387`。标签流水线当时通过 Python `390/390`、.NET Release `645/645`、15,000 次模拟与完整打包门禁。完整证据见[发布与清理清单](docs/release/2026-07-25-expanded-runtime-release-checklist.md)。`docs/release/v1.4.0.md` 只记录那一次标签。
+
+仓库里的单 EXE 构建产物仍然是：
 
 ```text
 outputs/CompanionDesktopPet/佳怡桌宠.exe
 outputs/CompanionDesktopPet/使用说明.txt
 ```
 
-`佳怡桌宠.exe` 是 `win-x64` 自包含单文件应用，运行时不需要另行安装 .NET，也不依赖旁置或外部应用 DLL、JSON、PDB 等运行时 sidecar。“自包含单 EXE”不表示进程绝不加载 DLL；作为 Windows 桌面应用，它仍会正常使用操作系统提供的系统 DLL 与系统组件。
+`佳怡桌宠.exe` 是 `win-x64` 自包含单文件应用，运行时不需要另行安装 .NET，也不依赖旁置或外部应用 DLL、JSON、PDB 等运行时 sidecar。“自包含单 EXE”不表示进程绝不加载 DLL；作为 Windows 桌面应用，它仍会正常使用操作系统提供的系统 DLL 与系统组件。这条单 EXE 不包含语音权重、GPT-SoVITS 运行时或对话用的 Python 环境。这些文件在 v1.6.0 安装包里；源码树用 `.gitignore` 排除 `voice/python/`、`voice/engine/`、`dialogue/python/` 和 `config/llm.runtime.json`。
 
-当前公开交付是 [v1.4.0](https://github.com/haohaizi554/CompanionDesktopPet/releases/tag/v1.4.0)：EXE 从提交 `d30e0102a3896b173ce1554b6769a705158effbe` 使用 .NET SDK `9.0.301` 构建，`ProductVersion=1.4.0+d30e0102a3896b173ce1554b6769a705158effbe`，大小为 `84,047,575` 字节，SHA-256 为 `19472bed0ea847b90cd73274b66c00d420cf4884ea2ae32ad4984029b3247387`。标签流水线实际通过 Python `390/390`、.NET Release `645/645`、15,000 次模拟与完整打包门禁；8 项 Release 资产经 `127.0.0.1:7890` 回下载后，直链 EXE、ZIP 内 EXE 与隔离烟测副本逐字节一致，最终本地 smoke PID `31808` 自行以退出码 0 结束。Release 标题精确为 `v1.4.0`，正文为具体中文变更、验证数字与构建来源。完整证据见[发布与清理清单](docs/release/2026-07-25-expanded-runtime-release-checklist.md)。该 EXE 未做 Authenticode 代码签名，从网络下载时可能出现 Windows SmartScreen/安全软件信誉提示。
+当前 `main` 可以比 v1.6.0 标签更靠前。标签记录的是已发布安装包的构建提交，不是仓库里的每一个后续提交。
 
 ## 体验与操作
 
 - 左键单击人物：显示爱心、按点击位置向相反方向轻轻倾斜，并按当前场景说一句话。
 - 按住左键拖动：移动桌宠，移动时按方向倾斜，松手后回弹。
 - 气泡与人物之间保持 30 DIP 的视觉距离；鼠标停在人物或气泡上时，只暂停当前气泡剩余的消失倒计时，移开后从剩余时间继续。
-- 右键人物：打开卡哇伊风格控制面板，可说句话、`打个招呼♡`、暂停/继续动画、调整大小、切换置顶、设置开机自启动、恢复位置、藏到托盘或退出。
+- 右键人物：在人物旁边打开卡哇伊风格控制面板，可说句话、`打个招呼♡`、暂停/继续动画、调整大小、切换置顶、设置开机自启动、恢复位置、藏到托盘或退出。v1.5.0 起菜单不再挡住佳怡；开发者模式可以按分类查看语料，测试参数在「开发者模式 → 测试参数」里。
+- 本地语音：v1.6.0 安装版在本机合成。连续点击会立刻把气泡换成最新一句，还没开始推理的旧句子不再接着读。把她明显挪开再松开，不会当成想让她说话；原地点击仍会说话。没有语音运行时的单 EXE 会保持安静的文字气泡。
+- 对话：默认关闭，开关在本地语音旁边。打开后可以用输入框说话，也可以用对话技能改间隔、气泡、语速和菜单状态。审计不过的模型原文不会拿去朗读。
 - 托盘：双击图标切换显示/隐藏；右键菜单可显示/隐藏、说句话、暂停/继续、切换开机自启动或退出。
 - v1.1.0 已支持 Windows 高对比度模式：气泡与控制面板会采用系统颜色和无阴影样式，关闭后恢复卡哇伊主题。
 
@@ -80,24 +101,29 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run
 ```text
 src/CompanionDesktopPet/       WPF 桌宠
 src/persona_corpus/            离线语料流水线、选择器与模拟器
+dialogue/                      可选对话服务；默认不启动，密钥不入库
+voice/                         本地语音脚本与参考音频；推理运行时不入库
+packaging/                     本机 Inno Setup 安装脚本
 data/source/                   不可变原始语料副本
 data/intermediate/             可追溯抽取产物与来源映射
 data/optimized/                v2、归档与人工复核 TSV
-config/                        调度配置与精确复核白名单
+data/persona/                  从 authored 语料蒸馏出的人物卡
+config/                        调度配置、复核白名单与对话接口示例
 reports/                       审计、改写、人工复核与模拟报告
-scripts/                       发布隔离验证脚本
+scripts/                       发布隔离验证与本机运行时组装脚本
 tools/                         语料命令行入口
-tests/                         Python、PowerShell 与 .NET 测试
-outputs/CompanionDesktopPet/   最终交付
+tests/                         语料 Python、PowerShell 与 .NET 测试
+dialogue/tests/                对话服务测试，不在上面的 tests/ 发现路径里
+outputs/CompanionDesktopPet/   单 EXE 交付；不含语音与对话运行时
 ```
 
 ## 环境
 
 - Windows x64
 - .NET SDK 9.0.301（由根目录 `global.json` 精确锁定）
-- Python 3.11 或更高版本（只使用标准库）
+- Python 3.11 或更高版本。语料流水线只使用标准库；对话测试另需 `dialogue/requirements.txt` 里钉住的包
 
-运行最终 EXE 不需要 Python 或 .NET SDK；这些工具只用于源码验证与重新构建。
+运行 v1.5.0 单 EXE 不需要 Python 或 .NET SDK。v1.6.0 安装包自带语音运行时和对话程序，也不需要用户另装 Python 或 .NET SDK。下面的工具只用于源码验证、重新构建，以及在没有安装包时自己组装语音或对话环境。
 
 ## 新鲜验证
 
@@ -118,6 +144,12 @@ python tools/validate_corpus_v2.py `
 
 python -m unittest discover -s tests -v
 
+python -m pip install --require-hashes --only-binary=:all: `
+  --requirement .github/requirements-dialogue.txt
+Push-Location dialogue
+python -m unittest discover -s tests -v
+Pop-Location
+
 dotnet restore CompanionDesktopPet.sln -r win-x64
 $isTestProject = dotnet msbuild `
   tests/CompanionDesktopPet.Tests/CompanionDesktopPet.Tests.csproj `
@@ -132,9 +164,9 @@ dotnet test CompanionDesktopPet.sln -c Release --no-restore
 
 ## 自动化 CI/CD
 
-`.github/workflows/ci-cd.yml` 会在每个 PR 和推送到 `main` 时执行完整 Python、语料契约、模拟证据和 .NET Release 门禁。手动运行 `workflow_dispatch` 会在门禁通过后生成可下载的 Windows 发布 artifact，但不会创建公开 Release。
+`.github/workflows/ci-cd.yml` 会在每个 PR 和推送到 `main` 时执行完整语料 Python 测试、对话服务测试、语料契约、模拟证据和 .NET Release 门禁。对话测试使用 `.github/requirements-dialogue.txt` 里按 Python 3.11 / Windows x64 钉住哈希的二进制轮子，工作目录是 `dialogue/`。它不下载语音模型，也不连接真实大模型；图测试使用脚本替身。手动运行 `workflow_dispatch` 会在门禁通过后生成可下载的 Windows 单 EXE artifact，但不会创建公开 Release，也不会打出 v1.6.0 那种带语音运行时的安装包。
 
-正式发布只接受位于 `origin/main` 上、形如 `v1.1.0` 或 `v1.1.0-rc.1` 的全新 annotated tag。流水线从 tag 派生程序集版本，例如 `v1.1.0` 必须生成 `ProductVersion=1.1.0+<40 位提交 SHA>`；随后验证单 EXE、隔离 WPF smoke、法律文件和 SHA-256，再由 GitHub-hosted runner 使用仓库内置 `GITHUB_TOKEN` 创建新的 GitHub Release。Release 标题、发布亮点、下载说明、完整性验证和构建来源均使用中文；只有许可证要求逐字保留的 `Required Notice` 继续使用官方英文原文。这样无需把本机失效的 `gh` keyring 登录用于大文件上传。
+正式单 EXE 发布只接受位于 `origin/main` 上、形如 `v1.1.0` 或 `v1.1.0-rc.1` 的全新 annotated tag。流水线从 tag 派生程序集版本，例如 `v1.7.0` 必须生成 `ProductVersion=1.7.0+<40 位提交 SHA>`；随后验证单 EXE、隔离 WPF smoke、法律文件和 SHA-256，再由 GitHub-hosted runner 使用仓库内置 `GITHUB_TOKEN` 创建新的 GitHub Release。这条 Release 的资产仍是单 EXE、ZIP 和法律文件。带语音运行时的安装包超过 GitHub 单附件 2GB 限制，继续由本机 Inno Setup 分段上传；`packaging/JiayiDesktopPet.iss` 和 `scripts/Assemble-VoiceRuntime.ps1` 里的源目录是打包装机上的路径，CI 不执行这两步。Release 标题、发布亮点、下载说明、完整性验证和构建来源均使用中文；只有许可证要求逐字保留的 `Required Notice` 继续使用官方英文原文。
 
 在干净且已推送的 `main` 上可用下面的入口发布。若本机访问 GitHub 需要代理，只让这一次 tag push 经过代理；真正的 EXE/ZIP 上传由云端流水线完成：
 
@@ -181,6 +213,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
 - legacy 内容只进入 archive/review/PII review；运行时只接受通过安全规则、authorship manifest 与逐行 ledger 校验的 `curated_authored` 行。空的 surface manifest 是“零 legacy runtime surface”的可验证证据。
 - 身份彩蛋只有精确列入 editorial manifest、且 ID、来源、允许的身份 marker、文本 SHA-256、分类、冷却和每日上限全部匹配时才可进入 `PersonaCorpus`；宽泛 marker 命中或 EXE 字节扫描不是批准。应用启动自校验该 exact manifest，Python validator 和程序集测试共同阻止未审批身份或隐私内容进入运行时。
 - IDE 前台、连续活跃和空闲返回仍是未采集的未来信号，默认未知。全屏是当前唯一已采集的窗口上下文，只按本文开头公开的 HWND/可见性/样式、DWM 几何与显示器边界判断；失败保持原始 `unknown`，不读取标题、进程、输入、剪贴板、用户文件、像素或网络数据。
+- 对话开关默认关闭。打开并填好接口之后，用户写下的句子会离开本机，发往该接口；接口密钥只放在被 gitignore 的 `config/llm.runtime.json`，不进入安装包。语音合成、自动台词和点击回复仍然留在本机。对话草稿先经过审计，不通过就改写一次，仍然不通过就改说本地短句，不把模型原文送去朗读。
 - 自动检查不能替代人物授权、虚构身份、关系边界和再分发权利的人工审批。
 
 ## 许可

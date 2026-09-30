@@ -269,6 +269,58 @@ jobs:
           "### Python unittest: $($pythonEvidence.TestsRun) tests, 0 skipped, 0 failures, 0 errors" |
             Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8
 
+      - name: Install pinned dialogue test dependencies
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $log = Join-Path $env:GITHUB_WORKSPACE 'ci-evidence/dialogue-pip.txt'
+          $direct = @(
+            'langgraph==1.2.11'
+            'langchain-core==1.6.3'
+            'langchain-openai==1.6.2'
+            'langgraph-checkpoint-sqlite==3.1.1'
+          )
+          $pinned = Get-Content -LiteralPath '.github/requirements-dialogue.txt' -Raw -Encoding utf8
+          $missing = @($direct | Where-Object { -not $pinned.Contains($_) })
+          if ($missing.Count -ne 0) {
+            throw "dialogue/requirements.txt pins are missing from .github/requirements-dialogue.txt: $($missing -join ', ')"
+          }
+          $output = @(& python -m pip install `
+            --disable-pip-version-check `
+            --require-hashes `
+            --only-binary=:all: `
+            --requirement .github/requirements-dialogue.txt 2>&1)
+          $exitCode = $LASTEXITCODE
+          $output | Tee-Object -FilePath $log
+          if ($exitCode -ne 0) {
+            throw "Pinned dialogue dependency installation failed with exit code $exitCode."
+          }
+
+      - name: Run dialogue service tests
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $log = Join-Path $env:GITHUB_WORKSPACE 'ci-evidence/dialogue-tests.txt'
+          Push-Location dialogue
+          try {
+            $output = @(& python -m unittest discover -s tests -v 2>&1)
+            $exitCode = $LASTEXITCODE
+          }
+          finally {
+            Pop-Location
+          }
+          $output | Tee-Object -FilePath $log
+          if ($exitCode -ne 0) {
+            throw "Dialogue tests failed with exit code $exitCode."
+          }
+
+          Import-Module -Name (Join-Path $env:GITHUB_WORKSPACE 'scripts/Ci-TestEvidence.Core.psm1') -Force
+          $dialogueEvidence = Get-PythonUnittestEvidence -Lines $output
+          $dialogueEvidenceLines = @(
+            ConvertTo-CiTestEvidenceLines -Prefix 'Dialogue' -Evidence $dialogueEvidence
+          )
+          $dialogueEvidenceLines | Add-Content -LiteralPath $log -Encoding utf8
+          "### Dialogue unittest: $($dialogueEvidence.TestsRun) tests, 0 skipped, 0 failures, 0 errors" |
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8
+
       - name: Restore .NET solution
         run: |
           $ErrorActionPreference = 'Stop'
@@ -910,10 +962,9 @@ jobs:
 
           ## 发布亮点
 
-          - 右键菜单改到人物旁边打开，不再挡住佳怡。
-          - 开发者模式可以按分类查看语料库。同一主题下重复的那一层编号不再单独展开，目录文字按整行自适应。
-          - 测试参数放在「开发者模式 → 测试参数」的下一级菜单里，可改这一次运行的说话间隔和气泡停留，不会改语料文件。
-          - 语料面板和菜单使用同一套奶油粉圆角主题。
+          - 右键菜单在人物旁边打开。开发者模式可以按分类查看语料库，测试参数放在「开发者模式 → 测试参数」里，只影响这一次运行。
+          - 对话开关默认关闭。本工作流发布的单 EXE 不附带语音运行时或对话 Python；带这两份运行时的安装版是已发布的 v1.6.0，由本机 Inno Setup 分段上传。
+          - 打开对话并填写接口后，句子发往该接口；语音合成留在本机。审计不过的模型原文不会拿去朗读。
           - 运行库仍是 v1.4.0 的 82,132 条、1,723 个语义场景，SHA-256 仍为 339358c524785db30badf420a3bdc2b89c7753486e907ff1a5216f68ca5d7ece。
 
           ## 验证结果
@@ -938,8 +989,8 @@ jobs:
 
           ## 离线、单 EXE 与签名说明
 
-          - 应用完全离线运行，不读取输入内容、剪贴板或窗口标题，也不枚举用户目录。
-          - $noUpdateClaim；升级时需要由用户手动下载新版本并替换 EXE。
+          - 自动台词、点击、拖动和菜单不读取输入内容、剪贴板或窗口标题，也不枚举用户目录。对话开关默认关闭；不打开时，这个单 EXE 不向大模型发请求。
+          - $noUpdateClaim；升级时需要由用户手动下载新版本并替换 EXE。带语音运行时的安装包不由这条单 EXE 流水线生成。
           - Jiayi-Desktop-Pet.exe 是 self-contained 的 Windows x64 单 EXE，旁边不需要应用 DLL、JSON 或 PDB。
           - $unsignedClaim；从网络下载时，Windows SmartScreen 或安全软件可能显示信誉提示。
 
