@@ -37,9 +37,7 @@ public sealed class AnimationControllerTests
                 hearts);
 
             controller.StartIdle();
-            Assert.False(breathing.HasAnimatedProperties);
-            Assert.Equal(1, breathing.ScaleX);
-            Assert.Equal(1, breathing.ScaleY);
+            Assert.True(breathing.HasAnimatedProperties);
             Assert.True(sway.HasAnimatedProperties);
             Assert.True(floating.HasAnimatedProperties);
 
@@ -355,7 +353,7 @@ public sealed class AnimationControllerTests
             {
                 controller.StartIdle();
                 var idleClocks = controller.ActiveClocks;
-                Assert.Equal(2, idleClocks.Count);
+                Assert.Equal(4, idleClocks.Count);
                 foreach (var clock in idleClocks)
                 {
                     clock.Controller!.SeekAlignedToLastTick(
@@ -420,10 +418,10 @@ public sealed class AnimationControllerTests
                     controller.StartIdle();
                 }
 
-                Assert.Equal(2, controller.ActiveClockCount);
+                Assert.Equal(4, controller.ActiveClockCount);
                 var completions = 0;
                 controller.PlayBlink(doubleBlink: false, () => completions++);
-                Assert.Equal(3, controller.ActiveClockCount);
+                Assert.Equal(5, controller.ActiveClockCount);
 
                 controller.Dispose();
                 controller.Dispose();
