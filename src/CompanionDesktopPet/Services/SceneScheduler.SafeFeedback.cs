@@ -136,7 +136,9 @@ public sealed partial class SceneScheduler
                             && TriggerAndContextMatch(scene, context, contextTokens, history))
             .Where(scene => !retainCooldownsAndAdjacency
                             || (!history.IsSemanticGroupCoolingDown(scene, context.Now)
-                                && history.MeetsAdjacencyAndRecentQuotas(scene)))
+                                && history.MeetsAdjacencyAndRecentQuotas(
+                                    scene,
+                                    PersonaForest.IsClose(context.Relationship))))
             .Where(scene => HasSafeLine(
                 scene,
                 context.Now,
@@ -144,7 +146,7 @@ public sealed partial class SceneScheduler
                 previousText,
                 retainCooldownsAndAdjacency,
                 lineEligibility))
-            .Select(scene => Score(scene, recent))
+            .Select(scene => Score(scene, recent, context: context))
             .ToList();
 
         while (candidates.Count > 0)

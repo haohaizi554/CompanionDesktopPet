@@ -47,7 +47,8 @@ public sealed record SceneContext(
     TimeSpan UserIdle = default,
     DialogueTreeKind? PreferredTree = null,
     DialogueCategory? PreviousCategory = null,
-    bool EffectiveFullscreen = false);
+    bool EffectiveFullscreen = false,
+    string Relationship = "");
 
 public sealed record SceneHistoryEntry(
     [property: JsonRequired] string SceneId,
@@ -279,7 +280,10 @@ public sealed class SceneHistory
         }
     }
 
-    public bool MeetsAdjacencyAndRecentQuotas(SceneDefinition scene)
+    public bool MeetsAdjacencyAndRecentQuotas(SceneDefinition scene) =>
+        MeetsAdjacencyAndRecentQuotas(scene, closeRelationship: false);
+
+    public bool MeetsAdjacencyAndRecentQuotas(SceneDefinition scene, bool closeRelationship)
     {
         lock (_sync)
         {
@@ -298,7 +302,7 @@ public sealed class SceneHistory
                 return false;
             }
 
-            if (!MeetsRareRecentQuotas(scene))
+            if (!MeetsRareRecentQuotas(scene, closeRelationship))
             {
                 return false;
             }
@@ -309,11 +313,14 @@ public sealed class SceneHistory
         }
     }
 
-    public bool MeetsRareRecentQuotas(SceneDefinition scene)
+    public bool MeetsRareRecentQuotas(SceneDefinition scene) =>
+        MeetsRareRecentQuotas(scene, closeRelationship: false);
+
+    public bool MeetsRareRecentQuotas(SceneDefinition scene, bool closeRelationship)
     {
         lock (_sync)
         {
-            if (!MeetsRelationshipProfileQuota(scene))
+            if (!MeetsRelationshipProfileQuota(scene, closeRelationship))
             {
                 return false;
             }
@@ -333,7 +340,10 @@ public sealed class SceneHistory
         }
     }
 
-    public bool MeetsRelationshipProfileQuota(SceneDefinition scene)
+    public bool MeetsRelationshipProfileQuota(SceneDefinition scene) =>
+        MeetsRelationshipProfileQuota(scene, closeRelationship: false);
+
+    public bool MeetsRelationshipProfileQuota(SceneDefinition scene, bool closeRelationship)
     {
         lock (_sync)
         {
@@ -341,7 +351,7 @@ public sealed class SceneHistory
             {
                 "warm_friend" => CandidateWindowCount(
                     20,
-                    entry => entry.RelationshipProfile == "warm_friend") <= 2,
+                    entry => entry.RelationshipProfile == "warm_friend") <= (closeRelationship ? 6 : 2),
                 "nickname_easter_egg" => CandidateWindowCount(
                     100,
                     entry => entry.RelationshipProfile == "nickname_easter_egg") <= 1,
@@ -687,7 +697,7 @@ public sealed partial class SceneScheduler
             .ToArray();
         var historyEntries = history.SnapshotRecentEntries(PersonaContractGenerated.SourceTierRecentWindow);
         var candidates = ApplySourceTierPolicy(eligibleScenes, historyEntries)
-            .Select(scene => Score(scene, recent, SourceTierScoreBonus(historyEntries, scene.SourceTier)))
+            .Select(scene => Score(scene, recent, SourceTierScoreBonus(historyEntries, scene.SourceTier), context))
             .ToArray();
         return ChooseBestWithEligibleLine(candidates, context.Now, history, random, lineEligibility);
     }
@@ -712,11 +722,11 @@ public sealed partial class SceneScheduler
         var quotaRelaxedScenes = AvailableScenes(context)
             .Where(scene => TriggerAndContextMatch(scene, context, contextTokens, history))
             .Where(scene => !history.IsSemanticGroupCoolingDown(scene, context.Now))
-            .Where(history.MeetsRareRecentQuotas)
+            .Where(scene => history.MeetsRareRecentQuotas(scene, PersonaForest.IsClose(context.Relationship)))
             .ToArray();
         var historyEntries = history.SnapshotRecentEntries(PersonaContractGenerated.SourceTierRecentWindow);
         var quotaRelaxed = ApplySourceTierPolicy(quotaRelaxedScenes, historyEntries)
-            .Select(scene => Score(scene, recent, SourceTierScoreBonus(historyEntries, scene.SourceTier)))
+            .Select(scene => Score(scene, recent, SourceTierScoreBonus(historyEntries, scene.SourceTier), context))
             .ToArray();
         if (ChooseBestWithEligibleLine(quotaRelaxed, context.Now, history, random, lineEligibility) is { } quotaRelaxedScene)
         {
@@ -725,7 +735,7 @@ public sealed partial class SceneScheduler
 
         var reusableScenes = AvailableScenes(context)
             .Where(scene => TriggerAndContextMatch(scene, context, contextTokens, history))
-            .Where(history.MeetsRareRecentQuotas)
+            .Where(scene => history.MeetsRareRecentQuotas(scene, PersonaForest.IsClose(context.Relationship)))
             .Where(scene => scene.Lines.Any(line =>
                 IsLineEligible(line, lineEligibility)
                 && line.Enabled
@@ -736,7 +746,13 @@ public sealed partial class SceneScheduler
             return null;
         }
 
-        return SelectReusableClickFallback(reusableScenes, history, random, lineEligibility);
+        return SelectReusableClickFallback(
+            reusableScenes,
+            history,
+            random,
+            lineEligibility,
+            PersonaForest.IsClose(context.Relationship),
+            context);
     }
 
     private static SceneDefinition? ChooseBest(IReadOnlyList<ScoredScene> candidates, Random random)
@@ -748,10 +764,10 @@ public sealed partial class SceneScheduler
 
         var bestBand = candidates.Max(candidate => candidate.Band);
         var band = candidates.Where(candidate => candidate.Band == bestBand).OrderBy(candidate => candidate.Scene.Id).ToArray();
-        var roll = random.NextDouble() * band.Sum(candidate => candidate.Scene.Weight);
+        var roll = random.NextDouble() * band.Sum(candidate => candidate.Roll);
         foreach (var candidate in band)
         {
-            roll -= candidate.Scene.Weight;
+            roll -= candidate.Roll;
             if (roll <= 0)
             {
                 return candidate.Scene;
@@ -790,7 +806,9 @@ public sealed partial class SceneScheduler
         IReadOnlyList<SceneDefinition> scenes,
         SceneHistory history,
         Random random,
-        Func<DialogueLine, bool>? lineEligibility = null)
+        Func<DialogueLine, bool>? lineEligibility = null,
+        bool closeRelationship = false,
+        SceneContext? context = null)
     {
         ArgumentNullException.ThrowIfNull(scenes);
         ArgumentNullException.ThrowIfNull(history);
@@ -798,7 +816,7 @@ public sealed partial class SceneScheduler
 
         var playback = history.SnapshotRecentEntries(PersonaContractGenerated.SourceTierRecentWindow);
         var quotaEligibleScenes = ApplySourceTierPolicy(
-            scenes.Where(history.MeetsRareRecentQuotas).ToArray(), playback);
+            scenes.Where(scene => history.MeetsRareRecentQuotas(scene, closeRelationship)).ToArray(), playback);
         if (quotaEligibleScenes.Length == 0)
         {
             return null;
@@ -825,7 +843,7 @@ public sealed partial class SceneScheduler
                 && history.MeetsLineExposureQuota(line)
                 && (!hasNonRepeatingLine || line.Id != lastLineId)
                 && !lastPlayedAt.ContainsKey(line.Id)))
-            .Select(scene => Score(scene, recent, SourceTierScoreBonus(playback, scene.SourceTier)))
+            .Select(scene => Score(scene, recent, SourceTierScoreBonus(playback, scene.SourceTier), context))
             .ToArray();
         if (ChooseBest(scenesWithUnusedLines, random) is { } unusedScene)
         {
@@ -848,7 +866,7 @@ public sealed partial class SceneScheduler
                 && line.Enabled
                 && history.MeetsLineExposureQuota(line)
                 && (!hasNonRepeatingLine || line.Id != lastLineId)))
-            .Select(scene => Score(scene, recent, SourceTierScoreBonus(playback, scene.SourceTier)))
+            .Select(scene => Score(scene, recent, SourceTierScoreBonus(playback, scene.SourceTier), context))
             .ToArray();
         var selectedScene = ChooseBest(reusableScenes, random);
         if (selectedScene is null)
@@ -923,7 +941,7 @@ public sealed partial class SceneScheduler
             ? ContextMatches(scene, contextTokens)
             : TriggerAndContextMatch(scene, context, contextTokens, history))
         && !history.IsSemanticGroupCoolingDown(scene, context.Now)
-        && history.MeetsAdjacencyAndRecentQuotas(scene)
+        && history.MeetsAdjacencyAndRecentQuotas(scene, PersonaForest.IsClose(context.Relationship))
         && (bypassInterruptionBudget
             || InterruptionBudget.CanPlay(scene, context.Now, history, context.EffectiveFullscreen));
 
@@ -1050,7 +1068,8 @@ public sealed partial class SceneScheduler
     private static ScoredScene Score(
         SceneDefinition scene,
         RecentHistoryProfile recent,
-        double sourceTierBonus = 0)
+        double sourceTierBonus = 0,
+        SceneContext? context = null)
     {
         var total = recent.Total;
         var groupObserved = total == 0
@@ -1067,7 +1086,8 @@ public sealed partial class SceneScheduler
         var drySharpBonus = scene.Tone == "dry_sharp" ? drySharpDeficit * 200 : 0;
         var weightBonus = scene.Weight * 0.5;
         var trained = LineSelectionModel.Shared.Adjustment(scene.SemanticGroup, recent.Entries);
-        var score = (DialogueForest.CategoryGroupWeights[scene.CategoryGroup] - groupObserved) * 100
+        var persona = context is null ? 0 : PersonaBias(scene, recent, context);
+        var quota = (DialogueForest.CategoryGroupWeights[scene.CategoryGroup] - groupObserved) * 100
                     + (DialogueForest.OutputModeTargets[scene.OutputMode] - modeObserved) * 35
                     + weightBonus
                     - scene.InterruptionCost * 0.75
@@ -1075,8 +1095,51 @@ public sealed partial class SceneScheduler
                     + drySharpBonus
                     + sourceTierBonus
                     + trained;
-        return new ScoredScene(scene, score, (int)Math.Floor(score - weightBonus));
+        var bandScore = quota + (context is not null && PersonaForest.IsClose(context.Relationship) ? persona : 0);
+        var roll = scene.Weight * Math.Max(0.35, 1 + persona / 40);
+        return new ScoredScene(scene, quota + persona, (int)Math.Floor(bandScore - weightBonus), roll);
     }
+
+    private static double PersonaBias(SceneDefinition scene, RecentHistoryProfile recent, SceneContext context)
+    {
+        string? lastTone = null;
+        DialogueCategory? lastCategory = null;
+        DialogueCategory? categoryBeforeLast = null;
+        var entries = recent.Entries;
+        if (entries.Count > 0)
+        {
+            var last = entries[^1];
+            lastCategory = last.Category;
+            if (ToneByScene.Value.TryGetValue(last.SceneId, out var tone))
+            {
+                lastTone = tone;
+            }
+
+            if (entries.Count > 1)
+            {
+                categoryBeforeLast = entries[^2].Category;
+            }
+        }
+
+        return PersonaForest.Adjustment(
+            scene,
+            context.Relationship,
+            lastTone,
+            lastCategory,
+            categoryBeforeLast,
+            TemporalDialogueService.GetTimeContextToken(context.Now));
+    }
+
+    private static readonly Lazy<Dictionary<string, string>> ToneByScene = new(() =>
+    {
+        var tones = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var scene in SceneCatalog.All)
+        {
+            tones[scene.Id] = scene.Tone;
+        }
+
+        return tones;
+    });
 
     private sealed record RecentHistoryProfile(
         int Total,
@@ -1114,5 +1177,5 @@ public sealed partial class SceneScheduler
         }
     }
 
-    private sealed record ScoredScene(SceneDefinition Scene, double Score, int Band);
+    private sealed record ScoredScene(SceneDefinition Scene, double Score, int Band, double Roll);
 }

@@ -12,6 +12,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 
 from persona_dialogue.graph import build_graph, remember_line
 from persona_dialogue.llm import LlmConfig, build_model
+from persona_dialogue.persona_setting import PersonaSetting
 from persona_dialogue.retrieve import LineIndex
 
 
@@ -34,7 +35,13 @@ def main() -> int:
         return 1
 
     with SqliteSaver.from_conn_string(str(args.checkpoint)) as saver:
-        graph = build_graph(model, soul, index, saver)
+        graph = build_graph(
+            model,
+            soul,
+            index,
+            saver,
+            PersonaSetting(args.checkpoint.with_name("persona.json")),
+        )
         _emit({"type": "ready", "lines": index.count})
         for raw in sys.stdin:
             line = raw.strip()

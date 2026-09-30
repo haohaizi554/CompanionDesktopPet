@@ -52,5 +52,6 @@ public sealed record PetTuning
     public double SpeechRepetition { get; init; } = 1.35;
     public int TopK { get; init; } = 15;
     public double TopP { get; init; } = 1;
+    public int ReplyMaxChars { get; init; } = 80;
     public bool VoiceEnabled { get; init; } = true;
 }

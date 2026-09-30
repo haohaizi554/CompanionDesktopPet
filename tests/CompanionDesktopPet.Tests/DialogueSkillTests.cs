@@ -27,6 +27,7 @@ public sealed class DialogueSkillTests
         Assert.Equal(8, state.Timing.TopK);
         Assert.Equal(1, state.Timing.TopP);
         Assert.Equal(1, timing.SpeechSpeed);
+        Assert.Equal(80, state.Timing.ReplyMaxChars);
     }
 
     [Fact]

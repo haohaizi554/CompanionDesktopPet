@@ -38,6 +38,7 @@ public static class DialogueSkills
             ["speech_repetition"] = timing.SpeechRepetition,
             ["top_k"] = timing.TopK,
             ["top_p"] = timing.TopP,
+            ["reply_max_chars"] = timing.ReplyMaxChars,
             ["scale"] = scale.ToString(),
             ["always_on_top"] = alwaysOnTop,
             ["animation_paused"] = animationPaused,

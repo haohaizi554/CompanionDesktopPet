@@ -69,7 +69,7 @@ class GraphTests(unittest.TestCase):
         self.assertEqual("那你就靠一会儿。", result["draft"])
         prompt = model.seen[0][0]
         self.assertIn("湿热的天气把树叶养得很绿。", prompt)
-        self.assertIn("很少直接叫", prompt)
+        self.assertIn("先连上这句的意思", prompt)
         self.assertIn("我有点累", model.seen[0][-1])
 
     def test_empty_input_does_not_call_the_model(self) -> None:
@@ -126,8 +126,9 @@ class GraphTests(unittest.TestCase):
                 graph = build_graph(model, SOUL, index, saver)
                 config = {"configurable": {"thread_id": "jiayi"}, "recursion_limit": 12}
                 first = graph.invoke({"user_text": "语速慢一点", "settings": {}}, config)
-                self.assertEqual("好，我慢一点说。", first["draft"])
+                self.assertEqual("好，气泡我改好了。", first["draft"])
                 self.assertEqual([{"skill": "set_bubble", "seconds": 8}], first["actions"])
+                self.assertEqual(1, model.phase)
 
                 second = graph.invoke({"user_text": "嗯", "settings": first["settings"]}, config)
                 self.assertEqual("我听着呢。", second["draft"])
@@ -149,8 +150,6 @@ class ToolThenSpeechModel:
                 content="",
                 tool_calls=[{"name": "set_bubble", "args": {"seconds": 8}, "id": "c1"}],
             )
-        if self.phase == 2:
-            return AIMessage(content="好，我慢一点说。")
         return AIMessage(content="我听着呢。")
 
 

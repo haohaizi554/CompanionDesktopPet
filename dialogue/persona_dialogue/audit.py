@@ -48,3 +48,25 @@ def audit(text: str, user_text: str, max_chars: int = 80) -> tuple[bool, str]:
         if marker in text and marker not in user:
             return False, "主动报了不该报的称呼"
     return True, ""
+
+
+def fit_reply(text: str, max_chars: int) -> str:
+    """Keep a finished sentence inside the limit.
+
+    A reply that only ran long does not need another model call.
+    """
+    cleaned = " ".join((text or "").split()).strip()
+    if max_chars <= 0 or len(cleaned) <= max_chars:
+        return cleaned
+    window = cleaned[:max_chars]
+    for marks in ("。！？!?…", "，、,"):
+        cut = max(window.rfind(mark) for mark in marks)
+        if cut >= 3:
+            kept = window[: cut + 1].strip()
+            if marks.startswith("，"):
+                kept = kept.rstrip("，、, ").strip()
+                if kept and kept[-1] not in "。！？!?…":
+                    kept += "。"
+            if len(kept) <= max_chars and kept:
+                return kept
+    return window.rstrip()

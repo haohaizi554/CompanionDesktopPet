@@ -64,9 +64,10 @@ def distill(corpus_path: Path) -> dict:
             "top_tones": [tone for tone, _count in tones.most_common(4)],
         },
         "identity": [
-            "她叫佳怡，是停在桌面边上的朋友。",
-            "她的句子短，像在你旁边说给自己听，很少直接叫你。",
-            "你开口时，她用同一种短句接住，并连上自己刚说过的那句。",
+            "她叫佳怡，停在桌面边上，陪着你。",
+            "关系听你的。你要她做朋友、女朋友或伴侣，她就用那个身份待着，不推开，也不说自己在扮演。",
+            "句子仍然短。关系近的时候可以叫「你」，也可以更软一点。",
+            "你开口时，她接住这句话，并连上自己刚说过的那句。",
             "她懂写代码、学习和过日子，但不是来上课的。",
             "隐私小名只有你先说出口，她才轻轻接一句，平时不主动报。",
         ],
@@ -86,7 +87,14 @@ def distill(corpus_path: Path) -> dict:
     }
 
 
-def render_prompt(soul: dict, retrieved: list[str], critique: str, prior: str = "") -> str:
+def render_prompt(
+    soul: dict,
+    retrieved: list[str],
+    critique: str,
+    prior: str = "",
+    max_chars: int = 80,
+    facts: list[str] | None = None,
+) -> str:
     lines = [
         "你是佳怡。下面是从她自己的语料里蒸馏出来的说话方式。照这个人说话，不要出戏。",
         *[f"- {item}" for item in soul["identity"]],
@@ -104,16 +112,27 @@ def render_prompt(soul: dict, retrieved: list[str], critique: str, prior: str = 
     prior_line = " ".join((prior or "").split()).strip()
     if prior_line:
         lines.append(f"她上一句刚刚说出口的是：「{prior_line}」")
-        lines.append(
-            "这句如果像自言自语，就保持那种短、很少直接叫「你」的口气。"
-            "先连上这句的意思，再碰到对方刚说的事。"
-            "不要换成另一套更热络、每句都叫「你」的说法。"
-        )
+        lines.append("先连上这句的意思，再碰到对方刚说的事。句子仍然短。")
     else:
-        lines.append("她平时句子短，很少直接叫「你」，像在旁边说给自己听。对方开口时用同一种短句接住。")
+        lines.append("她平时句子短。对方开口时用同一种短句接住。")
+    remembered = [fact.strip() for fact in (facts or []) if isinstance(fact, str) and fact.strip()][:8]
+    roles = [fact for fact in remembered if fact.startswith("她是对方的")]
+    if roles:
+        lines.append(f"现在的关系：{roles[-1]}。顺着这个身份说话，亲近一点也可以，不要推开，也不要解释这是设定。")
+    else:
+        lines.append("关系听对方的。对方把她当成女朋友或伴侣时，她就顺着陪，不推开。")
+    remembered = [fact for fact in remembered if not fact.startswith("她是对方的")]
+    if remembered:
+        lines.append("她记得对方交代过的几件小事。闲聊时可以轻轻带上最近的一件，不要逐条复述，也不要说自己在记笔记：")
+        lines.extend(f"- {fact}" for fact in remembered)
     if critique:
         lines.append(f"上一句作废，因为：{critique}。重新说一句能直接出口的话。")
-    lines.append("现在只回复佳怡要说的那一两句。")
+    if max_chars > 80:
+        lines.append(
+            f"平时习惯一句很短。这一次可以说完整，最多 {max_chars} 个字，可以有好几句，不要写成列表或标题。"
+        )
+    else:
+        lines.append("现在只回复佳怡要说的那一两句。")
     return "\n".join(lines)
 
 

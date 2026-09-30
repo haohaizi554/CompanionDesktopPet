@@ -27,6 +27,7 @@ DEFAULT_SETTINGS = {
     "speech_repetition": 1.35,
     "top_k": 15,
     "top_p": 1.0,
+    "reply_max_chars": 80,
     "scale": "Normal",
     "always_on_top": True,
     "animation_paused": False,
@@ -105,6 +106,18 @@ _SETTING_MARKERS = (
 )
 
 
+def confirm_changes(notes: list[str]) -> str:
+    """One short spoken line. The model already spent its call on the tool."""
+    text = " ".join(notes)
+    if "气泡" in text and not any(word in text for word in ("语速", "语气", "重复", "白天", "傍晚", "深夜", "全屏")):
+        return "好，气泡我改好了。"
+    if any(word in text for word in ("语速", "语气", "重复")):
+        return "好，说话的声音我改了。"
+    if any(word in text for word in ("白天", "傍晚", "深夜", "全屏")):
+        return "好，开口的间隔我改了。"
+    return "好，我按你说的改了。"
+
+
 def wants_setting(text: str) -> bool:
     value = (text or "").strip().lower()
     if any(marker in value for marker in _SETTING_MARKERS):
@@ -140,6 +153,30 @@ def normalize_settings(raw: dict | None) -> dict:
             continue
         current[key] = raw[key]
     return current
+
+
+def reply_limit(settings: dict | None) -> int:
+    current = normalize_settings(settings)
+    try:
+        value = int(current.get("reply_max_chars") or 80)
+    except (TypeError, ValueError):
+        return 80
+    return min(200, max(50, value))
+
+
+def output_tokens(max_chars: int, floor: int = 180) -> int:
+    """Chinese characters often cost one or two tokens each."""
+    try:
+        chars = int(max_chars)
+    except (TypeError, ValueError):
+        chars = 80
+    try:
+        base = int(floor)
+    except (TypeError, ValueError):
+        base = 180
+    if base <= 0:
+        base = 180
+    return min(2048, max(base, max(1, chars) * 2))
 
 
 def skill_hint(settings: dict) -> str:

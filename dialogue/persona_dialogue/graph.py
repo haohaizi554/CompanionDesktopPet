@@ -13,13 +13,18 @@ from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage, Syst
 from langgraph.graph import END, START, StateGraph, add_messages
 from typing_extensions import Annotated, TypedDict
 
-from persona_dialogue.audit import audit, clean_reply
+from persona_dialogue.audit import audit, clean_reply, fit_reply
 from persona_dialogue.distill import render_prompt
+from persona_dialogue.notebook import local_turn, sanitize_facts
+from persona_dialogue.persona_setting import PersonaSetting
 from persona_dialogue.retrieve import LineIndex
 from persona_dialogue.skills import (
     SKILL_TOOLS,
     apply_tool_calls,
+    confirm_changes,
     normalize_settings,
+    output_tokens,
+    reply_limit,
     setting_prompt,
     wants_setting,
 )
@@ -39,9 +44,19 @@ class DialogueState(TypedDict, total=False):
     failure: str
     settings: dict
     actions: list
+    facts: list
 
 
-def build_graph(model, soul: dict, index: LineIndex, checkpointer):
+def build_graph(model, soul: dict, index: LineIndex, checkpointer, persona: PersonaSetting | None = None):
+    persona = persona or PersonaSetting(None)
+
+    def _known_facts(state: DialogueState) -> list[str]:
+        facts = [fact for fact in sanitize_facts(state.get("facts")) if not fact.startswith("她是对方的")]
+        persona.adopt(sanitize_facts(state.get("facts")))
+        relation = persona.get()
+        if relation:
+            return [relation, *facts]
+        return facts
     def trim(state: DialogueState) -> dict:
         messages = state.get("messages") or []
         if len(messages) <= _MEMORY_LIMIT:
@@ -75,6 +90,23 @@ def build_graph(model, soul: dict, index: LineIndex, checkpointer):
                 "retrieved": [],
                 "actions": [],
             }
+        kept = [fact for fact in sanitize_facts(state.get("facts")) if not fact.startswith("她是对方的")]
+        persona.adopt(sanitize_facts(state.get("facts")))
+        local = local_turn(text, kept, relationship=persona.get())
+        if local:
+            if local.get("relationship"):
+                persona.set(local["relationship"])
+            return {
+                "user_text": text,
+                "draft": local["draft"],
+                "accepted": True,
+                "failure": "local",
+                "attempts": 99,
+                "retrieved": [],
+                "actions": local["actions"],
+                "facts": local["facts"],
+                "messages": [HumanMessage(content=text), AIMessage(content=local["draft"])],
+            }
         return {
             "user_text": text,
             "draft": "",
@@ -87,7 +119,17 @@ def build_graph(model, soul: dict, index: LineIndex, checkpointer):
         }
 
     def retrieve(state: DialogueState) -> dict:
-        return {"retrieved": index.search(state.get("user_text") or "", limit=4)}
+        spoken: list[str] = []
+        for message in reversed(state.get("messages") or []):
+            if not isinstance(message, AIMessage):
+                continue
+            text = _message_text(message).strip()
+            if not text:
+                continue
+            spoken.append(text)
+            if len(spoken) == 4:
+                break
+        return {"retrieved": index.search(state.get("user_text") or "", limit=4, exclude=spoken)}
 
     def draft(state: DialogueState) -> dict:
         settings = normalize_settings(state.get("settings"))
@@ -107,14 +149,11 @@ def build_graph(model, soul: dict, index: LineIndex, checkpointer):
                     "actions": [],
                     "settings": settings,
                 }
-            spoken = model.invoke(
-                [
-                    SystemMessage(content="你是佳怡。用一句不超过二十个字的口语确认，不要提技能，不要列数字。"),
-                    HumanMessage(content="对方说：" + text + "。结果：" + " ".join(notes)),
-                ]
-            )
-            content = _message_text(spoken) or "好，我按你说的改了。"
-            return {"draft": content, "actions": actions, "settings": settings}
+            return {
+                "draft": confirm_changes(notes),
+                "actions": actions,
+                "settings": settings,
+            }
 
         history = list(state.get("messages") or [])[-12:]
         prompt = render_prompt(
@@ -122,8 +161,10 @@ def build_graph(model, soul: dict, index: LineIndex, checkpointer):
             state.get("retrieved") or [],
             state.get("failure") or "",
             prior=_prior_spoken(history),
+            max_chars=reply_limit(settings),
+            facts=_known_facts(state),
         )
-        response = model.invoke([SystemMessage(content=prompt), *history])
+        response = _speak(model, [SystemMessage(content=prompt), *history], reply_limit(settings))
         return {"draft": _message_text(response), "actions": [], "settings": settings}
 
     def rewrite(state: DialogueState) -> dict:
@@ -133,13 +174,24 @@ def build_graph(model, soul: dict, index: LineIndex, checkpointer):
             state.get("retrieved") or [],
             state.get("failure") or "",
             prior=_prior_spoken(history),
+            max_chars=reply_limit(state.get("settings")),
+            facts=_known_facts(state),
         )
-        response = model.invoke([SystemMessage(content=prompt), *history])
+        response = _speak(model, [SystemMessage(content=prompt), *history], reply_limit(state.get("settings")))
         return {"draft": _message_text(response)}
 
     def inspect(state: DialogueState) -> dict:
         cleaned = clean_reply(state.get("draft") or "")
-        accepted, reason = audit(cleaned, state.get("user_text") or "")
+        limit = reply_limit(state.get("settings"))
+        user_text = state.get("user_text") or ""
+        accepted, reason = audit(cleaned, user_text, max_chars=limit)
+        if not accepted and reason == "太长":
+            fitted = fit_reply(cleaned, limit)
+            fitted_ok, fitted_reason = audit(fitted, user_text, max_chars=limit)
+            if fitted_ok:
+                cleaned, accepted, reason = fitted, True, ""
+            else:
+                reason = fitted_reason
         if accepted:
             return {
                 "draft": cleaned,
@@ -156,7 +208,9 @@ def build_graph(model, soul: dict, index: LineIndex, checkpointer):
 
     def fallback(state: DialogueState) -> dict:
         retrieved = state.get("retrieved") or []
-        text = next((line for line in retrieved if audit(line, state.get("user_text") or "")[0]), _FALLBACK)
+        limit = reply_limit(state.get("settings"))
+        user_text = state.get("user_text") or ""
+        text = next((line for line in retrieved if audit(line, user_text, max_chars=limit)[0]), _FALLBACK)
         return {
             "draft": text,
             "accepted": True,
@@ -234,6 +288,14 @@ def _prior_spoken(messages: list) -> str:
         if isinstance(message, AIMessage):
             return _message_text(message)
     return ""
+
+
+def _speak(model, messages, max_chars: int):
+    floor = getattr(model, "max_tokens", None)
+    tokens = output_tokens(max_chars, floor if isinstance(floor, int) and floor > 0 else 180)
+    if hasattr(model, "bind"):
+        model = model.bind(max_tokens=tokens)
+    return model.invoke(messages)
 
 
 def _invoke(model, messages, tools: bool, force: bool = False):

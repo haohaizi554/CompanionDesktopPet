@@ -234,6 +234,7 @@ public sealed class DialogueService
         var agent = compatibleSnapshot is null
             ? new OfflineCompanionAgent()
             : new OfflineCompanionAgent(compatibleSnapshot);
+        agent.UsePersonaRelationshipFile();
         agent.WarmUp();
         return agent;
     }

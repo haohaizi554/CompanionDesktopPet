@@ -38,6 +38,7 @@ public sealed class OfflineCompanionAgent : ICompanionDialogueAgent
     private readonly SceneHistory _history = new();
     private readonly SceneScheduler _scheduler = new();
     private readonly IdentitySessionExposure _identitySessionExposure = new();
+    private Func<string> _relationshipSource = static () => "";
     private readonly Func<SceneCatalogLoadResult> _catalogSnapshotLoader;
     private CharacterState? _state;
     private DialogueCategory? _lastCategory;
@@ -76,6 +77,8 @@ public sealed class OfflineCompanionAgent : ICompanionDialogueAgent
             Remember(line);
         }
     }
+
+    internal void UsePersonaRelationshipFile() => _relationshipSource = () => PersonaRelationship.Load();
 
     public int TurnCount
     {
@@ -186,7 +189,8 @@ public sealed class OfflineCompanionAgent : ICompanionDialogueAgent
             IsFullscreen: fullscreen.Observed,
             PreferredTree: preferredTree.Kind,
             PreviousCategory: _lastCategory,
-            EffectiveFullscreen: fullscreen.EffectiveQuietMode);
+            EffectiveFullscreen: fullscreen.EffectiveQuietMode,
+            Relationship: _relationshipSource());
         var bypassBudget = DialogueEventPolicy.BypassesInterruptionBudget(trigger);
         var scene = _scheduler.Select(
             context,
