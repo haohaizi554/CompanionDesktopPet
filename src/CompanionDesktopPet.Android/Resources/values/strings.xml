@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="awareness_description">佳怡用来判断当前画面是否铺满屏幕，以及你是不是回到了桌面。她只看窗口矩形和前台应用包名，不读窗口里的文字。</string>
+</resources>

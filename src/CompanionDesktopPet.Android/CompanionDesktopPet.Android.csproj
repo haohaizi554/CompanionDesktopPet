@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0-android</TargetFramework>
+    <SupportedOSPlatformVersion>26</SupportedOSPlatformVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationId>com.jiayi.companionpet</ApplicationId>
+    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>1.6.0</ApplicationDisplayVersion>
+    <RuntimeIdentifiers>android-arm64</RuntimeIdentifiers>
+    <AndroidLinkMode>None</AndroidLinkMode>
+    <EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>
+    <JavaSdkDirectory Condition="'$(JavaSdkDirectory)' == '' and Exists('$(LOCALAPPDATA)\CompanionDesktopPet\jdk-21\jdk-21.0.12.1+1\bin\java.exe')">$(LOCALAPPDATA)\CompanionDesktopPet\jdk-21\jdk-21.0.12.1+1</JavaSdkDirectory>
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\CompanionDesktopPet\Services\*.cs"
+             Exclude="..\CompanionDesktopPet\Services\TrayIconService.cs;..\CompanionDesktopPet\Services\TrayMenuTheme.cs;..\CompanionDesktopPet\Services\WorkAreaService.cs;..\CompanionDesktopPet\Services\AutoStartService.cs"
+             Link="Shared\Services\%(Filename)%(Extension)" />
+    <Compile Include="..\CompanionDesktopPet\Models\*.cs"
+             Link="Shared\Models\%(Filename)%(Extension)" />
+    <Compile Include="..\CompanionDesktopPet\UI\AutomaticDialogueCadenceController.cs"
+             Link="Shared\UI\AutomaticDialogueCadenceController.cs" />
+    <Compile Include="..\CompanionDesktopPet\UI\AutomaticDialogueRuntimeSnapshot.cs"
+             Link="Shared\UI\AutomaticDialogueRuntimeSnapshot.cs" />
+    <Compile Include="..\CompanionDesktopPet\UI\AmbientRuntimeSnapshot.cs"
+             Link="Shared\UI\AmbientRuntimeSnapshot.cs" />
+    <EmbeddedResource Include="..\..\data\optimized\persona-corpus-v2.tsv"
+                      Link="Assets\persona-corpus-v2.tsv"
+                      LogicalName="CompanionDesktopPet.Assets.persona-corpus-v2.tsv" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AndroidAsset Include="..\CompanionDesktopPet\Assets\character.png"
+                  Link="Assets\pet\character.png" />
+    <AndroidAsset Include="..\CompanionDesktopPet\Assets\character-blink-closed.png"
+                  Link="Assets\pet\blink.png" />
+    <AndroidAsset Include="..\CompanionDesktopPet\Assets\mouth-mid.png"
+                  Link="Assets\pet\mouth-mid.png" />
+    <AndroidAsset Include="..\CompanionDesktopPet\Assets\mouth-open.png"
+                  Link="Assets\pet\mouth-open.png" />
+    <AndroidAsset Include="..\..\voice\packs\jiayi\manifest.json"
+                  Link="Assets\voice\manifest.json" />
+    <AndroidAsset Include="..\..\voice\packs\jiayi\refs\*.wav"
+                  Link="Assets\voice\refs\%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>
