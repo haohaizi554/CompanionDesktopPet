@@ -49,7 +49,7 @@ public sealed record PetTuning
     public int BubbleSeconds { get; init; } = 5;
     public double SpeechSpeed { get; init; } = 1;
     public double SpeechTemperature { get; init; } = 1;
-    public double SpeechRepetition { get; init; } = 1.35;
+    public double SpeechRepetition { get; init; } = 1.4;
     public int TopK { get; init; } = 15;
     public double TopP { get; init; } = 1;
     public int ReplyMaxChars { get; init; } = 80;

@@ -166,19 +166,28 @@ public static class DialogueSkills
         var changed = false;
         if (TryDouble(action, "speed", out var speed))
         {
-            timing.SpeechSpeed = speed;
+            timing.SpeechSpeed = SnapSpeechIfLegal(
+                speed,
+                DeveloperTestParameters.MinimumSpeechSpeed,
+                DeveloperTestParameters.MaximumSpeechSpeed);
             changed = true;
         }
 
         if (TryDouble(action, "temperature", out var temperature))
         {
-            timing.SpeechTemperature = temperature;
+            timing.SpeechTemperature = SnapSpeechIfLegal(
+                temperature,
+                DeveloperTestParameters.MinimumSpeechTemperature,
+                DeveloperTestParameters.MaximumSpeechTemperature);
             changed = true;
         }
 
         if (TryDouble(action, "repetition", out var repetition))
         {
-            timing.SpeechRepetition = repetition;
+            timing.SpeechRepetition = SnapSpeechIfLegal(
+                repetition,
+                DeveloperTestParameters.MinimumSpeechRepetition,
+                DeveloperTestParameters.MaximumSpeechRepetition);
             changed = true;
         }
 
@@ -256,6 +265,11 @@ public static class DialogueSkills
         value = (int)number;
         return true;
     }
+
+    private static double SnapSpeechIfLegal(double value, double minimum, double maximum) =>
+        value >= minimum && value <= maximum && !double.IsNaN(value) && !double.IsInfinity(value)
+            ? DeveloperTestParameters.SnapSpeechStep(value, minimum, maximum)
+            : value;
 
     private static bool TryDouble(JsonElement action, string name, out double value)
     {

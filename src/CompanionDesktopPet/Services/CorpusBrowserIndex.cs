@@ -15,7 +15,20 @@ public sealed class CorpusFolder
 
     public CorpusFolder[] Children { get; }
 
-    public string Header => $"{Title}  {Lines.Length}";
+    public int Count => Lines.Length > 0 ? Lines.Length : CountChildren();
+
+    public string Header => $"{Title}  {Count}";
+
+    private int CountChildren()
+    {
+        var total = 0;
+        foreach (var child in Children)
+        {
+            total += child.Count;
+        }
+
+        return total;
+    }
 }
 
 public static class CorpusLabels
@@ -67,6 +80,53 @@ public static class CorpusBrowserIndex
     private static readonly Lazy<CorpusFolder> Snapshot = new(Build);
 
     public static CorpusFolder Root => Snapshot.Value;
+
+    private static readonly Lazy<CorpusFolder> OutlineSnapshot = new(BuildOutline);
+
+    public static CorpusFolder Outline => OutlineSnapshot.Value;
+
+    private static CorpusFolder BuildOutline()
+    {
+        var grouped = new Dictionary<DialogueCategoryGroup, Dictionary<DialogueCategory, List<DialogueLine>>>();
+        foreach (var line in PersonaCorpus.All)
+        {
+            if (!grouped.TryGetValue(line.CategoryGroup, out var categories))
+            {
+                categories = [];
+                grouped[line.CategoryGroup] = categories;
+            }
+
+            if (!categories.TryGetValue(line.Category, out var bucket))
+            {
+                bucket = [];
+                categories[line.Category] = bucket;
+            }
+
+            bucket.Add(line);
+        }
+
+        var children = new List<CorpusFolder>();
+        foreach (var group in Enum.GetValues<DialogueCategoryGroup>())
+        {
+            if (!grouped.TryGetValue(group, out var categories))
+            {
+                continue;
+            }
+
+            var categoryFolders = new List<CorpusFolder>();
+            foreach (var category in Enum.GetValues<DialogueCategory>())
+            {
+                if (categories.TryGetValue(category, out var bucket))
+                {
+                    categoryFolders.Add(new CorpusFolder(CorpusLabels.Category(category), bucket.ToArray(), []));
+                }
+            }
+
+            children.Add(new CorpusFolder(CorpusLabels.Group(group), [], categoryFolders.ToArray()));
+        }
+
+        return new CorpusFolder("全库", [], children.ToArray());
+    }
 
     private static CorpusFolder Build()
     {

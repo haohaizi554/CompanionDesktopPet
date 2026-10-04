@@ -5,6 +5,25 @@ namespace CompanionDesktopPet.Tests;
 public sealed class SpeechFragmentsTests
 {
     [Fact]
+    public void AReplyDropsALeadingCopyOfThePreviousSentence()
+    {
+        const string prior = "我先醒醒，马上就好。";
+
+        Assert.Equal(
+            "窗外的光挺亮堂，看着就让人心情舒展。",
+            SpeechFragments.DropLeadingRepeat(
+                "我先醒醒，马上就好。窗外的光挺亮堂，看着就让人心情舒展。",
+                prior));
+        Assert.Equal(string.Empty, SpeechFragments.DropLeadingRepeat(prior, prior));
+        Assert.Equal("你先坐一会儿。", SpeechFragments.DropLeadingRepeat("你先坐一会儿。", prior));
+        const string copied = "你来了，我刚把这页翻过去。今天过得怎么样，有没有遇到让你开心的小事？";
+        Assert.Equal(string.Empty, SpeechFragments.DropLeadingRepeat(copied, copied));
+        Assert.Equal(
+            "你敲这些数字，是想让我歇会儿吗？",
+            SpeechFragments.DropLeadingRepeat(copied + "你敲这些数字，是想让我歇会儿吗？", copied));
+    }
+
+    [Fact]
     public void OneSentenceStaysWhole()
     {
         var pieces = SpeechFragments.SplitForSpeech("你先把杯子放下。");
@@ -58,11 +77,11 @@ public sealed class SpeechFragmentsTests
     }
 
     [Fact]
-    public void InferenceParksOnlyAfterAQuietIdleInterval()
+    public void InferenceStaysLoadedUntilVoiceIsTurnedOff()
     {
-        Assert.False(JiayiVoiceSpeaker.ShouldParkInference(true, true, TimeSpan.FromMinutes(7), TimeSpan.FromMinutes(8)));
-        Assert.True(JiayiVoiceSpeaker.ShouldParkInference(true, true, TimeSpan.FromMinutes(8), TimeSpan.FromMinutes(8)));
-        Assert.False(JiayiVoiceSpeaker.ShouldParkInference(true, false, TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(8)));
-        Assert.False(JiayiVoiceSpeaker.ShouldParkInference(false, true, TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(8)));
+        Assert.False(JiayiVoiceSpeaker.ShouldParkInference(true, true, TimeSpan.FromHours(12), TimeSpan.FromHours(24)));
+        Assert.True(JiayiVoiceSpeaker.ShouldParkInference(true, true, TimeSpan.Zero, TimeSpan.Zero));
+        Assert.False(JiayiVoiceSpeaker.ShouldParkInference(true, false, TimeSpan.FromMinutes(30), TimeSpan.Zero));
+        Assert.False(JiayiVoiceSpeaker.ShouldParkInference(false, true, TimeSpan.FromMinutes(30), TimeSpan.Zero));
     }
 }

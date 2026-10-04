@@ -38,7 +38,7 @@ public sealed class DeveloperTestParameters
     public int BubbleSeconds { get; set; } = 5;
     public double SpeechSpeed { get; set; } = 1;
     public double SpeechTemperature { get; set; } = 1;
-    public double SpeechRepetition { get; set; } = 1.35;
+    public double SpeechRepetition { get; set; } = 1.4;
     public int TopK { get; set; } = 15;
     public double TopP { get; set; } = 1;
     public int ReplyMaxChars { get; set; } = 80;
@@ -109,15 +109,24 @@ public sealed class DeveloperTestParameters
             MinimumFullscreenMinutes,
             MaximumFullscreenMinutes);
         draft.BubbleSeconds = int.Clamp(tuning.BubbleSeconds, MinimumBubbleSeconds, MaximumBubbleSeconds);
-        draft.SpeechSpeed = FiniteBand(tuning.SpeechSpeed, draft.SpeechSpeed, MinimumSpeechSpeed, MaximumSpeechSpeed);
-        draft.SpeechTemperature = FiniteBand(
-            tuning.SpeechTemperature,
-            draft.SpeechTemperature,
+        draft.SpeechSpeed = SnapSpeechStep(
+            FiniteBand(tuning.SpeechSpeed, draft.SpeechSpeed, MinimumSpeechSpeed, MaximumSpeechSpeed),
+            MinimumSpeechSpeed,
+            MaximumSpeechSpeed);
+        draft.SpeechTemperature = SnapSpeechStep(
+            FiniteBand(
+                tuning.SpeechTemperature,
+                draft.SpeechTemperature,
+                MinimumSpeechTemperature,
+                MaximumSpeechTemperature),
             MinimumSpeechTemperature,
             MaximumSpeechTemperature);
-        draft.SpeechRepetition = FiniteBand(
-            tuning.SpeechRepetition,
-            draft.SpeechRepetition,
+        draft.SpeechRepetition = SnapSpeechStep(
+            FiniteBand(
+                tuning.SpeechRepetition,
+                draft.SpeechRepetition,
+                MinimumSpeechRepetition,
+                MaximumSpeechRepetition),
             MinimumSpeechRepetition,
             MaximumSpeechRepetition);
         draft.TopK = int.Clamp(tuning.TopK, MinimumTopK, MaximumTopK);
@@ -242,6 +251,15 @@ public sealed class DeveloperTestParameters
         double.IsNaN(value) || double.IsInfinity(value)
             ? fallback
             : double.Clamp(value, minimum, maximum);
+
+    internal static double SnapSpeechStep(double value, double minimum, double maximum)
+    {
+        const double step = 0.1;
+        value = Math.Clamp(value, minimum, maximum);
+        var snapped = minimum + Math.Round((value - minimum) / step, MidpointRounding.AwayFromZero) * step;
+        snapped = Math.Round(snapped * 10d, MidpointRounding.AwayFromZero) / 10d;
+        return Math.Clamp(snapped, minimum, maximum);
+    }
 
     private static bool InSpeechRange(double value, double minimum, double maximum) =>
         !double.IsNaN(value) && !double.IsInfinity(value) && value >= minimum && value <= maximum;

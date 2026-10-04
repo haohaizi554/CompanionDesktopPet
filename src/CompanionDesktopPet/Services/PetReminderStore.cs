@@ -17,6 +17,7 @@ internal sealed class PetReminderStore
 
     private readonly string _path;
     private readonly List<Entry> _items = [];
+    private readonly object _fileGate = new();
 
     public PetReminderStore(string? directory = null)
     {
@@ -209,9 +210,28 @@ internal sealed class PetReminderStore
             item.DueUtc.ToUniversalTime().ToString("o", CultureInfo.InvariantCulture),
             item.Text)).ToArray();
         var json = JsonSerializer.Serialize(payload, JsonOptions);
-        var temporary = _path + ".tmp";
-        File.WriteAllText(temporary, json);
-        File.Move(temporary, _path, overwrite: true);
+        lock (_fileGate)
+        {
+            var temporary = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
+            {
+                File.WriteAllText(temporary, json);
+                File.Move(temporary, _path, overwrite: true);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                try
+                {
+                    if (File.Exists(temporary))
+                    {
+                        File.Delete(temporary);
+                    }
+                }
+                catch (Exception cleanup) when (cleanup is IOException or UnauthorizedAccessException)
+                {
+                }
+            }
+        }
     }
 
     private sealed record Entry(DateTime DueUtc, string Text);

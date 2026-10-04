@@ -13,6 +13,8 @@ internal interface IVoiceSpeaker : IDisposable
 
     void ApplySpeech(double speed, double temperature, double repetitionPenalty, int topK, double topP);
 
+    bool HasPendingSpeech { get; }
+
     void Stop();
 
     void NotifyPlaybackCompleted();
@@ -50,15 +52,17 @@ internal sealed class JiayiVoiceSpeaker : IVoiceSpeaker
     private int _disposed;
     private int _ready;
     private int _parked;
-    private int _cancel;
+    private int _releaseWhenIdle;
+    private int _speechEpoch;
     private DateTime _lastInferenceUtc = DateTime.UtcNow;
+    // Backs off restarting a process that already exited. A loaded model stays resident.
     private static readonly TimeSpan InferenceParkAfter = TimeSpan.FromMinutes(8);
     private string? _lastReferenceId;
     private string? _retriedText;
     private string? _activeCacheKey;
     private double _speechSpeed = 1;
     private double _speechTemperature = 1;
-    private double _speechRepetition = 1.35;
+    private double _speechRepetition = 1.4;
     private int _topK = 15;
     private double _topP = 1;
 
@@ -122,7 +126,7 @@ internal sealed class JiayiVoiceSpeaker : IVoiceSpeaker
 
     internal void ParkWhenQuiet()
     {
-        _lastInferenceUtc = DateTime.UtcNow - InferenceParkAfter;
+        Interlocked.Exchange(ref _releaseWhenIdle, 1);
         _work.Set();
     }
 
@@ -164,15 +168,28 @@ internal sealed class JiayiVoiceSpeaker : IVoiceSpeaker
         }
     }
 
+    public bool HasPendingSpeech
+    {
+        get
+        {
+            lock (_pendingGate)
+            {
+                return _activeId >= 0 || !_queue.IsIdle;
+            }
+        }
+    }
+
     public void Stop()
     {
         lock (_pendingGate)
         {
             _queue.Clear();
             _activeId = -1;
+            _activeCacheKey = null;
         }
 
-        Interlocked.Exchange(ref _cancel, 1);
+        Interlocked.Increment(ref _speechEpoch);
+        TryWrite("{\"cmd\":\"cancel\"}");
         _work.Set();
     }
 
@@ -290,6 +307,7 @@ internal sealed class JiayiVoiceSpeaker : IVoiceSpeaker
                     }
                 }
 
+                var speechEpoch = Volatile.Read(ref _speechEpoch);
                 VoiceReference? reference = null;
                 if (turn is not null)
                 {
@@ -314,6 +332,11 @@ internal sealed class JiayiVoiceSpeaker : IVoiceSpeaker
                         try
                         {
                             File.Copy(cached, copy, overwrite: true);
+                            if (Volatile.Read(ref _speechEpoch) != speechEpoch)
+                            {
+                                continue;
+                            }
+
                             SynthesisStarted?.Invoke(turn.Value.Text);
                             DeliverSynthesized(copy);
                             continue;
@@ -352,11 +375,6 @@ internal sealed class JiayiVoiceSpeaker : IVoiceSpeaker
 
                 if (turn is null)
                 {
-                    if (Interlocked.Exchange(ref _cancel, 0) == 1)
-                    {
-                        TryWrite("{\"cmd\":\"cancel\"}");
-                    }
-
                     var idle = false;
                     lock (_pendingGate)
                     {
@@ -376,12 +394,14 @@ internal sealed class JiayiVoiceSpeaker : IVoiceSpeaker
                         continue;
                     }
 
-                    if (ShouldParkInference(
+                    if (Volatile.Read(ref _releaseWhenIdle) == 1
+                        && ShouldParkInference(
                             Volatile.Read(ref _ready) == 1,
                             idle,
                             quietFor,
-                            InferenceParkAfter))
+                            TimeSpan.Zero))
                     {
+                        Interlocked.Exchange(ref _releaseWhenIdle, 0);
                         ParkInference();
                         continue;
                     }
@@ -413,6 +433,11 @@ internal sealed class JiayiVoiceSpeaker : IVoiceSpeaker
                     top_p = topP
                 });
                 SynthesisStarted?.Invoke(turn.Value.Text);
+                if (Volatile.Read(ref _speechEpoch) != speechEpoch)
+                {
+                    continue;
+                }
+
                 if (!TryWrite(request) && Volatile.Read(ref _disposed) == 0)
                 {
                     var idle = false;

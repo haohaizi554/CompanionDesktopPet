@@ -60,6 +60,23 @@ public sealed class DeveloperModeTests
     }
 
     [Fact]
+    public void DeveloperParameters_SnapsAHalfwayRepetitionOntoTheSpeechStep()
+    {
+        var parameters = DeveloperTestParameters.CreateDefault();
+        Assert.Equal(1.4, parameters.SpeechRepetition);
+
+        var tuning = parameters.ToTuning(true) with
+        {
+            SpeechRepetition = 1.35,
+            SpeechSpeed = 0.94
+        };
+
+        Assert.True(parameters.TryCopyTuning(tuning));
+        Assert.Equal(1.4, parameters.SpeechRepetition);
+        Assert.Equal(0.9, parameters.SpeechSpeed);
+    }
+
+    [Fact]
     public void DeveloperParameters_RejectReplyLengthOutsideTheReadableRange()
     {
         var parameters = DeveloperTestParameters.CreateDefault();

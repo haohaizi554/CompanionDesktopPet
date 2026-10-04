@@ -23,7 +23,7 @@ public sealed class DialogueSkillTests
         Assert.True(state.Changed);
         Assert.Equal(0.8, state.Timing.SpeechSpeed);
         Assert.Equal(1, state.Timing.SpeechTemperature);
-        Assert.Equal(1.35, state.Timing.SpeechRepetition);
+        Assert.Equal(1.4, state.Timing.SpeechRepetition);
         Assert.Equal(8, state.Timing.TopK);
         Assert.Equal(1, state.Timing.TopP);
         Assert.Equal(1, timing.SpeechSpeed);
