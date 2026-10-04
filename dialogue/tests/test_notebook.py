@@ -66,6 +66,8 @@ class NotebookTests(unittest.TestCase):
         blocked = local_turn("记住小玥明天来", [])
         self.assertEqual("这个我就不记了。", blocked["draft"])
         self.assertEqual([], blocked["facts"])
+        renamed = local_turn("记住我叫小周", ["我叫小林", "下周考试"])
+        self.assertEqual(["下周考试", "我叫小周"], renamed["facts"])
 
     def test_recall_mentions_the_latest_two_and_forget_drops_a_match(self) -> None:
         facts = ["下周考试", "多喝水", "早点睡"]

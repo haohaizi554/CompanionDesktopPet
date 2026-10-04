@@ -25,6 +25,79 @@ _LEAKS = (
 _MARKDOWN = ("```", "**", "- ", "# ")
 
 
+def without_repeated_prior(text: str, prior: str) -> str:
+    """Drop sentences she already said in the previous reply."""
+    return drop_known_sentences(text, [prior] if prior else [])
+
+
+def drop_known_sentences(text: str, earlier: list[str]) -> str:
+    """Remove sentences that already appeared in a recent reply.
+
+    A copied answer is often two sentences. Comparing the whole previous
+    reply to only the first new sentence lets that copy through.
+    """
+    cleaned = " ".join((text or "").split()).strip()
+    known = {
+        key
+        for line in earlier
+        for key in _sentence_keys(line)
+        if len(key) >= 4
+    }
+    if not cleaned or not known:
+        return cleaned
+
+    kept: list[str] = []
+    removed = False
+    for part in _sentences(cleaned):
+        key = _sentence_key(part)
+        if len(key) >= 4 and key in known:
+            removed = True
+            continue
+        kept.append(part.strip())
+    return "".join(kept) if removed else cleaned
+
+
+def repeats_earlier_reply(text: str, earlier: list[str]) -> bool:
+    key = _sentence_key(text)
+    if len(key) < 4:
+        return False
+    return any(_sentence_key(line) == key for line in earlier if line)
+
+
+def asks_to_repeat(user_text: str) -> bool:
+    text = user_text or ""
+    return any(
+        phrase in text
+        for phrase in ("再说一遍", "再讲一遍", "重复一遍", "刚才说的", "你刚说", "没听清", "没听见")
+    )
+
+
+def _sentence_key(text: str) -> str:
+    return " ".join((text or "").split()).strip().rstrip("。！？!?…").strip()
+
+
+def _sentence_keys(text: str) -> list[str]:
+    return [_sentence_key(part) for part in _sentences(text)]
+
+
+def _sentences(text: str) -> list[str]:
+    cleaned = " ".join((text or "").split()).strip()
+    if not cleaned:
+        return []
+    parts: list[str] = []
+    start = 0
+    for index, char in enumerate(cleaned):
+        if char in "。！？!?":
+            piece = cleaned[start : index + 1].strip()
+            if piece:
+                parts.append(piece)
+            start = index + 1
+    tail = cleaned[start:].strip()
+    if tail:
+        parts.append(tail)
+    return parts
+
+
 def clean_reply(text: str) -> str:
     value = _THINKING.sub("", text or "")
     value = value.replace("\r", " ").replace("\n", " ")

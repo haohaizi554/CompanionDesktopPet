@@ -1,11 +1,12 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.sqlite import SqliteSaver
 
-from persona_dialogue.audit import audit, clean_reply
+from persona_dialogue.audit import audit, clean_reply, without_repeated_prior
 from persona_dialogue.graph import build_graph, remember_line
 from persona_dialogue.retrieve import LineIndex
 
@@ -30,6 +31,24 @@ class ScriptedModel:
 
 
 class GraphTests(unittest.TestCase):
+    def test_repeated_prior_sentence_is_removed_before_the_new_line(self) -> None:
+        prior = "我先醒醒，马上就好。"
+        self.assertEqual(
+            "窗外的光挺亮堂，看着就让人心情舒展。",
+            without_repeated_prior(
+                "我先醒醒，马上就好。窗外的光挺亮堂，看着就让人心情舒展。",
+                prior,
+            ),
+        )
+        self.assertEqual("", without_repeated_prior(prior, prior))
+        self.assertEqual("你先坐一会儿。", without_repeated_prior("你先坐一会儿。", prior))
+        copied = "你来了，我刚把这页翻过去。今天过得怎么样，有没有遇到让你开心的小事？"
+        self.assertEqual("", without_repeated_prior(copied, copied))
+        self.assertEqual(
+            "你敲这些数字，是想让我歇会儿吗？",
+            without_repeated_prior(copied + "你敲这些数字，是想让我歇会儿吗？", copied),
+        )
+
     def test_audit_strips_thinking_and_rejects_model_identity(self) -> None:
         self.assertEqual("我在。", clean_reply("<think>secret</think>我在。"))
         self.assertFalse(audit("我是通义千问。", "你好")[0])
@@ -68,9 +87,24 @@ class GraphTests(unittest.TestCase):
 
         self.assertEqual("那你就靠一会儿。", result["draft"])
         prompt = model.seen[0][0]
-        self.assertIn("湿热的天气把树叶养得很绿。", prompt)
-        self.assertIn("先连上这句的意思", prompt)
+        self.assertNotIn("湿热的天气把树叶养得很绿。", prompt)
+        self.assertIn("不要把先前的回答再念一遍", prompt)
+        self.assertIn("湿热的天气把树叶养得很绿。", model.seen[0])
         self.assertIn("我有点累", model.seen[0][-1])
+
+    def test_a_copied_earlier_answer_is_rewritten(self) -> None:
+        copied = "你来了，我刚把这页翻过去。今天过得怎么样，有没有遇到让你开心的小事？"
+        model = ScriptedModel([copied, "你敲这些数字，是想让我歇会儿吗？"])
+        with tempfile.TemporaryDirectory() as directory:
+            with SqliteSaver.from_conn_string(str(Path(directory) / "memory.sqlite")) as saver:
+                graph = build_graph(model, SOUL, LineIndex(["你先喝口水。"]), saver)
+                config = {"configurable": {"thread_id": "jiayi"}, "recursion_limit": 12}
+                self.assertTrue(remember_line(graph, "jiayi", copied))
+                result = graph.invoke({"user_text": "333333"}, config)
+
+        self.assertEqual("你敲这些数字，是想让我歇会儿吗？", result["draft"])
+        self.assertEqual(2, len(model.seen))
+        self.assertIn("不要复述旧回答", model.seen[1][0])
 
     def test_empty_input_does_not_call_the_model(self) -> None:
         model = ScriptedModel(["不该被叫到。"])
@@ -133,6 +167,58 @@ class GraphTests(unittest.TestCase):
                 second = graph.invoke({"user_text": "嗯", "settings": first["settings"]}, config)
                 self.assertEqual("我听着呢。", second["draft"])
                 self.assertEqual([], second["actions"])
+
+
+    def test_older_turns_are_compacted_and_the_recent_ones_stay(self) -> None:
+        packed = json.dumps(
+            {"summary": "对方在准备下周考试。", "remember": ["下周考试"], "forget": []},
+            ensure_ascii=False,
+        )
+        model = ScriptedModel([packed, "那你早点睡。"])
+        with tempfile.TemporaryDirectory() as directory:
+            with SqliteSaver.from_conn_string(str(Path(directory) / "memory.sqlite")) as saver:
+                graph = build_graph(model, SOUL, LineIndex(["你先喝口水。"]), saver)
+                config = {"configurable": {"thread_id": "jiayi"}, "recursion_limit": 12}
+                for index in range(12):
+                    graph.update_state(
+                        config,
+                        {
+                            "messages": [
+                                HumanMessage(content=f"第{index}件事先放着"),
+                                AIMessage(content="嗯，我听着。"),
+                            ]
+                        },
+                        as_node="inspect",
+                    )
+                result = graph.invoke({"user_text": "我有点累"}, config)
+                values = graph.get_state(config).values
+
+        self.assertEqual("那你早点睡。", result["draft"])
+        self.assertEqual(2, len(model.seen))
+        self.assertIn("第0件事先放着", model.seen[0][1])
+        draft = model.seen[1]
+        self.assertIn("对方在准备下周考试。", draft[0])
+        self.assertIn("下周考试", draft[0])
+        self.assertNotIn("第0件事先放着", "\n".join(draft[1:]))
+        self.assertIn("第8件事先放着", "\n".join(draft[1:]))
+        self.assertEqual(8, values["compacted_count"])
+        self.assertIn("下周考试", values["facts"])
+
+    def test_spoken_lines_past_two_hundred_stay_in_the_summary(self) -> None:
+        model = ScriptedModel([])
+        with tempfile.TemporaryDirectory() as directory:
+            with SqliteSaver.from_conn_string(str(Path(directory) / "memory.sqlite")) as saver:
+                graph = build_graph(model, SOUL, LineIndex(["你先喝口水。"]), saver)
+                config = {"configurable": {"thread_id": "jiayi"}, "recursion_limit": 8}
+                for index in range(201):
+                    self.assertTrue(remember_line(graph, "jiayi", f"第{index}句树叶。"))
+                values = graph.get_state(config).values
+
+        self.assertEqual([], model.seen)
+        self.assertEqual(200, len(values["messages"]))
+        self.assertIn("第0句树叶", values["memory_summary"])
+        self.assertNotIn("第0句树叶。", [message.content for message in values["messages"]])
+        self.assertIn("第200句树叶。", [message.content for message in values["messages"]])
 
 
 class ToolThenSpeechModel:

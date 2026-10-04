@@ -1,6 +1,8 @@
 """佳怡的对话图。
 
-顺序是固定的：裁剪记忆、收下这句话、检索原句、按人物卡起草、审计。
+顺序是固定的：把滑出近期窗口的旧对话收成摘要、删掉已经被摘要盖住的超额原文、
+收下这句话、检索原句、按人物卡起草、审计。
+原文至少留两百条。模型只看摘要加上还没被摘要盖住的最近一段。
 审计不过就重写一次。还是不过，就退回一句本地的短话，不把模型原文送去朗读。
 她自己先说出口的语料句，用 remember_line 写进同一条记忆，不另叫模型。
 """
@@ -9,12 +11,28 @@ from __future__ import annotations
 
 from typing import Literal
 
-from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph, add_messages
 from typing_extensions import Annotated, TypedDict
 
-from persona_dialogue.audit import audit, clean_reply, fit_reply
+from persona_dialogue.audit import (
+    asks_to_repeat,
+    audit,
+    clean_reply,
+    drop_known_sentences,
+    fit_reply,
+    repeats_earlier_reply,
+)
 from persona_dialogue.distill import render_prompt
+from persona_dialogue.memory import (
+    compact_passes,
+    compaction_prompt,
+    expire_overflow,
+    fold_pending,
+    fold_transcript,
+    live_messages,
+    pending_messages,
+)
 from persona_dialogue.notebook import local_turn, sanitize_facts
 from persona_dialogue.persona_setting import PersonaSetting
 from persona_dialogue.retrieve import LineIndex
@@ -29,9 +47,9 @@ from persona_dialogue.skills import (
     wants_setting,
 )
 
-_MEMORY_LIMIT = 16
 _REMEMBER_LIMIT = 120
 _FALLBACK = "我在呢，你慢慢说。"
+_COMPACT_SYSTEM = "你在整理对话记忆。只输出一个 JSON 对象，不要markdown，不要多余的话。"
 
 
 class DialogueState(TypedDict, total=False):
@@ -45,6 +63,8 @@ class DialogueState(TypedDict, total=False):
     settings: dict
     actions: list
     facts: list
+    memory_summary: str
+    compacted_count: int
 
 
 def build_graph(model, soul: dict, index: LineIndex, checkpointer, persona: PersonaSetting | None = None):
@@ -57,16 +77,41 @@ def build_graph(model, soul: dict, index: LineIndex, checkpointer, persona: Pers
         if relation:
             return [relation, *facts]
         return facts
-    def trim(state: DialogueState) -> dict:
-        messages = state.get("messages") or []
-        if len(messages) <= _MEMORY_LIMIT:
+    def compact(state: DialogueState) -> dict:
+        messages = list(state.get("messages") or [])
+        cover = int(state.get("compacted_count") or 0)
+        summary = state.get("memory_summary") or ""
+        facts = sanitize_facts(state.get("facts"))
+        changed = False
+        for _ in range(compact_passes()):
+            pending = pending_messages(messages, cover)
+            if not pending:
+                break
+            try:
+                response = _invoke(
+                    model,
+                    [
+                        SystemMessage(content=_COMPACT_SYSTEM),
+                        HumanMessage(content=compaction_prompt(summary, facts, pending)),
+                    ],
+                    tools=False,
+                )
+                model_text = _message_text(response)
+            except Exception:
+                model_text = None
+            summary, facts = fold_pending(summary, facts, pending, model_text)
+            cover += len(pending)
+            changed = True
+        if not changed:
             return {}
-        expired = [
-            RemoveMessage(id=message.id)
-            for message in messages[:-_MEMORY_LIMIT]
-            if getattr(message, "id", None)
-        ]
-        return {"messages": expired} if expired else {}
+        return {"memory_summary": summary, "facts": facts, "compacted_count": cover}
+
+    def trim(state: DialogueState) -> dict:
+        messages = list(state.get("messages") or [])
+        expired, cover = expire_overflow(messages, state.get("compacted_count") or 0)
+        if not expired:
+            return {}
+        return {"messages": expired, "compacted_count": cover}
 
     def normalize(state: DialogueState) -> dict:
         text = (state.get("user_text") or "").strip()
@@ -155,7 +200,7 @@ def build_graph(model, soul: dict, index: LineIndex, checkpointer, persona: Pers
                 "settings": settings,
             }
 
-        history = list(state.get("messages") or [])[-12:]
+        history = _live_history(state)
         prompt = render_prompt(
             soul,
             state.get("retrieved") or [],
@@ -163,12 +208,13 @@ def build_graph(model, soul: dict, index: LineIndex, checkpointer, persona: Pers
             prior=_prior_spoken(history),
             max_chars=reply_limit(settings),
             facts=_known_facts(state),
+            memory=state.get("memory_summary") or "",
         )
         response = _speak(model, [SystemMessage(content=prompt), *history], reply_limit(settings))
         return {"draft": _message_text(response), "actions": [], "settings": settings}
 
     def rewrite(state: DialogueState) -> dict:
-        history = list(state.get("messages") or [])[-12:]
+        history = _live_history(state)
         prompt = render_prompt(
             soul,
             state.get("retrieved") or [],
@@ -176,15 +222,23 @@ def build_graph(model, soul: dict, index: LineIndex, checkpointer, persona: Pers
             prior=_prior_spoken(history),
             max_chars=reply_limit(state.get("settings")),
             facts=_known_facts(state),
+            memory=state.get("memory_summary") or "",
         )
         response = _speak(model, [SystemMessage(content=prompt), *history], reply_limit(state.get("settings")))
         return {"draft": _message_text(response)}
 
     def inspect(state: DialogueState) -> dict:
-        cleaned = clean_reply(state.get("draft") or "")
-        limit = reply_limit(state.get("settings"))
         user_text = state.get("user_text") or ""
-        accepted, reason = audit(cleaned, user_text, max_chars=limit)
+        raw = clean_reply(state.get("draft") or "")
+        recent = _recent_spoken(list(state.get("messages") or []))
+        cleaned = raw if asks_to_repeat(user_text) else drop_known_sentences(raw, recent)
+        limit = reply_limit(state.get("settings"))
+        if raw and not cleaned:
+            accepted, reason = False, "重复"
+        elif not asks_to_repeat(user_text) and repeats_earlier_reply(cleaned, recent):
+            accepted, reason = False, "重复"
+        else:
+            accepted, reason = audit(cleaned, user_text, max_chars=limit)
         if not accepted and reason == "太长":
             fitted = fit_reply(cleaned, limit)
             fitted_ok, fitted_reason = audit(fitted, user_text, max_chars=limit)
@@ -229,6 +283,7 @@ def build_graph(model, soul: dict, index: LineIndex, checkpointer, persona: Pers
         return "fallback"
 
     builder = StateGraph(DialogueState)
+    builder.add_node("compact", compact)
     builder.add_node("trim", trim)
     builder.add_node("normalize", normalize)
     builder.add_node("retrieve", retrieve)
@@ -236,7 +291,8 @@ def build_graph(model, soul: dict, index: LineIndex, checkpointer, persona: Pers
     builder.add_node("rewrite", rewrite)
     builder.add_node("inspect", inspect)
     builder.add_node("fallback", fallback)
-    builder.add_edge(START, "trim")
+    builder.add_edge(START, "compact")
+    builder.add_edge("compact", "trim")
     builder.add_edge("trim", "normalize")
     builder.add_conditional_edges(
         "normalize",
@@ -269,25 +325,39 @@ def remember_line(graph, thread_id: str, text: str) -> bool:
         return False
     graph.update_state(config, {"messages": [AIMessage(content=cleaned)]}, as_node="inspect")
     snapshot = graph.get_state(config)
-    messages = list((snapshot.values or {}).get("messages") or [])
-    if len(messages) > _MEMORY_LIMIT:
-        expired = [
-            RemoveMessage(id=message.id)
-            for message in messages[:-_MEMORY_LIMIT]
-            if getattr(message, "id", None)
-        ]
-        if expired:
-            graph.update_state(config, {"messages": expired}, as_node="trim")
+    values = snapshot.values or {}
+    folded = fold_transcript(
+        list(values.get("messages") or []),
+        values.get("memory_summary") or "",
+        values.get("facts"),
+        values.get("compacted_count") or 0,
+    )
+    if folded:
+        graph.update_state(config, folded, as_node="trim")
     return True
 
 
+def _live_history(state: DialogueState) -> list:
+    return live_messages(list(state.get("messages") or []), state.get("compacted_count") or 0)
+
+
 def _prior_spoken(messages: list) -> str:
+    recent = _recent_spoken(messages, limit=1)
+    return recent[0] if recent else ""
+
+
+def _recent_spoken(messages: list, limit: int = 6) -> list[str]:
+    spoken: list[str] = []
     for message in reversed(messages):
-        if isinstance(message, HumanMessage):
+        if not isinstance(message, AIMessage):
             continue
-        if isinstance(message, AIMessage):
-            return _message_text(message)
-    return ""
+        text = _message_text(message).strip()
+        if not text:
+            continue
+        spoken.append(text)
+        if len(spoken) == limit:
+            break
+    return spoken
 
 
 def _speak(model, messages, max_chars: int):

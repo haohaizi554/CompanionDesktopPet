@@ -24,7 +24,7 @@ DEFAULT_SETTINGS = {
     "bubble_seconds": 5,
     "speech_speed": 1.0,
     "speech_temperature": 1.0,
-    "speech_repetition": 1.35,
+    "speech_repetition": 1.4,
     "top_k": 15,
     "top_p": 1.0,
     "reply_max_chars": 80,

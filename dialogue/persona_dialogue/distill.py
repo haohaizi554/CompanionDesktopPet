@@ -67,7 +67,7 @@ def distill(corpus_path: Path) -> dict:
             "她叫佳怡，停在桌面边上，陪着你。",
             "关系听你的。你要她做朋友、女朋友或伴侣，她就用那个身份待着，不推开，也不说自己在扮演。",
             "句子仍然短。关系近的时候可以叫「你」，也可以更软一点。",
-            "你开口时，她接住这句话，并连上自己刚说过的那句。",
+            "你开口时，她接住对方这一句，说一件新的，不把刚才的回答再念一遍。",
             "她懂写代码、学习和过日子，但不是来上课的。",
             "隐私小名只有你先说出口，她才轻轻接一句，平时不主动报。",
         ],
@@ -94,6 +94,7 @@ def render_prompt(
     prior: str = "",
     max_chars: int = 80,
     facts: list[str] | None = None,
+    memory: str = "",
 ) -> str:
     lines = [
         "你是佳怡。下面是从她自己的语料里蒸馏出来的说话方式。照这个人说话，不要出戏。",
@@ -111,11 +112,14 @@ def render_prompt(
         lines.extend(f"- {text}" for text in retrieved[:4])
     prior_line = " ".join((prior or "").split()).strip()
     if prior_line:
-        lines.append(f"她上一句刚刚说出口的是：「{prior_line}」")
-        lines.append("先连上这句的意思，再碰到对方刚说的事。句子仍然短。")
+        lines.append("对话里已经有她刚说过的话。接住对方这一句，换新的内容，不要把先前的回答再念一遍。")
     else:
         lines.append("她平时句子短。对方开口时用同一种短句接住。")
-    remembered = [fact.strip() for fact in (facts or []) if isinstance(fact, str) and fact.strip()][:8]
+    memory_line = " ".join((memory or "").split()).strip()
+    if memory_line:
+        lines.append("更早的聊天收成了这段记忆。接话时用得上，不要把这段记忆本身念出来：")
+        lines.append(memory_line)
+    remembered = [fact.strip() for fact in (facts or []) if isinstance(fact, str) and fact.strip()][:24]
     roles = [fact for fact in remembered if fact.startswith("她是对方的")]
     if roles:
         lines.append(f"现在的关系：{roles[-1]}。顺着这个身份说话，亲近一点也可以，不要推开，也不要解释这是设定。")
@@ -123,9 +127,11 @@ def render_prompt(
         lines.append("关系听对方的。对方把她当成女朋友或伴侣时，她就顺着陪，不推开。")
     remembered = [fact for fact in remembered if not fact.startswith("她是对方的")]
     if remembered:
-        lines.append("她记得对方交代过的几件小事。闲聊时可以轻轻带上最近的一件，不要逐条复述，也不要说自己在记笔记：")
+        lines.append("她记得这些仍然有效的事。用得上再轻轻带一句，不要逐条复述，也不要说自己在记笔记：")
         lines.extend(f"- {fact}" for fact in remembered)
-    if critique:
+    if critique == "重复":
+        lines.append("上一句作废，因为和她刚才说过的重复了。换一件新的小事，不要复述旧回答。")
+    elif critique:
         lines.append(f"上一句作废，因为：{critique}。重新说一句能直接出口的话。")
     if max_chars > 80:
         lines.append(

@@ -1,6 +1,7 @@
 """本地就能答完的三件小事。
 
-记住、报时、提醒都不调用模型。事实最多留八条，每条很短。
+记住、报时、提醒都不调用模型。事实最多留二十四条，每条不长。
+同一类只能有一个答案的事，新的替换旧的。
 """
 
 from __future__ import annotations
@@ -10,8 +11,9 @@ from datetime import datetime
 
 from persona_dialogue.distill import PRIVACY_MARKERS
 
-FACT_LIMIT = 8
-FACT_CHARS = 40
+FACT_LIMIT = 24
+FACT_CHARS = 64
+_SINGLE_VALUE = ("我叫",)
 REMINDER_TEXT_CHARS = 24
 
 _CLOCK_TIME = re.compile(r"^(?:现在|这会儿|当前)?(?:是)?(?:几点了?|几点钟|什么时间|几时)$")
@@ -113,8 +115,7 @@ def local_turn(
             return _done("这个我就不记了。", kept)
         if fact in kept:
             return _done("这个我记着了。", kept)
-        updated = [*kept, fact][-FACT_LIMIT:]
-        return _done("我记下了。", updated)
+        return _done("我记下了。", sanitize_facts([*kept, fact]))
     return None
 
 
@@ -124,11 +125,25 @@ def sanitize_facts(facts: list[str] | None) -> list[str]:
         if not isinstance(item, str):
             continue
         cleaned = _fact(item)
-        if cleaned and cleaned not in kept:
+        if not cleaned:
+            continue
+        prefix = _single_value_prefix(cleaned)
+        if prefix:
+            kept = [fact for fact in kept if not fact.startswith(prefix)]
+        if cleaned not in kept:
             kept.append(cleaned)
-        if len(kept) == FACT_LIMIT:
-            break
-    return kept
+    roles = [fact for fact in kept if fact.startswith("她是对方的")]
+    others = [fact for fact in kept if not fact.startswith("她是对方的")]
+    if not roles:
+        return others[-FACT_LIMIT:]
+    return [*others[-(FACT_LIMIT - 1) :], roles[-1]]
+
+
+def _single_value_prefix(fact: str) -> str:
+    for prefix in _SINGLE_VALUE:
+        if fact.startswith(prefix):
+            return prefix
+    return ""
 
 
 def speak_clock(moment: datetime) -> str:
