@@ -63,6 +63,35 @@ public sealed class AnimationControllerTests
     }
 
     [Fact]
+    public void SpeechMotion_KeepsTheBreathClockRunning()
+    {
+        RunOnStaThread(() =>
+        {
+            var breathing = new ScaleTransform();
+            var controller = new AnimationController(
+                breathing,
+                new RotateTransform(),
+                new TranslateTransform(),
+                new ScaleTransform(),
+                new RotateTransform(),
+                new ScaleTransform(),
+                new RotateTransform(),
+                new TranslateTransform(),
+                []);
+
+            controller.StartIdle();
+            var breath = controller.ActiveClocks.Take(2).ToArray();
+            controller.SetSpeechMotion(true);
+            controller.SetSpeechMotion(false);
+
+            Assert.Equal(4, controller.ActiveClockCount);
+            Assert.Same(breath[0], controller.ActiveClocks[0]);
+            Assert.Same(breath[1], controller.ActiveClocks[1]);
+            Assert.True(breathing.HasAnimatedProperties);
+        });
+    }
+
+    [Fact]
     public void ClickReaction_TiltsAwayFromClickedSideWhenTheSameSideRepeatsQuickly()
     {
         RunClickReactionScenario((controller, reactionRotation) =>

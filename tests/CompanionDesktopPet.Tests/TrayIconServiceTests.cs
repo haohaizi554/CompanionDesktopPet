@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Drawing;
+using System.Drawing.Imaging;
 using System.IO;
 using System.Runtime.ExceptionServices;
 using System.Windows.Threading;
@@ -48,10 +49,64 @@ public sealed class TrayIconServiceTests
             Assert.False(service.AutoStartMenuItem.Checked);
             Assert.True(service.AutoStartMenuItem.Enabled);
             Assert.Equal(string.Empty, service.AutoStartMenuItem.ToolTipText);
+            var menu = Assert.IsType<PetTrayMenuStrip>(shell.ContextMenuStrip);
+            Assert.Equal(PetTrayMenuStrip.UiFontName, menu.Font.FontFamily.Name);
+            Assert.False(menu.ShowImageMargin);
+            Assert.IsType<PetTrayMenuRenderer>(menu.Renderer);
+            Assert.Equal(PetTrayMenuColors.Text.ToArgb(), menu.ForeColor.ToArgb());
             service.Dispose();
             Assert.Equal(0, shell.VisibleTrueCount);
             Assert.Equal(0, shell.VisibleFalseCount);
         });
+    }
+
+    [Fact]
+    public void TrayMenu_HoverAndPressPaintDifferentRows()
+    {
+        RunOnStaThread(() =>
+        {
+            using var menu = new PetTrayMenuStrip();
+            menu.Items.Add(new Forms.ToolStripMenuItem("藏起佳怡"));
+            menu.Items.Add(new Forms.ToolStripMenuItem("说句话 ♡"));
+            var size = menu.GetPreferredSize(System.Drawing.Size.Empty);
+            menu.Size = size;
+            var first = menu.Items[0].Bounds;
+            var second = menu.Items[1].Bounds;
+            menu.ApplyPointer(new Point(first.Left + (first.Width / 2), first.Top + (first.Height / 2)), pressed: false);
+            using var hover = Render(menu);
+            Assert.True(Contains(hover, color => color.R > 250 && color.G > 250 && color.B > 250), "悬停没有画出白底行。");
+
+            menu.ApplyPointer(new Point(2, 2), pressed: true);
+            Assert.Same(menu.Items[0], menu.PressedItem);
+            menu.ApplyPointer(new Point(second.Left + (second.Width / 2), second.Top + (second.Height / 2)), pressed: true);
+            using var pressed = Render(menu);
+            Assert.True(
+                Contains(pressed, color => color.R > 250 && color.G is > 160 and < 210 && color.B is > 180 and < 220),
+                "按下没有画出更深的粉色行。");
+        });
+    }
+
+    private static bool Contains(Bitmap bitmap, Func<Color, bool> match)
+    {
+        for (var y = 0; y < bitmap.Height; y++)
+        {
+            for (var x = 0; x < bitmap.Width; x++)
+            {
+                if (match(bitmap.GetPixel(x, y)))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static Bitmap Render(Forms.Control control)
+    {
+        var bitmap = new Bitmap(Math.Max(1, control.Width), Math.Max(1, control.Height), PixelFormat.Format32bppArgb);
+        control.DrawToBitmap(bitmap, new Rectangle(0, 0, bitmap.Width, bitmap.Height));
+        return bitmap;
     }
 
     [Fact]

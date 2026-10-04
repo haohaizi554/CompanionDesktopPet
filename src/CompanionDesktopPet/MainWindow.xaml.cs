@@ -109,7 +109,10 @@ public partial class MainWindow : Window
     private string? _playedWavPath;
     private bool _voiceLineActive;
     private string? _requestedVoiceText;
+    private string? _lastUtterance;
+    private bool _awaitingReply;
     private bool _voicePlaying;
+    private VoiceClip? _deferredVoiceClip;
     private DateTime _voicePhaseStarted;
     private TimeSpan _playbackDuration = TimeSpan.FromSeconds(4);
     private string? _synthesizingText;
@@ -1001,12 +1004,60 @@ public partial class MainWindow : Window
         });
     }
 
+    private void RememberUtterance(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text) || text == "……")
+        {
+            return;
+        }
+
+        _lastUtterance = text.Trim();
+    }
+
     internal void ShowBubble(string text, bool speak = false, string? tone = null, string? trigger = null, bool urgent = false)
     {
         if (InteractionFrozen)
         {
             return;
         }
+
+        var waiting = text == "……";
+        if (!waiting)
+        {
+            _awaitingReply = false;
+        }
+
+        var incoming = text;
+        text = SpeechFragments.DropLeadingRepeat(text, _lastUtterance);
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            if (waiting || string.IsNullOrWhiteSpace(incoming))
+            {
+                return;
+            }
+
+            text = "我换一句。";
+        }
+
+        if (speak
+            && _voice is { Enabled: true }
+            && _voiceLineActive
+            && string.Equals(_lastUtterance, FallbackDialogueCatalog.StartupLine.Text, StringComparison.Ordinal))
+        {
+            StopVoicePlayback();
+        }
+
+        if (!speak && _voiceLineActive)
+        {
+            StopVoicePlayback();
+        }
+
+        if (waiting)
+        {
+            _awaitingReply = true;
+        }
+
+        RememberUtterance(text);
 
         if (speak && _voice is { Enabled: true })
         {
@@ -1053,12 +1104,13 @@ public partial class MainWindow : Window
         AutomationProperties.SetName(SpeechText, $"佳怡说：{text}");
         SpeechBubble.Visibility = Visibility.Visible;
 
-        if (_voiceLineActive)
+        _bubbleCountdown.Show();
+        if (waiting)
         {
-            StopVoicePlayback();
+            _bubbleCountdown.Suspend();
+            _bubbleTimer.Stop();
         }
 
-        _bubbleCountdown.Show();
         if (_isHiddenToTray)
         {
             _bubbleSuspendedForWindowHide = true;
@@ -1069,7 +1121,10 @@ public partial class MainWindow : Window
 
         OpenSpeechPopup();
         _announceLiveRegionChanged(SpeechText);
-        SynchronizeBubbleTimer();
+        if (!waiting)
+        {
+            SynchronizeBubbleTimer();
+        }
     }
 
     private void OpenSpeechPopup()
@@ -1266,34 +1321,46 @@ public partial class MainWindow : Window
         {
             while (_dialogueQueue.TryDequeue(out var text))
             {
-                if (InteractionFrozen || !DialogueMenuItem.IsChecked || _personaDialogue is not { IsReady: true })
+                if (InteractionFrozen || !DialogueMenuItem.IsChecked)
+                {
+                    _awaitingReply = false;
+                    _dialogueQueue.Clear();
+                    break;
+                }
+
+                if (_personaDialogue is not { IsReady: true })
                 {
                     _dialogueQueue.Clear();
+                    ShowBubble("对话这会儿没接上，你再说一次。");
                     break;
                 }
 
                 ShowBubble("……");
-                var reply = await _personaDialogue.ReplyAsync(
-                    text,
-                    DialogueSkills.Describe(
-                        _developerParameters,
-                        _scale,
-                        Topmost,
-                        _paused,
-                        _voice is { Enabled: true }));
-                if (InteractionFrozen || !DialogueMenuItem.IsChecked)
+                PersonaDialogueReply reply;
+                try
                 {
-                    _dialogueQueue.Clear();
-                    break;
+                    reply = await _personaDialogue.ReplyAsync(
+                        text,
+                        DialogueSkills.Describe(
+                            _developerParameters,
+                            _scale,
+                            Topmost,
+                            _paused,
+                            _voice is { Enabled: true }));
+                }
+                catch (Exception exception) when (!IsFatalException(exception))
+                {
+                    Trace.TraceError("Dialogue reply failed: {0}", exception);
+                    await RunOnUiAsync(() => ShowBubble("这句话我没接住，你再说一次。"));
+                    continue;
                 }
 
-                ApplyDialogueActions(reply.Actions);
-
-                var answer = reply.Ok && !string.IsNullOrWhiteSpace(reply.Text)
-                    ? reply.Text
-                    : "这句话我没接住，你再说一次。";
-                var speak = reply.Ok && _voice is { Enabled: true };
-                ShowBubble(answer, speak: speak, tone: "gentle", urgent: true);
+                var keepReading = true;
+                await RunOnUiAsync(() => keepReading = DeliverDialogueReply(reply));
+                if (!keepReading)
+                {
+                    break;
+                }
             }
         }
         finally
@@ -1304,6 +1371,35 @@ public partial class MainWindow : Window
                 StartDialoguePump();
             }
         }
+    }
+
+    private bool DeliverDialogueReply(PersonaDialogueReply reply)
+    {
+        if (InteractionFrozen || !DialogueMenuItem.IsChecked)
+        {
+            _dialogueQueue.Clear();
+            CollapseBubble();
+            return false;
+        }
+
+        ApplyDialogueActions(reply.Actions);
+        var answer = reply.Ok && !string.IsNullOrWhiteSpace(reply.Text)
+            ? reply.Text
+            : "这句话我没接住，你再说一次。";
+        var speak = reply.Ok && _voice is { Enabled: true };
+        ShowBubble(answer, speak: speak, tone: "gentle", urgent: true);
+        return true;
+    }
+
+    private Task RunOnUiAsync(Action action)
+    {
+        if (Dispatcher.CheckAccess())
+        {
+            action();
+            return Task.CompletedTask;
+        }
+
+        return Dispatcher.InvokeAsync(action).Task;
     }
 
     private void ConfigureDialogueEndpoint_Click(object sender, RoutedEventArgs e)
@@ -1517,7 +1613,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (!_voiceLineActive)
+        if (_awaitingReply || _voice is { HasPendingSpeech: true } || !_voiceLineActive)
         {
             return;
         }
@@ -1533,15 +1629,23 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (InteractionFrozen || _isHiddenToTray || _voice is not { Enabled: true })
+        if (InteractionFrozen || _voice is not { Enabled: true })
         {
+            _deferredVoiceClip = null;
             StopVoicePlayback();
             return;
         }
 
         if (!SpeechFragments.BelongsTo(clip.Text, _requestedVoiceText))
         {
+            _deferredVoiceClip = null;
             _voice?.NotifyPlaybackCompleted();
+            return;
+        }
+
+        if (_isHiddenToTray)
+        {
+            _deferredVoiceClip = clip;
             return;
         }
 
@@ -1796,6 +1900,7 @@ public partial class MainWindow : Window
 
     private void StopVoicePlayback()
     {
+        _deferredVoiceClip = null;
         _voice?.Stop();
         ReleaseVoicePlayer();
         if (_voiceLineActive)
@@ -1851,7 +1956,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (_voiceLineActive)
+        if (_awaitingReply || _voiceLineActive)
         {
             _bubbleTimer.Stop();
             return;
@@ -1874,6 +1979,7 @@ public partial class MainWindow : Window
 
     private void CollapseBubble()
     {
+        _awaitingReply = false;
         _bubbleTimer.Stop();
         _voiceProgressTimer.Stop();
         VoiceProgressRing.Visibility = Visibility.Collapsed;
@@ -2361,11 +2467,11 @@ public partial class MainWindow : Window
         {
             ShowBubble(
                 reply.Text,
-                speak: true,
+                speak: reply.SourceLine?.SourceKind != "builtin_fallback",
                 tone: reply.SourceLine?.Tone,
                 trigger: reply.SourceLine?.Trigger.ToString(),
-                urgent: reply.Trigger == CompanionEvent.Click);
-            if (!InteractionFrozen)
+                urgent: reply.Trigger is CompanionEvent.Click or CompanionEvent.Startup);
+            if (!InteractionFrozen && reply.SourceLine?.SourceKind != "builtin_fallback")
             {
                 NoteCorpusLine(reply.Text);
             }
@@ -2668,6 +2774,12 @@ public partial class MainWindow : Window
         }
         if (resumingFromTray)
         {
+            if (_deferredVoiceClip is { } deferred)
+            {
+                _deferredVoiceClip = null;
+                OnVoicePlaybackReady(deferred);
+            }
+
             var replayDisplayed = ConsumePendingDialogueWarmupOutcome(
                 restoreTime,
                 restoreFullscreen);

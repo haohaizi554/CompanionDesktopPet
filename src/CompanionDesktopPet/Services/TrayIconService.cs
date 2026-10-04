@@ -177,7 +177,7 @@ public sealed class TrayIconService : IDisposable
             };
             ExitMenuItem = new Forms.ToolStripMenuItem("先休息啦（退出）");
 
-            contextMenu = new Forms.ContextMenuStrip();
+            contextMenu = new PetTrayMenuStrip();
             contextMenu.Items.AddRange(
             [
                 ShowHideMenuItem,

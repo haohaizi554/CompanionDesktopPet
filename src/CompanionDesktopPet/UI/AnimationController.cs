@@ -132,15 +132,27 @@ public sealed class AnimationController : IPetAnimationController
             return;
         }
 
-        ApplyIdleMotion();
+        ApplyPostureMotion();
     }
 
     private void ApplyIdleMotion()
     {
         RemoveIdleAnimations();
-        var breathSeconds = _speechMotion ? 1.6 : 2.0;
+        ApplyBreath();
+        ApplyPostureMotion();
+    }
+
+    private void ApplyBreath()
+    {
+        const double breathSeconds = 2.0;
         ApplyIdle(breathingScale, ScaleTransform.ScaleXProperty, 1.0, 1.015, breathSeconds);
         ApplyIdle(breathingScale, ScaleTransform.ScaleYProperty, 0.985, 1.015, breathSeconds);
+    }
+
+    private void ApplyPostureMotion()
+    {
+        RemoveAnimation(swayRotation, RotateTransform.AngleProperty);
+        RemoveAnimation(floatingOffset, TranslateTransform.YProperty);
         var sway = _speechMotion ? 0.3 : 0.6;
         var lift = _speechMotion ? 0.8 : 1.5;
         var seconds = _speechMotion ? 5.0 : 4.0;

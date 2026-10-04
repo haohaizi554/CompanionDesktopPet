@@ -423,6 +423,11 @@ internal static class RangeSliderMath
         bool isRange)
     {
         var high = isRange ? Math.Min(maximum, upper - Math.Max(0, gap)) : maximum;
+        if (high < minimum)
+        {
+            high = minimum;
+        }
+
         return Fit(value, minimum, high, minimum, step);
     }
 
@@ -435,6 +440,11 @@ internal static class RangeSliderMath
         double gap)
     {
         var low = Math.Max(minimum, lower + Math.Max(0, gap));
+        if (low > maximum)
+        {
+            low = maximum;
+        }
+
         return Fit(value, low, maximum, minimum, step);
     }
 

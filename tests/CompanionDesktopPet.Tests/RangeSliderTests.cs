@@ -37,6 +37,8 @@ public sealed class RangeSliderTests
         Assert.Equal(12, RangeSliderMath.FitLower(14, 1, 30, 15, 1, 3, true));
         Assert.Equal(17, RangeSliderMath.FitUpper(15, 1, 30, 14, 1, 3));
         Assert.Equal(30, RangeSliderMath.FitLower(40, 1, 30, 30, 1, 0, false));
+        Assert.Equal(1, RangeSliderMath.FitLower(15, 1, 30, 10, 1, 100, true));
+        Assert.Equal(30, RangeSliderMath.FitUpper(15, 1, 30, 20, 1, 100));
     }
 
     [Fact]
