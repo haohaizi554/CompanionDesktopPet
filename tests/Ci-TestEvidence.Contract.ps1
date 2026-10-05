@@ -331,7 +331,7 @@ try {
     foreach ($requiredHybridEvidence in @(
         '82,132'
         '15,000/15,000'
-        '30.07%'
+        '30.62%'
         'Validation: 0 hard errors, 1 warnings'
         '--title $releaseTitle'
     )) {

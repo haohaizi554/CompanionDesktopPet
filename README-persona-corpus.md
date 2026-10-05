@@ -261,8 +261,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
 | `data/optimized/persona-surface-manifest.tsv` | `bcf9c97be0e4b1d7b7db11fcb46f44de17ef0ade6cb2e79d69f8af69bdbc637d` |
 | `config/persona-authorship-manifest.json` | `4742a984077ce044adf8f059ee46dd36bfd7f4a0248c3422060bd366027cc4b6` |
 | `data/optimized/persona-authorship-ledger.tsv` | `31305579ebf55d2d49c3227d7c7664b16e89abd0e9aab3cbbfa11ae3e0cace8d` |
-| `reports/simulation-report.md` | `2fceb9aecd6817dedf4c3690938c0c1656c97eeff4af8558f300791091597952` |
-| `reports/simulation-events.json` | `84c05704368bc5a18946342e2f6d5cef113ebc345aa9ac7f3b8037f45b6a8fd2` |
+| `reports/simulation-report.md` | `5600a860db6f91f7e33aa1673cafd9a1b839206769d262c48439514bc99debbe` |
+| `reports/simulation-events.json` | `48c5be7a5ddeda6966d75c6b23bcb1bbafb9e709fd06bcda1b4fe2d170762772` |
 | 当前 `v1.4.0` 的 `outputs/CompanionDesktopPet/佳怡桌宠.exe` | `19472bed0ea847b90cd73274b66c00d420cf4884ea2ae32ad4984029b3247387` |
 | 历史 `v1.0.0` 的 `outputs/CompanionDesktopPet/佳怡桌宠.exe` | `b79bf57a94d63387b6d8db288e53f64b06af32a3aa4881e7c069634839442a82` |
 

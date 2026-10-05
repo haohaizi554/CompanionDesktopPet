@@ -80,11 +80,11 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run
 - legacy 分区保留 v1.2.1 的 806 条 curated 内容与 51,326 条 hash-bound surface，合计 52,132 条；authored 分区仍为 100 个批次、每批 300 条。
 - 100 个 authored 批次各 300 条，合计 30,000 条；manifest 绑定每批文本与元数据摘要，ledger 逐行绑定 variant、关系画像与根哈希。
 - 当前运行时精确为 82,132 条：30,000 条 authored 加 52,132 条 legacy，按唯一 `semantic_group` 聚合为 1,723 个场景。
-- 来源档位由 `source_kind` 派生；最近 100 次播放的 legacy 总体门禁为 25%–35%，正式 100-seed 模拟实测 30.07%。
+- 来源档位由 `source_kind` 派生；最近 100 次播放的 legacy 总体门禁为 25%–35%，正式 100-seed 模拟实测 30.62%。
 - 21 列 v2 元数据包含 `relationship_profile`；受控值为 `neutral`、`warm_friend`、`playful_friend`、`nickname_easter_egg`。
 - 运行时按场景优先：先执行触发器/上下文、语义冷却、每日上限、最小间隔、滚动小时预算、夜间预算、组配额与关系画像配额，再在所选场景内选择合格变体。
 - 发布模拟门禁是 legacy 25%–35%、Easter egg 8%–12%、seasoning 0.5%–1.5%、dry-sharp 0%–4%；它们是 30 天 × 100 seeds 的播放暴露率，不是 TSV 行数占比。
-- 正式模拟结果为 15,000/15,000 次输出、legacy 30.07%、0 hard violations；联合 validator 为 0 hard errors，唯一 warning 是不参与播放验收的 legacy surface 原始库存观察。
+- 正式模拟结果为 15,000/15,000 次输出、legacy 30.62%、0 hard violations；联合 validator 为 0 hard errors，唯一 warning 是不参与播放验收的 legacy surface 原始库存观察。
 
 下面的 806/51,326/52,132/533/20 列条目仅保留为 v1.2.1 历史基线，不是当前发布门禁：
 - 当前运行时精确集成 52,132 条启用语料：806 条 curated core 加 51,326 条通过安全筛选并由 manifest 精确绑定的 legacy surfaces；按唯一 `semantic_group` 聚合后精确为 533 个场景。

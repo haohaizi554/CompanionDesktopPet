@@ -250,8 +250,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
 | scheduler semantic binding | `eedc8979fb239a915789af4ff62d55b31a2aeabde3f196dabd7355e73f666f2a` |
 | editorial manifest | `ce03fcbe4bb4de0f61ab81e29075ed80eb30bfe921bb1499e5514a1a3c5ad7b5` |
 | subseed derivation v2 | `e5f6d36ffb5d4936bccca24cb9c7177a63e02d937118342916bd5eea0a83640d` |
-| simulation report | `2fceb9aecd6817dedf4c3690938c0c1656c97eeff4af8558f300791091597952` |
-| validator-facing simulation events | `84c05704368bc5a18946342e2f6d5cef113ebc345aa9ac7f3b8037f45b6a8fd2` |
+| simulation report | `5600a860db6f91f7e33aa1673cafd9a1b839206769d262c48439514bc99debbe` |
+| validator-facing simulation events | `48c5be7a5ddeda6966d75c6b23bcb1bbafb9e709fd06bcda1b4fe2d170762772` |
 | current `v1.3.0` `佳怡桌宠.exe` | `9d20f5a546d10c65ac5b65558dbcc722f96ceef5e63fb89484dcb69bc420d5e6` |
 | current `v1.2.1` `佳怡桌宠.exe` | `7d5343c01e1ed89ef15e3d9595f6c9fb1ec24f8275db15628a5b541ad5c1ff03` |
 | historical `v1.0.0` `佳怡桌宠.exe` | `b79bf57a94d63387b6d8db288e53f64b06af32a3aa4881e7c069634839442a82` |

@@ -390,7 +390,26 @@ def _candidate_row_is_safe(row: object, config: SchedulerConfig) -> bool:
         or row.max_per_day < 1
     ):
         return False
-    return True
+    return _dry_sharp_metadata_allowed(row)
+
+
+def _dry_sharp_metadata_allowed(row: CorpusLine) -> bool:
+    """Keep dry_sharp playback inside the contract's forbidden-metadata boundary."""
+
+    if row.tone != "dry_sharp":
+        return True
+    policy = _persona_contract().dry_sharp
+    forbidden_groups = policy["forbidden_category_groups"]
+    forbidden_triggers = policy["forbidden_triggers"]
+    forbidden_contexts = policy["forbidden_context_tokens"]
+    if row.category_group in forbidden_groups or row.trigger in forbidden_triggers:
+        return False
+    tokens = {
+        token.strip()
+        for token in row.required_context.split(",")
+        if token.strip() and token.strip() != "none"
+    }
+    return tokens.isdisjoint(forbidden_contexts)
 
 
 def _context_tokens(required_context: str, config: SchedulerConfig) -> tuple[str, ...] | None:

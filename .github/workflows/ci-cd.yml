@@ -970,8 +970,8 @@ jobs:
           ## 验证结果
 
           - Python 与 .NET Release 全量测试均通过，实际发现数、通过数和零跳过/零失败状态保存在本标签质量门禁日志中。
-          - 正式模拟：30 天 × 100 个固定 seeds，产生 15,000/15,000 次输出；legacy 实际播放 4,511 次，占 30.07%，每个 seed 均为 29.33%–30.67%。
-          - 模拟结果为 0 个 hard violations；dry_sharp 2.00%、seasoning 1.32%、Easter egg 9.89%，均在发布契约内。
+          - 正式模拟：30 天 × 100 个固定 seeds，产生 15,000/15,000 次输出；legacy 实际播放 4,593 次，占 30.62%，每个 seed 均为 29.33%–32.00%。
+          - 模拟结果为 0 个 hard violations；dry_sharp 2.00%、seasoning 1.33%、Easter egg 10.00%，均在发布契约内。
           - 联合语料校验：0 hard errors；唯一 warning 是 51,326 条 legacy surface 的原始库存观察，不是播放安全违规。
           - 发布构建继续执行干净 self-contained single-file publish、单文件边界检查、真实 WPF 隔离烟测与 SHA-256 校验。
 

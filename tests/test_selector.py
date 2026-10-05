@@ -716,6 +716,41 @@ class SelectorFilterTests(unittest.TestCase):
             [row], context_at(now, minutes_since_last_output=minutes), history, now, seed=0
         )
 
+    def test_dry_sharp_forbidden_metadata_is_not_selectable(self) -> None:
+        forbidden = corpus_line(
+            id="forbidden-dry",
+            semantic_group="care.dry",
+            category_group="daily_care",
+            tone="dry_sharp",
+            text="喝水这件事可以先放在手边。",
+        )
+        allowed_dry = corpus_line(
+            id="allowed-dry",
+            semantic_group="life.dry",
+            tone="dry_sharp",
+            text="桌面边缘的影子今天收得很整齐。",
+        )
+        allowed_warm = corpus_line(
+            id="allowed-warm",
+            semantic_group="life.warm",
+        )
+        history = SelectionHistory()
+
+        self.assertIsNone(self.select(forbidden, history))
+        self.assertEqual((), history.records)
+        self.assertEqual("allowed-dry", self.select(allowed_dry).row.id)
+        selected = select_line(
+            [forbidden, allowed_warm],
+            context_at(),
+            history,
+            NOW,
+            seed=0,
+        )
+        self.assertIsNotNone(selected)
+        assert selected is not None
+        self.assertEqual("allowed-warm", selected.row.id)
+        self.assertEqual("allowed-warm", history.records[-1].selected_id)
+
     def test_disabled_rows_are_removed_first(self) -> None:
         history = SelectionHistory()
         self.assertIsNone(self.select(corpus_line(enabled=False), history))
