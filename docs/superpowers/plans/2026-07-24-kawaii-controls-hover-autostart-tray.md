@@ -1507,3 +1507,8 @@ git commit -m "build: release kawaii tray desktop pet"
 Run two review gates: task-spec compliance and code quality. Confirm the clean worktree has only the known ignored scratch/cache paths. Push the feature branch, update the existing PR, then fast-forward the original user worktree only if its twelve known dirty/untracked paths remain unchanged and no tracked overlap exists.
 
 Final handoff must report commit range, test counts, validator/simulation results, EXE absolute path, byte size, SHA-256, tray/registry cleanup status, GitHub branch/PR, and preserved user-owned paths.
+
+
+## v1.7.0 增补
+
+2026-10-05：上面的正文保持原样。v1.7.0 在桌面版之外增加 Android 浮窗 com.jiayi.companionpet，显示版本 1.7.0。对话步骤与桌面 agent 对齐并打包进 APK，语音仍由这台电脑的显卡经 http://43.138.138.200:8765 合成。运行库仍是 82,132 条、1,723 个语义场景，SHA-256 仍为 339358c524785db30badf420a3bdc2b89c7753486e907ff1a5216f68ca5d7ece。Windows 安装包仍是 v1.6.0。

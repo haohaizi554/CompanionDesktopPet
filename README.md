@@ -221,3 +221,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
 本仓库采用分层许可：可分离的技术代码按 [PolyForm Noncommercial License 1.0.0](LICENSE.md) 提供，可用于非商业学习、研究、实验、修改与按条款分发。由于该许可限制商业用途，本项目属于 **source-available（源码可见）**，不是 OSI 定义的开源软件。仓库使用 `LICENSE.md` 让 GitHub 正常渲染许可正文；Release 包中仍以标准文件名 `LICENSE` 携带同一份逐字节一致的原文。
 
 桌宠形象、图标、姓名与昵称、人格、口吻、背景、关系设定、全部语料、语义分组、剧情/决策树、行为森林和编辑性编排均不随技术代码授权，原则上保留全部权利。官方 Release 仅额外允许非商业的私下运行，不授权抽取、复用、转载、改编、训练/微调模型、制作数据集或衍生角色。完整边界见 [LICENSE-SCOPE.md](LICENSE-SCOPE.md)、[ASSET_AND_PERSONA_RIGHTS.md](ASSET_AND_PERSONA_RIGHTS.md) 与 [NOTICE](NOTICE)。
+
+## v1.7.0 增补
+
+2026-10-05。上面各节保持原样。annotated tag `v1.7.0` 指向 `eae7ebd`，Windows 单 EXE 仍由该 tag 的流水线发布；带语音运行时的安装包仍是 v1.6.0。运行库仍是 82,132 条、1,723 个语义场景，SHA-256 仍为 `339358c524785db30badf420a3bdc2b89c7753486e907ff1a5216f68ca5d7ece`。
+
+这次增加的是 Android 浮窗，包名 `com.jiayi.companionpet`，显示版本 1.7.0，version code 2。工程在 `src/CompanionDesktopPet.Android/`，不加入 Windows 解决方案。`android/jiayi-agent/` 用 Chaquopy 把 `dialogue/persona_dialogue` 打进 APK，对话按桌面 agent 的顺序在手机上完成：关系设定、记忆压缩、检索、审计和设置。本机 `persona.json` 里的「她是对方的女朋友」在打包时带上；说「做我女朋友」仍走本地回合，回复「好，我做你女朋友。」回车和发送按钮都会送出这一句。浮窗平时不占键盘，只有点进输入框才取焦点，点外面就放开。气泡底部留出行距，最后一行不再被裁掉。
+
+语音不再探测空闲端口，也不再把非模拟器上保存的局域网或 `10.0.2.2` 地址留着。手机固定把文本发到 `http://43.138.138.200:8765`，由这台电脑的显卡合成后经 frp 转出。模拟器仍可使用 `10.0.2.2`。对话不再要求平板去连本机 `8766`。
+
+本地调试签名 APK 为 116,374,976 字节，SHA-256 为 `9fc1b9218c68ed2cc7842693ff5ca8845d7f65009e7f1f7a501f1d1392968bdd`。仓库忽略 `outputs/`、`voice/gpu-host.log`、`voice/gpu-out/`，以及 Android 的 `build/`、`.gradle/` 和 `local.properties`。

@@ -389,3 +389,8 @@ git status --short
 - 已关闭（v1.2.1 历史 Release）：built-from、SDK、ProductVersion、字节数、SHA-256、签名状态、两个 smoke、ZIP 清单与 8 项资产均保留在第 7.3 节。
 - 已关闭（v1.3.0 历史 Release）：built-from、SDK、ProductVersion、字节数、SHA-256、签名状态、两个 smoke、ZIP 清单、8 项资产与具体中文 Release 均已在第 7.4 节登记。
 - 已关闭（v1.4.0 当前 Release）：标题仅为版本号 `v1.4.0`，具体中文正文、built-from、SDK、ProductVersion、测试与模拟数字、字节数、SHA-256、签名状态、代理回下载、最终 smoke、ZIP 清单与 8 项资产均已在第 7.5 节登记。
+
+
+## v1.7.0 增补
+
+2026-10-05：上面的正文保持原样。v1.7.0 在桌面版之外增加 Android 浮窗 com.jiayi.companionpet，显示版本 1.7.0。对话步骤与桌面 agent 对齐并打包进 APK，语音仍由这台电脑的显卡经 http://43.138.138.200:8765 合成。运行库仍是 82,132 条、1,723 个语义场景，SHA-256 仍为 339358c524785db30badf420a3bdc2b89c7753486e907ff1a5216f68ca5d7ece。Windows 安装包仍是 v1.6.0。

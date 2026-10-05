@@ -269,3 +269,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
 当前 EXE 是 `v1.4.0` 实证：annotated tag 指向提交 `d30e0102a3896b173ce1554b6769a705158effbe`，使用 .NET SDK `9.0.301` 构建，`ProductVersion=1.4.0+d30e0102a3896b173ce1554b6769a705158effbe`，大小为 `84,047,575` 字节。云端 publish、delivery、isolated、直接 Release 资产、ZIP 内 EXE、经 `127.0.0.1:7890` 回下载后的最终本地隔离副本 SHA-256 全部等于上表值；最终本地复核 smoke PID `31808` 自行以退出码 0 结束。历史 v1.0.0/v1.1.0/v1.2.1/v1.3.0 的独立证据仍保留在发布清单中。
 
 发布表中任何哈希占位都必须先清零；v1.4.0 的 EXE、资产与校验和来自目标标签流水线和代理回下载实证，没有预填或沿用旧值。完整 8 项资产哈希、ZIP 清单、签名状态和 CI 链接见发布与清理清单。
+
+
+## v1.7.0 增补
+
+2026-10-05：上面的正文保持原样。v1.7.0 在桌面版之外增加 Android 浮窗 com.jiayi.companionpet，显示版本 1.7.0。对话步骤与桌面 agent 对齐并打包进 APK，语音仍由这台电脑的显卡经 http://43.138.138.200:8765 合成。运行库仍是 82,132 条、1,723 个语义场景，SHA-256 仍为 339358c524785db30badf420a3bdc2b89c7753486e907ff1a5216f68ca5d7ece。Windows 安装包仍是 v1.6.0。

@@ -4552,3 +4552,8 @@ All items remain disabled and unapproved until a human decision is recorded. Thi
 | pii_75243_32232b815b93 | 75243 | EasterEgg | location_or_history | 湖南冬天的湿冷，会让人认真想念厚被子。 | 确认角色设定为虚构且获授权前保持禁用。 |  |
 | pii_75251_ed1a70aaaa23 | 75251 | EasterEgg | location_or_history | 广东太阳很认真，防晒也得认真一点。 | 确认角色设定为虚构且获授权前保持禁用。 |  |
 | pii_75252_204625a70873 | 75252 | EasterEgg | location_or_history | 湖南人说莫慌时，听起来真的会稳一点。 | 确认角色设定为虚构且获授权前保持禁用。 |  |
+
+
+## v1.7.0 增补
+
+2026-10-05：上面的正文保持原样。v1.7.0 在桌面版之外增加 Android 浮窗 com.jiayi.companionpet，显示版本 1.7.0。对话步骤与桌面 agent 对齐并打包进 APK，语音仍由这台电脑的显卡经 http://43.138.138.200:8765 合成。运行库仍是 82,132 条、1,723 个语义场景，SHA-256 仍为 339358c524785db30badf420a3bdc2b89c7753486e907ff1a5216f68ca5d7ece。Windows 安装包仍是 v1.6.0。

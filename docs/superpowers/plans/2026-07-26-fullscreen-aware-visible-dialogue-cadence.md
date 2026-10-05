@@ -1073,3 +1073,8 @@ Require final status clean and final `HEAD == origin/main`. If the evidence comm
 - [x] Every code task contains a RED command, GREEN command, commit, and proxy push; documentation and release tasks use their authoritative verification gates.
 - [x] Final verification uses fresh full outputs rather than historical test counts.
 - [x] Release verification covers all eight assets, hashes, ProductVersion, unsigned signature, ZIP layout, and real smoke.
+
+
+## v1.7.0 增补
+
+2026-10-05：上面的正文保持原样。v1.7.0 在桌面版之外增加 Android 浮窗 com.jiayi.companionpet，显示版本 1.7.0。对话步骤与桌面 agent 对齐并打包进 APK，语音仍由这台电脑的显卡经 http://43.138.138.200:8765 合成。运行库仍是 82,132 条、1,723 个语义场景，SHA-256 仍为 339358c524785db30badf420a3bdc2b89c7753486e907ff1a5216f68ca5d7ece。Windows 安装包仍是 v1.6.0。
