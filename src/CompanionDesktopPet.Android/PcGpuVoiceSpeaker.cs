@@ -66,12 +66,13 @@ internal sealed class PcGpuVoiceSpeaker : IVoiceSpeaker
         UseProxy = false,
         ConnectTimeout = TimeSpan.FromSeconds(8)
     })
-    { Timeout = TimeSpan.FromMinutes(3) };
+    { Timeout = Timeout.InfiniteTimeSpan };
     private readonly Handler _main = new(Looper.MainLooper!);
     private int _generation;
     private int _pending;
     private int _pump;
     private readonly object _speechGate = new();
+    private CancellationTokenSource? _requestCancel;
     private string? _nextText;
     private string? _nextTone;
     private string? _nextTrigger;
@@ -133,15 +134,18 @@ internal sealed class PcGpuVoiceSpeaker : IVoiceSpeaker
             return;
         }
 
-        int generation;
+        CancellationTokenSource? previous;
         lock (_speechGate)
         {
             _nextText = text.Trim();
             _nextTone = tone;
             _nextTrigger = trigger;
-            generation = Interlocked.Increment(ref _generation);
+            Interlocked.Increment(ref _generation);
+            previous = _requestCancel;
+            _requestCancel = new CancellationTokenSource();
         }
 
+        previous?.Cancel();
         Interlocked.Exchange(ref _pending, 1);
         SynthesisStarted?.Invoke(text);
         if (Interlocked.CompareExchange(ref _pump, 1, 0) == 0)
@@ -183,36 +187,43 @@ internal sealed class PcGpuVoiceSpeaker : IVoiceSpeaker
                 continue;
             }
 
+            var request = _requestCancel;
+            if (request is null)
+            {
+                continue;
+            }
+
             try
             {
-                var speed = _speed;
-                var temperature = _temperature;
-                var repetition = _repetition;
-                var topK = _topK;
-                var topP = _topP;
+                request.CancelAfter(TimeSpan.FromSeconds(45));
                 var payload = JsonSerializer.Serialize(new
                 {
                     text,
                     tone,
                     trigger,
-                    speed_factor = speed,
-                    temperature,
-                    repetition_penalty = repetition,
-                    top_k = topK,
-                    top_p = topP
+                    speed_factor = _speed,
+                    temperature = _temperature,
+                    repetition_penalty = _repetition,
+                    top_k = _topK,
+                    top_p = _topP
                 });
                 using var response = await _http.PostAsync(
                     _baseUrl + "/v1/speak",
-                    new StringContent(payload, System.Text.Encoding.UTF8, "application/json"));
-                response.EnsureSuccessStatusCode();
-                var bytes = await response.Content.ReadAsByteArrayAsync();
+                    new StringContent(payload, System.Text.Encoding.UTF8, "application/json"),
+                    request.Token).ConfigureAwait(false);
+                var bytes = await response.Content.ReadAsByteArrayAsync(request.Token).ConfigureAwait(false);
+                if (!response.IsSuccessStatusCode || bytes.Length < 44)
+                {
+                    throw new HttpRequestException("voice returned no audio");
+                }
+
                 if (generation != Volatile.Read(ref _generation))
                 {
                     continue;
                 }
 
                 var path = Path.Combine(_cache, generation + ".wav");
-                await File.WriteAllBytesAsync(path, bytes);
+                await File.WriteAllBytesAsync(path, bytes, request.Token).ConfigureAwait(false);
                 var levels = SpeechMouthTimeline.FromWav(path);
                 PlaybackReady?.Invoke(new VoiceClip(text, path));
                 _main.Post(() => Play(path, generation, levels));
@@ -221,7 +232,7 @@ internal sealed class PcGpuVoiceSpeaker : IVoiceSpeaker
             {
                 if (generation == Volatile.Read(ref _generation))
                 {
-                    Failed?.Invoke("语音还在这台电脑的显卡上。平板连不上 " + _baseUrl + "，本机的转发要开着。");
+                    Failed?.Invoke("这句话的语音没回来。对话还能继续，你接着说就行。");
                     Finish(generation);
                 }
             }
@@ -239,17 +250,22 @@ internal sealed class PcGpuVoiceSpeaker : IVoiceSpeaker
 
     public void Stop()
     {
+        CancellationTokenSource? previous;
+        int generation;
         lock (_speechGate)
         {
             _nextText = null;
+            generation = Interlocked.Increment(ref _generation);
+            previous = _requestCancel;
+            _requestCancel = null;
         }
 
-        Interlocked.Increment(ref _generation);
-        _main.Post(StopPlayer);
-        Finish(Volatile.Read(ref _generation));
+        previous?.Cancel();
+        Interlocked.Exchange(ref _pending, 0);
+        _main.Post(() => CompleteOnMain(generation));
     }
 
-    public void NotifyPlaybackCompleted() => StopPlayer();
+    public void NotifyPlaybackCompleted() => DetachPlayer();
 
     public void Dispose()
     {
@@ -264,14 +280,14 @@ internal sealed class PcGpuVoiceSpeaker : IVoiceSpeaker
             return;
         }
 
-        StopPlayer();
+        DetachPlayer();
         _levels = levels;
         var player = new MediaPlayer();
         player.Prepared += (_, _) =>
         {
             if (generation != Volatile.Read(ref _generation))
             {
-                player.Release();
+                ReleasePlayer(player);
                 return;
             }
 
@@ -294,8 +310,14 @@ internal sealed class PcGpuVoiceSpeaker : IVoiceSpeaker
         player.PrepareAsync();
     }
 
-    private void StopPlayer()
+    private void DetachPlayer()
     {
+        if (Looper.MyLooper() != _main.Looper)
+        {
+            _main.Post(DetachPlayer);
+            return;
+        }
+
         if (_tick is not null)
         {
             _main.RemoveCallbacks(_tick);
@@ -305,20 +327,24 @@ internal sealed class PcGpuVoiceSpeaker : IVoiceSpeaker
         Mouth?.Invoke(0);
         var player = _player;
         _player = null;
-        if (player is null)
+        if (player is not null)
         {
-            return;
+            ReleasePlayer(player);
         }
+    }
 
-        try
+    private static void ReleasePlayer(MediaPlayer player)
+    {
+        Task.Run(() =>
         {
-            player.Stop();
-        }
-        catch (Exception)
-        {
-        }
-
-        player.Release();
+            try
+            {
+                player.Release();
+            }
+            catch (Exception)
+            {
+            }
+        });
     }
 
     private void Finish(int generation)
@@ -329,11 +355,18 @@ internal sealed class PcGpuVoiceSpeaker : IVoiceSpeaker
         }
 
         Interlocked.Exchange(ref _pending, 0);
-        _main.Post(() =>
+        _main.Post(() => CompleteOnMain(generation));
+    }
+
+    private void CompleteOnMain(int generation)
+    {
+        if (generation != Volatile.Read(ref _generation))
         {
-            StopPlayer();
-            VoiceIdle?.Invoke();
-        });
+            return;
+        }
+
+        DetachPlayer();
+        VoiceIdle?.Invoke();
     }
 
     private void TickMouth()

@@ -28,6 +28,7 @@ internal sealed class PetSession : IDisposable
     private CompanionEventPump? _events;
     private IVoiceSpeaker? _voice;
     private readonly PcDialogueClient _dialogueClient;
+    private readonly PcGpuVoiceSpeaker? _gpuVoice;
     private PetSettings _settings = PetSettings.Default;
     private double _left = double.NaN;
     private double _top = double.NaN;
@@ -61,6 +62,7 @@ internal sealed class PetSession : IDisposable
     private int _spokenFlush;
     private bool _voiceLine;
     private bool _awaitingReply;
+    private int _speakEpoch;
     private bool _fingerHold;
     private bool _bubbleVisible;
     private bool _bubbleHeld;
@@ -85,9 +87,20 @@ internal sealed class PetSession : IDisposable
         IVoiceSpeaker? voice = PcGpuVoiceSpeaker.TryCreate(voiceContext, voiceHost, stateDirectory);
         if (voice is PcGpuVoiceSpeaker gpu)
         {
+            _gpuVoice = gpu;
             gpu.Mouth += level => MouthChanged?.Invoke(level);
             gpu.PlaybackFraction += fraction => VoiceCue?.Invoke(2, fraction);
-            gpu.Failed += message => _handler.Post(() => ShowText(message));
+            gpu.Failed += _ =>
+            {
+                var epoch = _speakEpoch;
+                _handler.Post(() =>
+                {
+                    if (epoch == _speakEpoch)
+                    {
+                        ReleaseVoiceHold();
+                    }
+                });
+            };
         }
 
         _voice = voice ?? JiayiVoiceSpeaker.TryCreate(stateDirectory ?? AppContext.BaseDirectory);
@@ -529,6 +542,7 @@ internal sealed class PetSession : IDisposable
             return;
         }
 
+        InterruptSpeaking();
         lock (_dialogueLines)
         {
             _dialogueLines.Enqueue(text.Trim());
@@ -607,21 +621,14 @@ internal sealed class PetSession : IDisposable
                     break;
                 }
 
-                var shown = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                var speakEpoch = _speakEpoch;
                 _handler.Post(() =>
                 {
                     if (DialogueEnabled && !_exit)
                     {
-                        ShowText("……", hold: true);
+                        ShowDialogueText("……", hold: true);
                     }
-
-                    shown.TrySetResult(true);
                 });
-                await shown.Task.ConfigureAwait(false);
-                if (_exit || !DialogueEnabled)
-                {
-                    break;
-                }
 
                 var settings = DialogueSkills.Describe(_parameters, Scale, _topmost, _paused, VoiceEnabled);
                 PersonaDialogueReply reply;
@@ -632,6 +639,11 @@ internal sealed class PetSession : IDisposable
                 catch (Exception exception)
                 {
                     global::Android.Util.Log.Error("jiayi", exception.ToString());
+                    reply = new PersonaDialogueReply(false, "这句话我没接住，你再说一次。", false);
+                }
+
+                if (string.IsNullOrWhiteSpace(reply.Text))
+                {
                     reply = new PersonaDialogueReply(false, "这句话我没接住，你再说一次。", false);
                 }
 
@@ -646,7 +658,16 @@ internal sealed class PetSession : IDisposable
                 {
                     try
                     {
-                        PresentDialogue(captured);
+                        var line = PresentDialogue(captured);
+                        if (!string.IsNullOrWhiteSpace(line) && speakEpoch == _speakEpoch)
+                        {
+                            SpeakLine(line, "gentle", "dialogue");
+                        }
+                    }
+                    catch (Exception exception)
+                    {
+                        global::Android.Util.Log.Error("jiayi", exception.ToString());
+                        ShowDialogueText("这句话我没接住，你再说一次。", hold: false);
                     }
                     finally
                     {
@@ -667,11 +688,11 @@ internal sealed class PetSession : IDisposable
         }
     }
 
-    private void PresentDialogue(PersonaDialogueReply reply)
+    private string? PresentDialogue(PersonaDialogueReply reply)
     {
         if (_exit || !DialogueEnabled)
         {
-            return;
+            return null;
         }
 
         _reminders ??= new PetReminderStore(_stateDirectory);
@@ -697,12 +718,8 @@ internal sealed class PetSession : IDisposable
             answer = reply.Text;
         }
 
-        _awaitingReply = false;
-        ShowText(answer);
-        if (reply.Ok)
-        {
-            SpeakLine(answer, "gentle", "dialogue");
-        }
+        ShowDialogueText(answer, hold: false);
+        return reply.Ok ? answer : null;
     }
 
     private void ApplySkillState(DialogueSkillState state)
@@ -1012,9 +1029,13 @@ internal sealed class PetSession : IDisposable
         }
     }
 
-    private void ShowText(string text, bool hold = false)
+    private void ShowText(string text, bool hold = false) => ShowBubble(text, hold, replaceWaiting: false);
+
+    private void ShowDialogueText(string text, bool hold) => ShowBubble(text, hold, replaceWaiting: true);
+
+    private void ShowBubble(string text, bool hold, bool replaceWaiting)
     {
-        if (_awaitingReply && !hold)
+        if (_awaitingReply && !hold && !replaceWaiting)
         {
             return;
         }
@@ -1031,6 +1052,16 @@ internal sealed class PetSession : IDisposable
         }
     }
 
+    private void InterruptSpeaking()
+    {
+        _speakEpoch++;
+        _voiceLine = false;
+        _bubbleHeld = _awaitingReply || _fingerHold;
+        VoiceCue?.Invoke(0, 0);
+        MouthChanged?.Invoke(0);
+        _voice?.Stop();
+    }
+
     private void SpeakLine(string text, string? tone, string? trigger)
     {
         if (_voice is not { Enabled: true } || string.IsNullOrWhiteSpace(text))
@@ -1038,7 +1069,6 @@ internal sealed class PetSession : IDisposable
             return;
         }
 
-        _awaitingReply = false;
         _voiceLine = true;
         _bubbleHeld = true;
         VoiceCue?.Invoke(1, 0);
