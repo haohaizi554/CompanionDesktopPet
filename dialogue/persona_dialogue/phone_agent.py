@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import json
+import os
+import threading
 from pathlib import Path
 from urllib.request import Request, urlopen
 
@@ -42,6 +44,7 @@ from persona_dialogue.skills import (
 )
 
 _FALLBACK = "我在呢，你慢慢说。"
+_LOCK = threading.Lock()
 _REMEMBER_LIMIT = 120
 _COMPACT_SYSTEM = "你在整理对话记忆。只输出一个 JSON 对象，不要markdown，不要多余的话。"
 _INDEX: LineIndex | None = None
@@ -121,6 +124,11 @@ def reply(
     api_key: str,
 ) -> str:
     spoken = " ".join((text or "").split()).strip()
+    with _LOCK:
+        return _reply_locked(corpus_path, soul_path, state_dir, spoken, base_url, model, api_key)
+
+
+def _reply_locked(corpus_path, soul_path, state_dir, spoken, base_url, model, api_key) -> str:
     try:
         directory = Path(state_dir)
         directory.mkdir(parents=True, exist_ok=True)
@@ -189,7 +197,7 @@ def reply(
                     prior=_prior(history),
                     max_chars=limit,
                     facts=_known(facts, persona),
-                    memory=summary,
+                    memory=_memory_line(summary, history),
                 )
                 draft = _text(
                     _chat(
@@ -231,6 +239,11 @@ def reply(
 
 def remember(state_dir: str, text: str) -> str:
     """她自己先说出口的句子写进同一份记忆，不调用模型。"""
+    with _LOCK:
+        return _remember_locked(state_dir, text)
+
+
+def _remember_locked(state_dir: str, text: str) -> str:
     cleaned = " ".join((text or "").split()).strip()
     if not cleaned:
         return _pack(True, "", [])
@@ -417,8 +430,26 @@ def _load(path: Path) -> dict:
         return {}
 
 
+def _memory_line(summary: str, history: list) -> str:
+    """摘要后面带上还没被盖住的原话，避免模型只看见这一句。"""
+    lines = [str(summary or "").strip()]
+    for message in history[-13:-1]:
+        text = message_text(message)
+        if not text:
+            continue
+        who = "对方" if isinstance(message, dict) and message.get("role") in {"user", "human"} else "佳怡"
+        lines.append(f"{who}：{text}")
+    return "\n".join(line for line in lines if line)
+
+
 def _save(path: Path, state: dict) -> None:
-    path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    with temporary.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(json.dumps(state, ensure_ascii=False))
+        handle.flush()
+        os.fsync(handle.fileno())
+    temporary.replace(path)
 
 
 def _pack(ok: bool, text: str, actions: list) -> str:

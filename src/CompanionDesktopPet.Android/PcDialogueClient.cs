@@ -128,18 +128,30 @@ internal sealed class PcDialogueClient : IDisposable
     {
         try
         {
+            var relationship = string.IsNullOrWhiteSpace(_stateDirectory) ? "" : PackedAgent.Relationship(_stateDirectory);
+            var history = string.IsNullOrWhiteSpace(_stateDirectory)
+                ? []
+                : PackedAgent.Transcript(_stateDirectory);
+            var system = "你是佳怡，停在屏幕边上陪着对方。只用中文，说一两句口语，不要列表，不要承认自己是模型或程序。"
+                + "接住前面已经说过的话，不要装成第一次见面。"
+                + (relationship.StartsWith("她是对方的", StringComparison.Ordinal)
+                    ? "现在的关系是" + relationship + "。顺着这个身份说话，不要推开，也不要解释这是设定。"
+                    : "关系听对方的。对方把她当成女朋友时，她就顺着陪。");
+            var messages = new List<object> { new Dictionary<string, string> { ["role"] = "system", ["content"] = system } };
+            foreach (var turn in history.TakeLast(12))
+            {
+                messages.Add(new Dictionary<string, string> { ["role"] = turn.Role, ["content"] = turn.Text });
+            }
+
+            if (history.Count == 0 || history[^1].Role != "user" || history[^1].Text != text)
+            {
+                messages.Add(new Dictionary<string, string> { ["role"] = "user", ["content"] = text });
+            }
+
             var payload = JsonSerializer.Serialize(new Dictionary<string, object?>
             {
                 ["model"] = LinkDefaults.ModelName,
-                ["messages"] = new object[]
-                {
-                    new Dictionary<string, string>
-                    {
-                        ["role"] = "system",
-                        ["content"] = "你是佳怡，停在屏幕边上陪着对方。只用中文，说一两句口语，不要列表，不要承认自己是模型或程序。"
-                    },
-                    new Dictionary<string, string> { ["role"] = "user", ["content"] = text }
-                },
+                ["messages"] = messages,
                 ["max_tokens"] = 180,
                 ["temperature"] = 0.7,
                 ["chat_template_kwargs"] = new Dictionary<string, object> { ["enable_thinking"] = false }
@@ -162,9 +174,17 @@ internal sealed class PcDialogueClient : IDisposable
             }
 
             reply = (reply ?? "").Trim();
-            return string.IsNullOrWhiteSpace(reply)
-                ? null
-                : new PersonaDialogueReply(true, reply, false);
+            if (string.IsNullOrWhiteSpace(reply))
+            {
+                return null;
+            }
+
+            if (!string.IsNullOrWhiteSpace(_stateDirectory))
+            {
+                PackedAgent.AppendExchange(_stateDirectory, text, reply);
+            }
+
+            return new PersonaDialogueReply(true, reply, false);
         }
         catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
         {

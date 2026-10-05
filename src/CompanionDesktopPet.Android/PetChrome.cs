@@ -104,6 +104,8 @@ internal sealed class CharacterView : FrameLayout
         Clickable = true;
     }
 
+    public override bool DispatchTouchEvent(MotionEvent? e) => OnTouchEvent(e);
+
     public event Action<float>? Tapped;
     public event Action? LongPressed;
     public event Action? DragStarted;
@@ -543,7 +545,8 @@ internal sealed class ComposerView : LinearLayout
         shell.SetStroke(Dip.Px(2), PetColors.Accent);
         _card.Background = shell;
         _card.Elevation = Dip.Px(3);
-        _input = new EditText(context) { Hint = "跟佳怡说一句" };
+        var input = new InputField(context) { Hint = "跟佳怡说一句" };
+        _input = input;
         _input.SetSingleLine(true);
         _input.SetTextSize(global::Android.Util.ComplexUnitType.Sp, 14);
         _input.SetMinHeight(Dip.Px(34));
@@ -555,21 +558,8 @@ internal sealed class ComposerView : LinearLayout
         _input.ImeOptions = ImeAction.Send;
         _input.SetPadding(0, Dip.Px(8), 0, Dip.Px(8));
         _input.SetOnEditorActionListener(new SendAction(Submit));
-        _input.KeyPress += (_, args) =>
-        {
-            if (args.Event?.Action == KeyEventActions.Down && args.KeyCode == Keycode.Enter)
-            {
-                Submit();
-                args.Handled = true;
-            }
-        };
-        _input.Touch += (_, args) =>
-        {
-            if (args.Event?.ActionMasked == MotionEventActions.Down)
-            {
-                Editing?.Invoke();
-            }
-        };
+        input.FingerPressed += () => Editing?.Invoke();
+        input.Enter = Submit;
         var button = new Button(context) { Text = "发送" };
         button.SetAllCaps(false);
         button.SetTextSize(global::Android.Util.ComplexUnitType.Sp, 14);
@@ -594,6 +584,7 @@ internal sealed class ComposerView : LinearLayout
     public void TakeInput()
     {
         _input.RequestFocus();
+        _input.RequestFocusFromTouch();
         var manager = (InputMethodManager?)Context?.GetSystemService(Context.InputMethodService);
         manager?.ShowSoftInput(_input, ShowFlags.Implicit);
     }
@@ -616,6 +607,42 @@ internal sealed class ComposerView : LinearLayout
         _input.Text = "";
         _submit(text);
         Finished?.Invoke();
+    }
+
+    private sealed class InputField : EditText
+    {
+        public Action? Enter { get; set; }
+
+        public event Action? FingerPressed;
+
+        public InputField(Context context) : base(context)
+        {
+        }
+
+        public InputField(IntPtr handle, JniHandleOwnership transfer) : base(handle, transfer)
+        {
+        }
+
+        public override bool OnTouchEvent(MotionEvent? e)
+        {
+            if (e?.ActionMasked == MotionEventActions.Down)
+            {
+                FingerPressed?.Invoke();
+            }
+
+            return base.OnTouchEvent(e);
+        }
+
+        public override bool OnKeyDown(Keycode keyCode, KeyEvent? e)
+        {
+            if (keyCode == Keycode.Enter && e?.Action == KeyEventActions.Down)
+            {
+                Enter?.Invoke();
+                return true;
+            }
+
+            return base.OnKeyDown(keyCode, e);
+        }
     }
 
     private sealed class SendAction : Java.Lang.Object, TextView.IOnEditorActionListener

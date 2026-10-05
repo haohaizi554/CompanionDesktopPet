@@ -83,7 +83,7 @@ public sealed class OverlayService : Service
         _menu.EnsureKeyboard = FocusMenuForTyping;
         _menu.KeyboardIdle += ReleaseMenuTyping;
         Wire(_character, _bubble, _session);
-        _petParams = Window(_character, Dip.Px(_session.CharacterSize), Dip.Px(_session.CharacterSize), focusable: false);
+        _petParams = Window(_character, Dip.Px(_session.CharacterSize), Dip.Px(_session.CharacterSize), focusable: false, closeOnOutside: false);
         AddPet();
         _ = RunStartAsync();
         PetAwareness.Changed += OnAwarenessChanged;
@@ -239,6 +239,7 @@ public sealed class OverlayService : Service
             }
 
             PlaceBubble();
+            KeepPetOnTop();
         };
         session.BubbleCleared += () => Remove(_bubble, ref _bubbleAdded);
         session.Clicked += positive => _character?.PlayClick(positive);
@@ -315,6 +316,7 @@ public sealed class OverlayService : Service
 
         _menu.Show(PanelPage.Root);
         PlaceMenu();
+        KeepPetOnTop();
     }
 
     private void CloseMenu() => Remove(_menu, ref _menuAdded);
@@ -337,6 +339,7 @@ public sealed class OverlayService : Service
 
         _composerParams!.SoftInputMode = SoftInput.AdjustPan;
         PlaceComposer();
+        KeepPetOnTop();
     }
 
     private void QueueDrag(int x, int y)
@@ -648,6 +651,16 @@ public sealed class OverlayService : Service
         {
             global::Android.Util.Log.Error("jiayi", exception.ToString());
         }
+    }
+
+    private void KeepPetOnTop()
+    {
+        if (_character is null || _petParams is null || !_petAdded)
+        {
+            return;
+        }
+
+        Raise(_character, _petParams);
     }
 
     private void Raise(View view, WindowManagerLayoutParams parameters)
