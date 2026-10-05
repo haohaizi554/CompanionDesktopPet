@@ -110,8 +110,11 @@ class DialogueHost:
                     self._ready = False
                     self._error = "对话进程退出了"
                     raise RuntimeError(self._error)
-                message = json.loads(line)
-                if message.get("id") != request_id:
+                try:
+                    message = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(message, dict) or message.get("id") != request_id:
                     continue
                 return message
 

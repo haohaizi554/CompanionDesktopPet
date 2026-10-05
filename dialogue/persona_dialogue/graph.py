@@ -19,6 +19,7 @@ from persona_dialogue.audit import (
     asks_to_repeat,
     audit,
     clean_reply,
+    completion_text,
     drop_known_sentences,
     fit_reply,
     repeats_earlier_reply,
@@ -378,9 +379,4 @@ def _invoke(model, messages, tools: bool, force: bool = False):
 
 
 def _message_text(response) -> str:
-    content = getattr(response, "content", response)
-    if isinstance(content, list):
-        content = "".join(
-            part.get("text", "") if isinstance(part, dict) else str(part) for part in content
-        )
-    return str(content or "").strip()
+    return completion_text(response)

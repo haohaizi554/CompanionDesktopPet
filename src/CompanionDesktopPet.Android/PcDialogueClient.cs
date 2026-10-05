@@ -65,17 +65,27 @@ internal sealed class PcDialogueClient : IDisposable
             var packed = await Task.Run(
                 () => PackedAgent.TryReply(_context, _stateDirectory, text, settings),
                 cancellationToken).ConfigureAwait(false);
+            global::Android.Util.Log.Info("jiayi", "packed reply " + (packed ?? "<null>"));
             var agent = PackedAgent.Read(packed);
             if (agent is not null)
             {
+                global::Android.Util.Log.Info("jiayi", "packed accepted ok=" + agent.Value.Ok + " text=" + agent.Value.Text);
                 return agent.Value;
             }
+
+            var direct = await AskPublicAsync(text, cancellationToken).ConfigureAwait(false);
+            if (direct is not null)
+            {
+                return direct.Value;
+            }
+
+            return new PersonaDialogueReply(false, "这句话我没接住，你再说一次。", false);
         }
 
-        var direct = await AskPublicAsync(text, cancellationToken).ConfigureAwait(false);
-        if (direct is not null)
+        var publicReply = await AskPublicAsync(text, cancellationToken).ConfigureAwait(false);
+        if (publicReply is not null)
         {
-            return direct.Value;
+            return publicReply.Value;
         }
 
         try
@@ -166,14 +176,7 @@ internal sealed class PcDialogueClient : IDisposable
                 return null;
             }
 
-            var message = choices[0].GetProperty("message");
-            var reply = message.TryGetProperty("content", out var content) ? content.GetString() : "";
-            if (string.IsNullOrWhiteSpace(reply) && message.TryGetProperty("reasoning_content", out var reasoning))
-            {
-                reply = reasoning.GetString();
-            }
-
-            reply = (reply ?? "").Trim();
+            var reply = ReadModelText(choices[0].GetProperty("message"));
             if (string.IsNullOrWhiteSpace(reply))
             {
                 return null;
@@ -190,6 +193,78 @@ internal sealed class PcDialogueClient : IDisposable
         {
             return null;
         }
+    }
+
+    private static string ReadModelText(JsonElement message)
+    {
+        var content = ReadModelField(message, "content");
+        var reasoning = ReadModelField(message, "reasoning");
+        if (string.IsNullOrWhiteSpace(reasoning))
+        {
+            reasoning = ReadModelField(message, "reasoning_content");
+        }
+
+        if (HasCjk(content) && !IsThinkingTrace(content))
+        {
+            return content.Trim();
+        }
+
+        if (HasCjk(reasoning))
+        {
+            return reasoning.Trim();
+        }
+
+        if (Substantive(content) && !IsThinkingTrace(content))
+        {
+            return content.Trim();
+        }
+
+        return Substantive(reasoning) ? reasoning.Trim() : "";
+    }
+
+    private static string ReadModelField(JsonElement message, string name)
+    {
+        if (!message.TryGetProperty(name, out var value))
+        {
+            return "";
+        }
+
+        if (value.ValueKind == JsonValueKind.String)
+        {
+            return value.GetString() ?? "";
+        }
+
+        if (value.ValueKind != JsonValueKind.Array)
+        {
+            return "";
+        }
+
+        var builder = new System.Text.StringBuilder();
+        foreach (var part in value.EnumerateArray())
+        {
+            if (part.ValueKind == JsonValueKind.String)
+            {
+                builder.Append(part.GetString());
+                continue;
+            }
+
+            if (part.ValueKind == JsonValueKind.Object && part.TryGetProperty("text", out var text))
+            {
+                builder.Append(text.GetString());
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    private static bool HasCjk(string text) => text.Any(item => item >= '\u4e00' && item <= '\u9fff');
+
+    private static bool Substantive(string text) => text.Trim().Trim('.', '。', '…', '·', ' ').Length > 0;
+
+    private static bool IsThinkingTrace(string text)
+    {
+        var lowered = text.ToLowerInvariant();
+        return lowered.Contains("here's a thinking", StringComparison.Ordinal) || lowered.Contains("thinking process", StringComparison.Ordinal);
     }
 
     private static HttpRequestMessage PublicRequest(HttpMethod method, string url)

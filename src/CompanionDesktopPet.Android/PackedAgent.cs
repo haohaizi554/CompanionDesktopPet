@@ -7,11 +7,25 @@ namespace CompanionDesktopPet.Android;
 
 internal static class PackedAgent
 {
+    private static readonly object Gate = new();
+
     public static string? TryReply(
         Context context,
         string stateDirectory,
         string text,
         IReadOnlyDictionary<string, object?>? settings = null)
+    {
+        lock (Gate)
+        {
+            return ReplyUnlocked(context, stateDirectory, text, settings);
+        }
+    }
+
+    private static string? ReplyUnlocked(
+        Context context,
+        string stateDirectory,
+        string text,
+        IReadOnlyDictionary<string, object?>? settings)
     {
         try
         {
@@ -34,6 +48,7 @@ internal static class PackedAgent
                     JsonSerializer.Serialize(settings));
             }
             return Call(
+                context,
                 "reply",
                 context,
                 new Java.Lang.String(corpus),
@@ -46,18 +61,27 @@ internal static class PackedAgent
         }
         catch (System.Exception exception)
         {
-            global::Android.Util.Log.Warn("jiayi", "packed agent " + exception.Message);
+            global::Android.Util.Log.Warn("jiayi", "packed agent " + exception);
             return null;
         }
     }
 
     public static bool TryRemember(Context context, string stateDirectory, string text)
     {
+        lock (Gate)
+        {
+            return RememberUnlocked(context, stateDirectory, text);
+        }
+    }
+
+    private static bool RememberUnlocked(Context context, string stateDirectory, string text)
+    {
         try
         {
             MigrateCachedState(context, stateDirectory);
             EnsureRelationship(context, stateDirectory);
             var payload = Call(
+                context,
                 "remember",
                 context,
                 new Java.Lang.String(stateDirectory),
@@ -101,7 +125,11 @@ internal static class PackedAgent
                 return new PersonaDialogueReply(false, string.IsNullOrWhiteSpace(text) ? "这句话我没接住。" : text, false, actions);
             }
 
-            return string.IsNullOrWhiteSpace(text) ? null : new PersonaDialogueReply(true, text, false, actions);
+            return new PersonaDialogueReply(
+                !string.IsNullOrWhiteSpace(text),
+                string.IsNullOrWhiteSpace(text) ? "这句话我没接住。" : text,
+                false,
+                actions);
         }
         catch (JsonException)
         {
@@ -180,6 +208,14 @@ internal static class PackedAgent
 
     public static void AppendExchange(string stateDirectory, string user, string assistant)
     {
+        lock (Gate)
+        {
+            AppendExchangeUnlocked(stateDirectory, user, assistant);
+        }
+    }
+
+    private static void AppendExchangeUnlocked(string stateDirectory, string user, string assistant)
+    {
         Directory.CreateDirectory(stateDirectory);
         var path = Path.Combine(stateDirectory, "phone-agent.json");
         var messages = new List<Dictionary<string, string>>();
@@ -250,9 +286,10 @@ internal static class PackedAgent
         File.Move(temporary, path, overwrite: true);
     }
 
-    private static string? Call(string name, params Java.Lang.Object[] arguments)
+    private static string? Call(Context context, string name, params Java.Lang.Object[] arguments)
     {
-        var type = Class.ForName("com.jiayi.agent.JiayiAgent");
+        var type = context.ClassLoader?.LoadClass("com.jiayi.agent.JiayiAgent")
+            ?? Class.ForName("com.jiayi.agent.JiayiAgent");
         var method = type?.GetDeclaredMethods()?.FirstOrDefault(candidate => candidate.Name == name);
         if (method is null)
         {

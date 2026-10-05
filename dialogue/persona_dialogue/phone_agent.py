@@ -16,6 +16,7 @@ from persona_dialogue.audit import (
     asks_to_repeat,
     audit,
     clean_reply,
+    completion_text,
     drop_known_sentences,
     fit_reply,
     repeats_earlier_reply,
@@ -197,7 +198,7 @@ def _reply_locked(corpus_path, soul_path, state_dir, spoken, base_url, model, ap
                     prior=_prior(history),
                     max_chars=limit,
                     facts=_known(facts, persona),
-                    memory=_memory_line(summary, history),
+                    memory=summary,
                 )
                 draft = _text(
                     _chat(
@@ -380,7 +381,7 @@ def _chat(base_url, model, api_key, messages, max_tokens=180, temperature=0.7, t
 
 
 def _text(message: dict) -> str:
-    return str(message.get("content") or message.get("reasoning_content") or "")
+    return completion_text(message)
 
 
 def _tool_calls(message: dict) -> list[dict]:
@@ -428,18 +429,6 @@ def _load(path: Path) -> dict:
         return value if isinstance(value, dict) else {}
     except (OSError, json.JSONDecodeError):
         return {}
-
-
-def _memory_line(summary: str, history: list) -> str:
-    """摘要后面带上还没被盖住的原话，避免模型只看见这一句。"""
-    lines = [str(summary or "").strip()]
-    for message in history[-13:-1]:
-        text = message_text(message)
-        if not text:
-            continue
-        who = "对方" if isinstance(message, dict) and message.get("role") in {"user", "human"} else "佳怡"
-        lines.append(f"{who}：{text}")
-    return "\n".join(line for line in lines if line)
 
 
 def _save(path: Path, state: dict) -> None:

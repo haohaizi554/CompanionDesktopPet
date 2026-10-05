@@ -53,6 +53,8 @@ internal sealed class PetSession : IDisposable
     private string? _lastUtterance;
     private int _automaticGeneration;
     private readonly SpokenLineBridge _spoken = new();
+    private readonly Queue<string> _dialogueLines = new();
+    private int _dialoguePump;
     private readonly object _replyQueue = new();
     private readonly Queue<PendingReply> _replyRequests = new();
     private int _replyPumpRunning;
@@ -527,9 +529,12 @@ internal sealed class PetSession : IDisposable
             return;
         }
 
-        ShowText("……", hold: true);
-        var line = text.Trim();
-        _ = Task.Run(() => SendDialogueAsync(line));
+        lock (_dialogueLines)
+        {
+            _dialogueLines.Enqueue(text.Trim());
+        }
+
+        StartDialoguePump();
     }
 
     public void SaveEndpoint(string baseUrl, string model, string apiKey, string auth)
@@ -558,26 +563,108 @@ internal sealed class PetSession : IDisposable
         });
     }
 
-    private async Task SendDialogueAsync(string text)
+    private void StartDialoguePump()
     {
-        var settings = DialogueSkills.Describe(_parameters, Scale, _topmost, _paused, VoiceEnabled);
-        PersonaDialogueReply reply;
+        lock (_dialogueLines)
+        {
+            if (_dialoguePump != 0 || _dialogueLines.Count == 0)
+            {
+                return;
+            }
+
+            _dialoguePump = 1;
+        }
+
+        _ = Task.Run(PumpDialogueAsync);
+    }
+
+    private async Task PumpDialogueAsync()
+    {
         try
         {
-            reply = await _dialogueClient.ReplyAsync(text, settings, _lifetime.Token).ConfigureAwait(false);
-        }
-        catch (Exception exception)
-        {
-            global::Android.Util.Log.Error("jiayi", exception.ToString());
-            reply = new PersonaDialogueReply(false, "这句话我没接住，你再说一次。", false);
-        }
+            while (!_exit)
+            {
+                string? text;
+                lock (_dialogueLines)
+                {
+                    if (!DialogueEnabled || _dialogueLines.Count == 0)
+                    {
+                        if (!DialogueEnabled)
+                        {
+                            _dialogueLines.Clear();
+                        }
 
-        if (_exit)
-        {
-            return;
-        }
+                        text = null;
+                    }
+                    else
+                    {
+                        text = _dialogueLines.Dequeue();
+                    }
+                }
 
-        _handler.Post(() => PresentDialogue(reply));
+                if (text is null)
+                {
+                    break;
+                }
+
+                var shown = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                _handler.Post(() =>
+                {
+                    if (DialogueEnabled && !_exit)
+                    {
+                        ShowText("……", hold: true);
+                    }
+
+                    shown.TrySetResult(true);
+                });
+                await shown.Task.ConfigureAwait(false);
+                if (_exit || !DialogueEnabled)
+                {
+                    break;
+                }
+
+                var settings = DialogueSkills.Describe(_parameters, Scale, _topmost, _paused, VoiceEnabled);
+                PersonaDialogueReply reply;
+                try
+                {
+                    reply = await _dialogueClient.ReplyAsync(text, settings, _lifetime.Token).ConfigureAwait(false);
+                }
+                catch (Exception exception)
+                {
+                    global::Android.Util.Log.Error("jiayi", exception.ToString());
+                    reply = new PersonaDialogueReply(false, "这句话我没接住，你再说一次。", false);
+                }
+
+                if (_exit)
+                {
+                    return;
+                }
+
+                var presented = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                var captured = reply;
+                _handler.Post(() =>
+                {
+                    try
+                    {
+                        PresentDialogue(captured);
+                    }
+                    finally
+                    {
+                        presented.TrySetResult(true);
+                    }
+                });
+                await presented.Task.ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            lock (_dialogueLines)
+            {
+                _dialoguePump = 0;
+            }
+
+            StartDialoguePump();
+        }
     }
 
     private void PresentDialogue(PersonaDialogueReply reply)
@@ -614,7 +701,6 @@ internal sealed class PetSession : IDisposable
         ShowText(answer);
         if (reply.Ok)
         {
-            NoteSpoken(answer);
             SpeakLine(answer, "gentle", "dialogue");
         }
     }

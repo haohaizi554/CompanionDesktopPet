@@ -98,6 +98,64 @@ def _sentences(text: str) -> list[str]:
     return parts
 
 
+def completion_text(message) -> str:
+    """取出模型真正说出口的那句。
+
+    三个点、空白，或只有英文思考过程时，不算结果。
+    正文在 reasoning / reasoning_content 里时用那边。
+    """
+    content, reasoning = _completion_fields(message)
+    if _has_cjk(content) and not _thinking_trace(content):
+        return content
+    if _has_cjk(reasoning):
+        return reasoning
+    if _substantive(content) and not _thinking_trace(content):
+        return content
+    if _substantive(reasoning):
+        return reasoning
+    return ""
+
+
+def _completion_fields(message) -> tuple[str, str]:
+    if isinstance(message, dict):
+        content = message.get("content")
+        reasoning = message.get("reasoning") or message.get("reasoning_content")
+    else:
+        content = getattr(message, "content", "")
+        extra = getattr(message, "additional_kwargs", None) or {}
+        reasoning = ""
+        if isinstance(extra, dict):
+            reasoning = extra.get("reasoning") or extra.get("reasoning_content") or ""
+    return _flatten_content(content), _flatten_content(reasoning)
+
+
+def _flatten_content(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        parts = []
+        for part in value:
+            if isinstance(part, dict):
+                parts.append(str(part.get("text") or part.get("content") or ""))
+            else:
+                parts.append(str(part))
+        value = "".join(parts)
+    return " ".join(str(value).split()).strip()
+
+
+def _has_cjk(text: str) -> bool:
+    return any("\u4e00" <= char <= "\u9fff" for char in text or "")
+
+
+def _substantive(text: str) -> bool:
+    return bool((text or "").strip().strip(".。…· "))
+
+
+def _thinking_trace(text: str) -> bool:
+    lowered = (text or "").lower()
+    return "here's a thinking" in lowered or "thinking process" in lowered
+
+
 def clean_reply(text: str) -> str:
     value = _THINKING.sub("", text or "")
     value = value.replace("\r", " ").replace("\n", " ")

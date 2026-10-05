@@ -6,7 +6,7 @@ from pathlib import Path
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.sqlite import SqliteSaver
 
-from persona_dialogue.audit import audit, clean_reply, without_repeated_prior
+from persona_dialogue.audit import audit, clean_reply, completion_text, without_repeated_prior
 from persona_dialogue.graph import build_graph, remember_line
 from persona_dialogue.retrieve import LineIndex
 
@@ -48,6 +48,12 @@ class GraphTests(unittest.TestCase):
             "你敲这些数字，是想让我歇会儿吗？",
             without_repeated_prior(copied + "你敲这些数字，是想让我歇会儿吗？", copied),
         )
+
+    def test_dots_are_not_a_reply_when_the_sentence_is_in_reasoning(self) -> None:
+        self.assertEqual("在呢。", completion_text({"content": "……", "reasoning": "在呢。"}))
+        self.assertEqual("在呢。", completion_text({"content": "...", "reasoning_content": "在呢。"}))
+        self.assertEqual("在呢。", completion_text({"content": [{"type": "text", "text": "在呢。"}]}))
+        self.assertEqual("", completion_text({"content": "……"}))
 
     def test_audit_strips_thinking_and_rejects_model_identity(self) -> None:
         self.assertEqual("我在。", clean_reply("<think>secret</think>我在。"))

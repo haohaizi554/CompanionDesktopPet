@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import array
 import importlib.util
 import unittest
 from pathlib import Path
@@ -26,16 +27,16 @@ class VoiceTakeTests(unittest.TestCase):
         self.assertFalse(infer._keeps_first_take(text, int(0.3 * 32000), 32000, 1.0))
 
     def test_edge_silence_is_cut_and_a_quiet_clip_is_kept(self) -> None:
-        import numpy as np
-
         infer = _load_infer()
-        tone = np.zeros(32000, dtype=np.int16)
-        tone[8000:16000] = 1000
+        tone = array.array("h", bytes(32000 * 2))
+        for index in range(8000, 16000):
+            tone[index] = 1000
         trimmed = infer._trim_edges(tone, 32000)
-        self.assertLess(trimmed.size, tone.size)
-        self.assertGreaterEqual(int(np.argmax(np.abs(trimmed) >= 128)), 0)
-        self.assertLess(int(np.argmax(np.abs(trimmed) >= 128)), int(0.03 * 32000) + 1)
-        self.assertEqual(32000, infer._trim_edges(np.zeros(32000, dtype=np.int16), 32000).size)
+        self.assertLess(len(trimmed), len(tone))
+        first_loud = next(index for index, sample in enumerate(trimmed) if abs(sample) >= 128)
+        self.assertLess(first_loud, int(0.03 * 32000) + 1)
+        quiet = array.array("h", bytes(32000 * 2))
+        self.assertEqual(32000, len(infer._trim_edges(quiet, 32000)))
 
 
 if __name__ == "__main__":

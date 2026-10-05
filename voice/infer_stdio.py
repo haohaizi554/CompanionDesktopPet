@@ -270,24 +270,41 @@ def _collect(generator):
     return int(sample_rate), np.concatenate(pieces)
 
 
+def _sample_count(samples) -> int:
+    size = getattr(samples, "size", None)
+    if type(size) is int:
+        return size
+    return len(samples)
+
+
+def _is_floating_audio(samples) -> bool:
+    dtype = getattr(samples, "dtype", None)
+    return getattr(dtype, "kind", None) == "f"
+
+
 def _trim_edges(audio, sample_rate: int):
     """Drop the dead air a leading pause leaves, and the tail after the last word.
 
     Piper and Kokoro do the same before playback. A short pad stays so the
     attack is not cut off. A clip that is quiet all the way through is kept.
     """
-    import numpy as np
-
-    samples = np.asarray(audio).reshape(-1)
-    if samples.size == 0 or sample_rate <= 0:
+    samples = audio.reshape(-1) if hasattr(audio, "reshape") else audio
+    count = _sample_count(samples)
+    if count == 0 or sample_rate <= 0:
         return samples
-    level = 0.004 if np.issubdtype(samples.dtype, np.floating) else 128
-    loud = np.flatnonzero(np.abs(samples) >= level)
-    if loud.size == 0:
+    level = 0.004 if _is_floating_audio(samples) else 128
+    first = None
+    last = -1
+    for index in range(count):
+        if abs(samples[index]) >= level:
+            if first is None:
+                first = index
+            last = index
+    if first is None:
         return samples
     pad = int(sample_rate * 0.03)
-    start = max(0, int(loud[0]) - pad)
-    end = min(int(samples.size), int(loud[-1]) + 1 + pad)
+    start = max(0, first - pad)
+    end = min(count, last + 1 + pad)
     if end - start < int(sample_rate * 0.05):
         return samples
     return samples[start:end]
