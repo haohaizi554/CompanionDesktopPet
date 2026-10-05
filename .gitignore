@@ -6,8 +6,12 @@
 .vs/
 .idea/
 publish/
-outputs/verify/
-outputs/standalone/
+outputs/
+voice/gpu-host.log
+voice/gpu-out/
+android/**/build/
+android/**/.gradle/
+android/**/local.properties
 *.user
 *.suo
 voice/runtime.json
