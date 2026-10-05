@@ -3315,6 +3315,10 @@ public sealed class WindowShellTests
 
             Assert.Same(replyBeforeDrag, GetLastReply(window));
             window.Close();
+            WaitForCondition(
+                () => !HasPendingSettingsWrite(settingsDirectory),
+                TimeSpan.FromSeconds(5),
+                () => "The drag settings save still held its temporary file.");
             DeleteSettingsDirectory(settingsDirectory);
         });
     }
@@ -3948,7 +3952,8 @@ public sealed class WindowShellTests
                     KeyboardNavigationMode.Cycle,
                     KeyboardNavigation.GetDirectionalNavigation(presenter));
 
-                var separator = Assert.IsType<Separator>(menu.Items[3]);
+                var pause = Assert.IsType<MenuItem>(window.FindName("PauseMenuItem"));
+                var separator = Assert.IsType<Separator>(menu.Items[menu.Items.IndexOf(pause) + 1]);
                 separator.ApplyTemplate();
                 var separatorChrome = Assert.IsType<Border>(
                     VisualTreeHelper.GetChild(separator, 0));
@@ -4441,9 +4446,29 @@ public sealed class WindowShellTests
 
     private static void DeleteSettingsDirectory(string settingsDirectory)
     {
-        if (Directory.Exists(settingsDirectory))
+        if (!Directory.Exists(settingsDirectory))
         {
-            Directory.Delete(settingsDirectory, true);
+            return;
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        while (true)
+        {
+            try
+            {
+                if (HasPendingSettingsWrite(settingsDirectory) && stopwatch.Elapsed < TimeSpan.FromSeconds(5))
+                {
+                    Thread.Sleep(20);
+                    continue;
+                }
+
+                Directory.Delete(settingsDirectory, true);
+                return;
+            }
+            catch (IOException) when (stopwatch.Elapsed < TimeSpan.FromSeconds(5))
+            {
+                Thread.Sleep(20);
+            }
         }
     }
 

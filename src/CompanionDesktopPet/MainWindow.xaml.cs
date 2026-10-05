@@ -1120,7 +1120,6 @@ public partial class MainWindow : Window
         }
 
         OpenSpeechPopup();
-        _announceLiveRegionChanged(SpeechText);
         if (!waiting)
         {
             SynchronizeBubbleTimer();
