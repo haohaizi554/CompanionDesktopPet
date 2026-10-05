@@ -1,6 +1,5 @@
 using Android.App;
 using Android.Content;
-using Android.Content.PM;
 using Android.OS;
 using Android.Provider;
 using Android.Runtime;
@@ -9,7 +8,7 @@ using Android.Widget;
 
 namespace CompanionDesktopPet.Android;
 
-[Activity(Label = "佳怡", MainLauncher = true, Exported = true, Theme = "@android:style/Theme.Material.Light.NoActionBar", ScreenOrientation = ScreenOrientation.Portrait)]
+[Activity(Label = "佳怡", MainLauncher = true, Exported = true, Theme = "@android:style/Theme.Material.Light.NoActionBar")]
 public sealed class MainActivity : Activity
 {
     private const int NotificationRequest = 21;
@@ -51,7 +50,7 @@ public sealed class MainActivity : Activity
         body.SetPadding(0, Dip.Px(16), 0, Dip.Px(12));
         var hostLabel = new TextView(this)
         {
-            Text = "语音和对话都连这台电脑，模型和密钥已经填好。平板和电脑要在同一个 Wi-Fi。\n语音 " + LinkDefaults.VoiceHost + "\n对话 " + LinkDefaults.DialogueHost + "\n模型 " + LinkDefaults.ModelName,
+            Text = "对话直接问公网模型。语音写死连 " + LinkDefaults.VoiceHost + "，由这台电脑的显卡合成后再转出去。\n模型 " + LinkDefaults.ModelUrl,
             TextSize = 14
         };
         hostLabel.SetTextColor(global::Android.Graphics.Color.ParseColor("#FF543A3F"));

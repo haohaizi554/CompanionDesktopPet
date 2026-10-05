@@ -9,7 +9,8 @@ namespace CompanionDesktopPet.Android;
 
 internal static class LinkDefaults
 {
-    public const string VoiceHost = "http://192.168.1.46:8765";
+    public const string VoiceDomain = "inanshan.sjhcip.com";
+    public const string VoiceHost = "http://43.138.138.200:8765";
     public const string DialogueHost = "http://192.168.1.46:8766";
     public const string ModelUrl = "http://43.138.138.200:8588/v1";
     public const string ModelName = "Qwen3.6-35B-A3B-oQ4-fp16-mtp";
@@ -24,8 +25,10 @@ internal static class VoiceHostStore
     public static string Get(Context context)
     {
         var preferences = context.GetSharedPreferences("jiayi", FileCreationMode.Private);
-        var saved = preferences?.GetString("voice_host", DefaultHost);
-        if (string.IsNullOrWhiteSpace(saved) || (!IsEmulator() && saved.Contains("10.0.2.2", StringComparison.Ordinal)))
+        var saved = preferences?.GetString("voice_host", DefaultHost) ?? "";
+        var staleLan = saved.Contains("192.168.1.", StringComparison.Ordinal)
+            || saved.Contains("10.0.2.2", StringComparison.Ordinal);
+        if (string.IsNullOrWhiteSpace(saved) || (!IsEmulator() && staleLan))
         {
             preferences?.Edit()?.PutString("voice_host", DefaultHost)?.Apply();
             return DefaultHost;
@@ -58,7 +61,12 @@ internal sealed class PcGpuVoiceSpeaker : IVoiceSpeaker
     private readonly string _baseUrl;
     private readonly string _cache;
     private readonly Context _context;
-    private readonly HttpClient _http = new(new SocketsHttpHandler()) { Timeout = TimeSpan.FromMinutes(3) };
+    private readonly HttpClient _http = new(new SocketsHttpHandler
+    {
+        UseProxy = false,
+        ConnectTimeout = TimeSpan.FromSeconds(8)
+    })
+    { Timeout = TimeSpan.FromMinutes(3) };
     private readonly Handler _main = new(Looper.MainLooper!);
     private int _generation;
     private int _pending;
@@ -111,6 +119,8 @@ internal sealed class PcGpuVoiceSpeaker : IVoiceSpeaker
     public event Action? SynthesisContinuing;
 
     public event Action? VoiceIdle;
+
+    public event Action<string>? Failed;
 
     public event Action<byte>? Mouth;
 
@@ -211,6 +221,7 @@ internal sealed class PcGpuVoiceSpeaker : IVoiceSpeaker
             {
                 if (generation == Volatile.Read(ref _generation))
                 {
+                    Failed?.Invoke("语音还在这台电脑的显卡上。平板连不上 " + _baseUrl + "，本机的转发要开着。");
                     Finish(generation);
                 }
             }

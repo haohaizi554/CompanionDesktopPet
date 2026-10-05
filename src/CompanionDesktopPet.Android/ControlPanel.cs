@@ -3,6 +3,7 @@ using Android.Graphics;
 using Android.Graphics.Drawables;
 using Android.Media;
 using Android.Views;
+using Android.Views.InputMethods;
 using Android.Widget;
 using CompanionDesktopPet.Models;
 using CompanionDesktopPet.Services;
@@ -58,6 +59,10 @@ internal sealed class ControlPanel : FrameLayout
 
     public bool HoldsKeyboard => _page == PanelPage.Endpoint;
 
+    public Action? EnsureKeyboard { get; set; }
+
+    public event Action? KeyboardIdle;
+
     public void RefreshRoot()
     {
         if (_page == PanelPage.Root)
@@ -106,6 +111,10 @@ internal sealed class ControlPanel : FrameLayout
         }
 
         _relayout();
+        if (page != PanelPage.Endpoint)
+        {
+            KeyboardIdle?.Invoke();
+        }
     }
 
     private void ShowRoot()
@@ -329,6 +338,21 @@ internal sealed class ControlPanel : FrameLayout
         input.SetTextColor(PetColors.Text);
         input.Focusable = true;
         input.FocusableInTouchMode = true;
+        input.Touch += (_, args) =>
+        {
+            if (args.Event?.ActionMasked != MotionEventActions.Down)
+            {
+                return;
+            }
+
+            EnsureKeyboard?.Invoke();
+            input.Post(() =>
+            {
+                input.RequestFocus();
+                var manager = (InputMethodManager?)Context?.GetSystemService(Context.InputMethodService);
+                manager?.ShowSoftInput(input, ShowFlags.Implicit);
+            });
+        };
         _body.AddView(input, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent));
         return input;
     }

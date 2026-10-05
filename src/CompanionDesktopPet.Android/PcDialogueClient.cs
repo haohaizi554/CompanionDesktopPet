@@ -1,17 +1,27 @@
 using System.Net.Http;
 using System.Text.Json;
+using Android.Content;
 using CompanionDesktopPet.Services;
 
 namespace CompanionDesktopPet.Android;
 
 internal sealed class PcDialogueClient : IDisposable
 {
-    private readonly HttpClient _http = new(new SocketsHttpHandler()) { Timeout = TimeSpan.FromSeconds(50) };
+    private readonly HttpClient _http = new(new SocketsHttpHandler
+    {
+        UseProxy = false,
+        ConnectTimeout = TimeSpan.FromSeconds(8)
+    })
+    { Timeout = TimeSpan.FromSeconds(50) };
     private readonly string _baseUrl;
+    private readonly Context? _context;
+    private readonly string? _stateDirectory;
 
-    public PcDialogueClient(string voiceHost)
+    public PcDialogueClient(string voiceHost, Context? context = null, string? stateDirectory = null)
     {
         _baseUrl = FromVoiceHost(voiceHost);
+        _context = context;
+        _stateDirectory = stateDirectory;
     }
 
     public string BaseUrl => _baseUrl;
@@ -29,6 +39,11 @@ internal sealed class PcDialogueClient : IDisposable
 
     public async Task<bool> PingAsync(CancellationToken cancellationToken = default)
     {
+        if (await PingPublicAsync(cancellationToken).ConfigureAwait(false))
+        {
+            return true;
+        }
+
         try
         {
             using var response = await _http.GetAsync(_baseUrl + "/health", cancellationToken);
@@ -45,6 +60,24 @@ internal sealed class PcDialogueClient : IDisposable
         IReadOnlyDictionary<string, object?>? settings,
         CancellationToken cancellationToken = default)
     {
+        if (_context is not null && !string.IsNullOrWhiteSpace(_stateDirectory))
+        {
+            var packed = await Task.Run(
+                () => PackedAgent.TryReply(_context, _stateDirectory, text, settings),
+                cancellationToken).ConfigureAwait(false);
+            var agent = PackedAgent.Read(packed);
+            if (agent is not null)
+            {
+                return agent.Value;
+            }
+        }
+
+        var direct = await AskPublicAsync(text, cancellationToken).ConfigureAwait(false);
+        if (direct is not null)
+        {
+            return direct.Value;
+        }
+
         try
         {
             var payload = JsonSerializer.Serialize(new Dictionary<string, object?>
@@ -75,11 +108,94 @@ internal sealed class PcDialogueClient : IDisposable
         }
     }
 
+    private async Task<bool> PingPublicAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(6));
+            using var request = PublicRequest(HttpMethod.Get, LinkDefaults.ModelUrl.TrimEnd('/') + "/models");
+            using var response = await _http.SendAsync(request, timeout.Token).ConfigureAwait(false);
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException)
+        {
+            return false;
+        }
+    }
+
+    private async Task<PersonaDialogueReply?> AskPublicAsync(string text, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var payload = JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["model"] = LinkDefaults.ModelName,
+                ["messages"] = new object[]
+                {
+                    new Dictionary<string, string>
+                    {
+                        ["role"] = "system",
+                        ["content"] = "你是佳怡，停在屏幕边上陪着对方。只用中文，说一两句口语，不要列表，不要承认自己是模型或程序。"
+                    },
+                    new Dictionary<string, string> { ["role"] = "user", ["content"] = text }
+                },
+                ["max_tokens"] = 180,
+                ["temperature"] = 0.7,
+                ["chat_template_kwargs"] = new Dictionary<string, object> { ["enable_thinking"] = false }
+            });
+            using var request = PublicRequest(HttpMethod.Post, LinkDefaults.ModelUrl.TrimEnd('/') + "/chat/completions");
+            request.Content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
+            using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            using var document = await ReadUtf8JsonAsync(response, cancellationToken);
+            var root = document.RootElement;
+            if (!response.IsSuccessStatusCode || !root.TryGetProperty("choices", out var choices) || choices.GetArrayLength() == 0)
+            {
+                return null;
+            }
+
+            var message = choices[0].GetProperty("message");
+            var reply = message.TryGetProperty("content", out var content) ? content.GetString() : "";
+            if (string.IsNullOrWhiteSpace(reply) && message.TryGetProperty("reasoning_content", out var reasoning))
+            {
+                reply = reasoning.GetString();
+            }
+
+            reply = (reply ?? "").Trim();
+            return string.IsNullOrWhiteSpace(reply)
+                ? null
+                : new PersonaDialogueReply(true, reply, false);
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    private static HttpRequestMessage PublicRequest(HttpMethod method, string url)
+    {
+        var request = new HttpRequestMessage(method, url);
+        request.Headers.TryAddWithoutValidation("x-api-key", LinkDefaults.ApiKey);
+        request.Headers.TryAddWithoutValidation("Authorization", "Bearer " + LinkDefaults.ApiKey);
+        return request;
+    }
+
     public async Task<bool> RememberAsync(string text, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(text))
         {
             return true;
+        }
+
+        if (_context is not null && !string.IsNullOrWhiteSpace(_stateDirectory))
+        {
+            var remembered = await Task.Run(
+                () => PackedAgent.TryRemember(_context, _stateDirectory, text),
+                cancellationToken).ConfigureAwait(false);
+            if (remembered)
+            {
+                return true;
+            }
         }
 
         try

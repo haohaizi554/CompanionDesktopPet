@@ -2,7 +2,9 @@ using Android.Animation;
 using Android.Content;
 using Android.Graphics;
 using Android.Graphics.Drawables;
+using Android.Runtime;
 using Android.Views;
+using Android.Views.InputMethods;
 using Android.Widget;
 using CompanionDesktopPet.Services;
 
@@ -425,6 +427,10 @@ internal sealed class BubbleView : LinearLayout
         };
         card.SetTextColor(PetColors.Text);
         card.SetTypeface(Typeface.DefaultBold, TypefaceStyle.Bold);
+        card.Gravity = GravityFlags.CenterVertical;
+        card.SetIncludeFontPadding(true);
+        card.SetPadding(0, Dip.Px(2), 0, Dip.Px(8));
+        card.SetLineSpacing(Dip.Px(2), 1f);
         var row = new LinearLayout(context) { Orientation = global::Android.Widget.Orientation.Horizontal };
         row.SetGravity(GravityFlags.CenterVertical);
         row.SetPadding(Dip.Px(18), Dip.Px(13), Dip.Px(18), Dip.Px(13));
@@ -515,9 +521,16 @@ internal sealed class ComposerView : LinearLayout
 {
     private readonly PetArrowView _arrow;
     private readonly LinearLayout _card;
+    private readonly EditText _input;
+    private readonly Action<string> _submit;
+
+    public event Action? Editing;
+
+    public event Action? Finished;
 
     public ComposerView(Context context, Action<string> submit) : base(context)
     {
+        _submit = submit;
         SetBackgroundColor(Color.Transparent);
         SetPadding(Dip.Px(10), Dip.Px(10), Dip.Px(10), Dip.Px(10));
         _arrow = new PetArrowView(context);
@@ -530,15 +543,33 @@ internal sealed class ComposerView : LinearLayout
         shell.SetStroke(Dip.Px(2), PetColors.Accent);
         _card.Background = shell;
         _card.Elevation = Dip.Px(3);
-        var input = new EditText(context) { Hint = "跟佳怡说一句" };
-        input.SetSingleLine(true);
-        input.SetTextSize(global::Android.Util.ComplexUnitType.Sp, 14);
-        input.SetMinHeight(Dip.Px(34));
-        input.SetTextColor(PetColors.Text);
-        input.SetHintTextColor(PetColors.Disabled);
-        input.Background = null;
-        input.Focusable = true;
-        input.FocusableInTouchMode = true;
+        _input = new EditText(context) { Hint = "跟佳怡说一句" };
+        _input.SetSingleLine(true);
+        _input.SetTextSize(global::Android.Util.ComplexUnitType.Sp, 14);
+        _input.SetMinHeight(Dip.Px(34));
+        _input.SetTextColor(PetColors.Text);
+        _input.SetHintTextColor(PetColors.Disabled);
+        _input.Background = null;
+        _input.Focusable = true;
+        _input.FocusableInTouchMode = true;
+        _input.ImeOptions = ImeAction.Send;
+        _input.SetPadding(0, Dip.Px(8), 0, Dip.Px(8));
+        _input.SetOnEditorActionListener(new SendAction(Submit));
+        _input.KeyPress += (_, args) =>
+        {
+            if (args.Event?.Action == KeyEventActions.Down && args.KeyCode == Keycode.Enter)
+            {
+                Submit();
+                args.Handled = true;
+            }
+        };
+        _input.Touch += (_, args) =>
+        {
+            if (args.Event?.ActionMasked == MotionEventActions.Down)
+            {
+                Editing?.Invoke();
+            }
+        };
         var button = new Button(context) { Text = "发送" };
         button.SetAllCaps(false);
         button.SetTextSize(global::Android.Util.ComplexUnitType.Sp, 14);
@@ -552,22 +583,62 @@ internal sealed class ComposerView : LinearLayout
         var face = new GradientDrawable(GradientDrawable.Orientation.TlBr, [Color.ParseColor("#FFFF8AA6"), Color.ParseColor("#FFE85A86")]);
         face.SetCornerRadius(Dip.Px(16));
         button.Background = face;
-        button.Click += (_, _) =>
-        {
-            var text = input.Text?.Trim();
-            if (string.IsNullOrEmpty(text))
-            {
-                return;
-            }
-
-            input.Text = "";
-            submit(text);
-        };
+        button.Click += (_, _) => Submit();
         var buttonParams = new LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
         buttonParams.LeftMargin = Dip.Px(8);
-        _card.AddView(input, new LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1));
+        _card.AddView(_input, new LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1));
         _card.AddView(button, buttonParams);
         SetSide(DialoguePlacementSide.Below);
+    }
+
+    public void TakeInput()
+    {
+        _input.RequestFocus();
+        var manager = (InputMethodManager?)Context?.GetSystemService(Context.InputMethodService);
+        manager?.ShowSoftInput(_input, ShowFlags.Implicit);
+    }
+
+    public void ReleaseInput()
+    {
+        var manager = (InputMethodManager?)Context?.GetSystemService(Context.InputMethodService);
+        manager?.HideSoftInputFromWindow(_input.WindowToken, HideSoftInputFlags.None);
+        _input.ClearFocus();
+    }
+
+    private void Submit()
+    {
+        var text = _input.Text?.Trim();
+        if (string.IsNullOrEmpty(text))
+        {
+            return;
+        }
+
+        _input.Text = "";
+        _submit(text);
+        Finished?.Invoke();
+    }
+
+    private sealed class SendAction : Java.Lang.Object, TextView.IOnEditorActionListener
+    {
+        private readonly Action _send;
+
+        public SendAction(Action send) => _send = send;
+
+        public SendAction(IntPtr handle, JniHandleOwnership transfer) : base(handle, transfer)
+        {
+            _send = static () => { };
+        }
+
+        public bool OnEditorAction(TextView? view, ImeAction actionId, KeyEvent? keyEvent)
+        {
+            if (actionId is ImeAction.Send or ImeAction.Done || keyEvent?.KeyCode == Keycode.Enter)
+            {
+                _send();
+                return true;
+            }
+
+            return false;
+        }
     }
 
     private DialoguePlacementSide? _side;

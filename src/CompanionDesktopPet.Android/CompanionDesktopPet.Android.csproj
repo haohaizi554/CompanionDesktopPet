@@ -6,10 +6,11 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationId>com.jiayi.companionpet</ApplicationId>
-    <ApplicationVersion>1</ApplicationVersion>
-    <ApplicationDisplayVersion>1.6.0</ApplicationDisplayVersion>
+    <ApplicationVersion>2</ApplicationVersion>
+    <ApplicationDisplayVersion>1.7.0</ApplicationDisplayVersion>
     <RuntimeIdentifiers>android-arm64</RuntimeIdentifiers>
     <AndroidLinkMode>None</AndroidLinkMode>
+    <UseNativeHttpHandler>false</UseNativeHttpHandler>
     <EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>
     <JavaSdkDirectory Condition="'$(JavaSdkDirectory)' == '' and Exists('$(LOCALAPPDATA)\CompanionDesktopPet\jdk-21\jdk-21.0.12.1+1\bin\java.exe')">$(LOCALAPPDATA)\CompanionDesktopPet\jdk-21\jdk-21.0.12.1+1</JavaSdkDirectory>
     <NoWarn>$(NoWarn);CA1416</NoWarn>
@@ -45,5 +46,13 @@
                   Link="Assets\voice\manifest.json" />
     <AndroidAsset Include="..\..\voice\packs\jiayi\refs\*.wav"
                   Link="Assets\voice\refs\%(Filename)%(Extension)" />
+    <AndroidAsset Include="..\..\data\persona\jiayi-soul.json"
+                  Link="Assets\agent\jiayi-soul.json" />
+    <AndroidAsset Include="$(LOCALAPPDATA)\CompanionDesktopPet\dialogue\persona.json"
+                  Link="Assets\agent\persona.json"
+                  Condition="Exists('$(LOCALAPPDATA)\CompanionDesktopPet\dialogue\persona.json')" />
+    <AndroidLibrary Include="..\..\android\jiayi-agent\agent\build\outputs\aar\agent-release.aar"
+                    Condition="Exists('..\..\android\jiayi-agent\agent\build\outputs\aar\agent-release.aar')"
+                    Bind="false" />
   </ItemGroup>
 </Project>

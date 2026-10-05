@@ -85,6 +85,7 @@ internal sealed class PetSession : IDisposable
         {
             gpu.Mouth += level => MouthChanged?.Invoke(level);
             gpu.PlaybackFraction += fraction => VoiceCue?.Invoke(2, fraction);
+            gpu.Failed += message => _handler.Post(() => ShowText(message));
         }
 
         _voice = voice ?? JiayiVoiceSpeaker.TryCreate(stateDirectory ?? AppContext.BaseDirectory);
@@ -92,7 +93,10 @@ internal sealed class PetSession : IDisposable
         {
             _voice.VoiceIdle += () => _handler.Post(ReleaseVoiceHold);
         }
-        _dialogueClient = new PcDialogueClient(string.IsNullOrWhiteSpace(voiceHost) ? VoiceHostStore.DefaultHost : voiceHost);
+        _dialogueClient = new PcDialogueClient(
+            string.IsNullOrWhiteSpace(voiceHost) ? VoiceHostStore.DefaultHost : voiceHost,
+            voiceContext,
+            stateDirectory);
     }
 
     public PetScale Scale { get; private set; } = PetScale.Normal;
@@ -1209,6 +1213,18 @@ internal sealed class PetSession : IDisposable
     }
 
     private void CancelAmbient() => _ambientGeneration++;
+
+    public void SetWorkArea(ScreenRect area)
+    {
+        WorkArea = area;
+        if (!_ready)
+        {
+            return;
+        }
+
+        Clamp();
+        Moved?.Invoke(_left, _top);
+    }
 
     private ScreenPoint DefaultOrigin()
     {

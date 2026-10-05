@@ -80,6 +80,8 @@ public sealed class OverlayService : Service
             VoiceHostStore.Get(this));
         _session.WorkArea = ReadWorkArea();
         _menu = new ControlPanel(this, _session, PlaceMenu, _voicePack);
+        _menu.EnsureKeyboard = FocusMenuForTyping;
+        _menu.KeyboardIdle += ReleaseMenuTyping;
         Wire(_character, _bubble, _session);
         _petParams = Window(_character, Dip.Px(_session.CharacterSize), Dip.Px(_session.CharacterSize), focusable: false);
         AddPet();
@@ -128,6 +130,12 @@ public sealed class OverlayService : Service
         return StartCommandResult.Sticky;
     }
 
+    public override void OnConfigurationChanged(global::Android.Content.Res.Configuration? newConfig)
+    {
+        base.OnConfigurationChanged(newConfig);
+        RefreshWorkArea();
+    }
+
     public override void OnDestroy()
     {
         PetAwareness.Changed -= OnAwarenessChanged;
@@ -154,6 +162,7 @@ public sealed class OverlayService : Service
         character.DragStarted += () =>
         {
             CloseMenu();
+            RefreshWorkArea();
             _draggingWindow = true;
             session.BeginDrag();
         };
@@ -295,7 +304,7 @@ public sealed class OverlayService : Service
 
         if (!_menuAdded)
         {
-            _menuParams = Window(_menu, ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent, focusable: true);
+            _menuParams = Window(_menu, ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent, focusable: false);
             _windows.AddView(_menu, _menuParams);
             _menuAdded = true;
         }
@@ -317,10 +326,10 @@ public sealed class OverlayService : Service
             return;
         }
 
-        _composer ??= new ComposerView(this, text => _session?.SubmitDialogue(text));
+        _composer ??= CreateComposer();
         if (!_composerAdded)
         {
-            _composerParams = Window(_composer, Dip.Px(276), ViewGroup.LayoutParams.WrapContent, focusable: true, closeOnOutside: false);
+            _composerParams = Window(_composer, Dip.Px(276), ViewGroup.LayoutParams.WrapContent, focusable: false, closeOnOutside: false);
             _composerParams.SoftInputMode = SoftInput.AdjustPan;
             _windows.AddView(_composer, _composerParams);
             _composerAdded = true;
@@ -387,7 +396,7 @@ public sealed class OverlayService : Service
         var x = Dip.Px(placement.Origin.X);
         var y = Dip.Px(placement.Origin.Y);
         var width = Dip.Px(panel.Width);
-        var height = Dip.Px(panel.Height);
+        var height = Dip.Px(panel.Height) + Dip.Px(8);
         if (_composerParams.X == x && _composerParams.Y == y && _composerParams.Width == width && _composerParams.Height == height)
         {
             return;
@@ -400,7 +409,80 @@ public sealed class OverlayService : Service
         Update(_composer, _composerParams);
     }
 
-    private void HideComposer() => Remove(_composer, ref _composerAdded);
+    private void HideComposer()
+    {
+        ReleaseComposer();
+        Remove(_composer, ref _composerAdded);
+    }
+
+    private ComposerView CreateComposer()
+    {
+        var composer = new ComposerView(this, text => _session?.SubmitDialogue(text));
+        composer.Editing += FocusComposer;
+        composer.Finished += ReleaseComposer;
+        composer.Touch += (_, args) =>
+        {
+            if (args.Event?.Action != MotionEventActions.Outside)
+            {
+                return;
+            }
+
+            ReleaseComposer();
+            args.Handled = true;
+        };
+        return composer;
+    }
+
+    private void FocusComposer()
+    {
+        if (_composer is null || _composerParams is null || !_composerAdded)
+        {
+            return;
+        }
+
+        _composerParams.Flags &= ~WindowManagerFlags.NotFocusable;
+        _composerParams.Flags |= WindowManagerFlags.WatchOutsideTouch;
+        _composerParams.SoftInputMode = SoftInput.AdjustPan;
+        Update(_composer, _composerParams);
+        _composer.Post(() => _composer.TakeInput());
+    }
+
+    private void ReleaseComposer()
+    {
+        if (_composer is null || _composerParams is null || !_composerAdded)
+        {
+            return;
+        }
+
+        _composer.ReleaseInput();
+        _composerParams.Flags |= WindowManagerFlags.NotFocusable;
+        _composerParams.Flags &= ~WindowManagerFlags.WatchOutsideTouch;
+        Update(_composer, _composerParams);
+    }
+
+    private void FocusMenuForTyping()
+    {
+        if (_menu is null || _menuParams is null || !_menuAdded)
+        {
+            return;
+        }
+
+        _menuParams.Flags &= ~WindowManagerFlags.NotFocusable;
+        Update(_menu, _menuParams);
+    }
+
+    private void ReleaseMenuTyping()
+    {
+        if (_menu is null || _menuParams is null || !_menuAdded)
+        {
+            return;
+        }
+
+        var manager = (global::Android.Views.InputMethods.InputMethodManager?)GetSystemService(InputMethodService);
+        manager?.HideSoftInputFromWindow(_menu.WindowToken, global::Android.Views.InputMethods.HideSoftInputFlags.None);
+        _menuParams.Flags |= WindowManagerFlags.NotFocusable;
+        Update(_menu, _menuParams);
+    }
 
     private void PlaceMenu()
     {
@@ -458,7 +540,7 @@ public sealed class OverlayService : Service
         var x = Dip.Px(placement.Origin.X);
         var y = Dip.Px(placement.Origin.Y);
         var bubbleWidth = Dip.Px(bubble.Width);
-        var bubbleHeight = Dip.Px(bubble.Height);
+        var bubbleHeight = Dip.Px(bubble.Height) + Dip.Px(10);
         if (_bubbleParams.X == x && _bubbleParams.Y == y && _bubbleParams.Width == bubbleWidth && _bubbleParams.Height == bubbleHeight)
         {
             return;
@@ -516,11 +598,35 @@ public sealed class OverlayService : Service
         }
     }
 
+    private void RefreshWorkArea()
+    {
+        if (_session is null)
+        {
+            return;
+        }
+
+        _session.SetWorkArea(ReadWorkArea());
+    }
+
     private ScreenRect ReadWorkArea()
     {
-        var metrics = Resources?.DisplayMetrics;
-        var width = metrics?.WidthPixels ?? 1080;
-        var height = metrics?.HeightPixels ?? 1920;
+        var width = 0;
+        var height = 0;
+        if (_windows?.DefaultDisplay is { } display)
+        {
+            var real = new global::Android.Util.DisplayMetrics();
+            display.GetRealMetrics(real);
+            width = real.WidthPixels;
+            height = real.HeightPixels;
+        }
+
+        if (width <= 0 || height <= 0)
+        {
+            var metrics = Resources?.DisplayMetrics;
+            width = metrics?.WidthPixels ?? 1080;
+            height = metrics?.HeightPixels ?? 1920;
+        }
+
         var top = SystemDimen("status_bar_height");
         var bottom = SystemDimen("navigation_bar_height");
         return new ScreenRect(0, Dip.ToDip(top), Dip.ToDip(width), Dip.ToDip(Math.Max(1, height - top - bottom)));
@@ -578,7 +684,8 @@ public sealed class OverlayService : Service
         {
             flags |= WindowManagerFlags.NotFocusable;
         }
-        else if (closeOnOutside)
+
+        if (closeOnOutside)
         {
             flags |= WindowManagerFlags.WatchOutsideTouch;
             view.Touch += (_, args) =>
@@ -590,6 +697,7 @@ public sealed class OverlayService : Service
 
                 if (view is ControlPanel panel && panel.HoldsKeyboard)
                 {
+                    ReleaseMenuTyping();
                     args.Handled = true;
                     return;
                 }
