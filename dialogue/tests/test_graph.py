@@ -8,6 +8,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 
 from persona_dialogue.audit import audit, clean_reply, completion_text, without_repeated_prior
 from persona_dialogue.graph import build_graph, remember_line
+from persona_dialogue.memory import COMPACT_AFTER_MESSAGES, RECENT_WINDOW
 from persona_dialogue.retrieve import LineIndex
 
 SOUL = {
@@ -185,7 +186,7 @@ class GraphTests(unittest.TestCase):
             with SqliteSaver.from_conn_string(str(Path(directory) / "memory.sqlite")) as saver:
                 graph = build_graph(model, SOUL, LineIndex(["你先喝口水。"]), saver)
                 config = {"configurable": {"thread_id": "jiayi"}, "recursion_limit": 12}
-                for index in range(12):
+                for index in range(COMPACT_AFTER_MESSAGES // 2):
                     graph.update_state(
                         config,
                         {
@@ -199,6 +200,8 @@ class GraphTests(unittest.TestCase):
                 result = graph.invoke({"user_text": "我有点累"}, config)
                 values = graph.get_state(config).values
 
+        kept = COMPACT_AFTER_MESSAGES - RECENT_WINDOW
+        visible = kept // 2 + 1
         self.assertEqual("那你早点睡。", result["draft"])
         self.assertEqual(2, len(model.seen))
         self.assertIn("第0件事先放着", model.seen[0][1])
@@ -206,8 +209,8 @@ class GraphTests(unittest.TestCase):
         self.assertIn("对方在准备下周考试。", draft[0])
         self.assertIn("下周考试", draft[0])
         self.assertNotIn("第0件事先放着", "\n".join(draft[1:]))
-        self.assertIn("第8件事先放着", "\n".join(draft[1:]))
-        self.assertEqual(8, values["compacted_count"])
+        self.assertIn(f"第{visible}件事先放着", "\n".join(draft[1:]))
+        self.assertEqual(kept, values["compacted_count"])
         self.assertIn("下周考试", values["facts"])
 
     def test_spoken_lines_past_two_hundred_stay_in_the_summary(self) -> None:

@@ -3,6 +3,10 @@ import unittest
 from langchain_core.messages import HumanMessage
 
 from persona_dialogue.memory import (
+    COMPACT_AFTER_CHARS,
+    COMPACT_AFTER_MESSAGES,
+    RECENT_CHAR_BUDGET,
+    RECENT_WINDOW,
     TRANSCRIPT_LIMIT,
     apply_memory_update,
     clip_summary,
@@ -18,18 +22,24 @@ from persona_dialogue.notebook import sanitize_facts
 
 class MemoryTests(unittest.TestCase):
     def test_recent_window_stops_on_the_character_budget(self) -> None:
-        messages = [HumanMessage(content="字" * 200, id=str(index)) for index in range(20)]
+        messages = [HumanMessage(content="字" * 200, id=str(index)) for index in range(40)]
         recent = recent_messages(messages)
-        self.assertLess(len(recent), 16)
+        self.assertLess(len(recent), RECENT_WINDOW)
         self.assertEqual(messages[-1], recent[-1])
-        self.assertLessEqual(sum(len(message.content) for message in recent), 1400)
+        self.assertLessEqual(sum(len(message.content) for message in recent), RECENT_CHAR_BUDGET)
+
+    def test_short_cache_stays_verbatim_until_the_threshold(self) -> None:
+        messages = [HumanMessage(content=f"第{index}句", id=str(index)) for index in range(COMPACT_AFTER_MESSAGES - 1)]
+        self.assertEqual([], pending_messages(messages, 0))
+        self.assertEqual(messages, live_messages(messages, 0))
 
     def test_pending_slice_continues_after_the_first_batch(self) -> None:
-        messages = [HumanMessage(content="甲" * 1000, id=str(index)) for index in range(6)]
+        messages = [HumanMessage(content="甲" * 1000, id=str(index)) for index in range(20)]
+        self.assertGreaterEqual(sum(len(message.content) for message in messages), COMPACT_AFTER_CHARS)
         first = pending_messages(messages, 0)
         self.assertEqual(3, len(first))
         second = pending_messages(messages, len(first))
-        self.assertEqual(2, len(second))
+        self.assertEqual(3, len(second))
 
     def test_live_context_keeps_a_short_gap_until_it_is_compacted(self) -> None:
         messages = [HumanMessage(content=f"第{index}句", id=str(index)) for index in range(18)]

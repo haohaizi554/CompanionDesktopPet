@@ -1,6 +1,8 @@
 """对话记忆。
 
-原文至少留两百条。模型每次只看最近一段，更早的收成摘要。
+原文写在设备文件里，关掉后台、重启都还在。
+没到压缩阈值之前，模型看见全部已保存的对话。
+超过阈值之后，只把最近一截原文留给模型，更早的收成摘要。
 事实另外记一份，新的可以替换旧的，过时的删掉。
 """
 
@@ -19,9 +21,11 @@ from persona_dialogue.distill import PRIVACY_MARKERS
 from persona_dialogue.notebook import sanitize_facts
 
 TRANSCRIPT_LIMIT = 200
-RECENT_WINDOW = 16
-RECENT_CHAR_BUDGET = 1400
-COMPACT_BATCH = 8
+RECENT_WINDOW = 32
+RECENT_CHAR_BUDGET = 3600
+COMPACT_AFTER_MESSAGES = 80
+COMPACT_AFTER_CHARS = 12000
+COMPACT_BATCH = 12
 COMPACT_TRIGGER_CHARS = 500
 COMPACT_INPUT_CHARS = 3600
 SUMMARY_CHARS = 480
@@ -69,8 +73,22 @@ def recent_messages(messages: list) -> list:
     return chosen
 
 
+def cache_over_threshold(messages: list) -> bool:
+    """缓存原文够长了，才开始把滑出近期窗口的部分收成摘要。"""
+    if len(messages) >= COMPACT_AFTER_MESSAGES:
+        return True
+    total = 0
+    for message in messages:
+        total += len(message_text(message))
+        if total >= COMPACT_AFTER_CHARS:
+            return True
+    return False
+
+
 def pending_messages(messages: list, cover: object) -> list:
-    """还没写进摘要、又已经滑出近期窗口的那一截。"""
+    """还没写进摘要、又已经滑出近期窗口的那一截。没到阈值就先不压。"""
+    if not cache_over_threshold(messages):
+        return []
     index = clamp_cover(messages, cover)
     recent = recent_messages(messages)
     uncovered = messages[index : len(messages) - len(recent)]
@@ -95,13 +113,10 @@ def pending_messages(messages: list, cover: object) -> list:
 
 
 def live_messages(messages: list, cover: object) -> list:
-    """送给模型的原文：摘要还没盖住的部分，太长就只留最近一截。"""
+    """送给模型的原文。没到阈值就整段给它；过了阈值只留最近一截。"""
     index = clamp_cover(messages, cover)
     live = messages[index:]
-    if not live:
-        return []
-    chars = sum(len(message_text(message)) for message in live)
-    if len(live) <= RECENT_WINDOW + COMPACT_BATCH and chars <= RECENT_CHAR_BUDGET + COMPACT_TRIGGER_CHARS:
+    if not live or not cache_over_threshold(messages):
         return live
     return recent_messages(messages)
 

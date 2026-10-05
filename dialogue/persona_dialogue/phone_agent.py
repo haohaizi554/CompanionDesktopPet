@@ -23,6 +23,7 @@ from persona_dialogue.audit import (
 )
 from persona_dialogue.distill import render_prompt
 from persona_dialogue.memory import (
+    TRANSCRIPT_LIMIT,
     compact_passes,
     compaction_prompt,
     fold_pending,
@@ -301,7 +302,7 @@ def _compact(base_url, model, api_key, messages, summary, facts, cover):
 
 
 def _trim(messages: list, summary: str, facts: list, cover: int):
-    overflow = len(messages) - 200
+    overflow = len(messages) - TRANSCRIPT_LIMIT
     if overflow <= 0:
         return messages, summary, sanitize_facts(facts), cover
     index = min(max(int(cover or 0), 0), len(messages))
