@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import queue
 import subprocess
 import threading
 import time
@@ -15,6 +16,7 @@ from urllib.parse import urlparse
 
 HOST = "0.0.0.0"
 PORT = 8765
+SPEAK_TIMEOUT_SECONDS = 75
 ROOT = Path(__file__).resolve().parents[1]
 VOICE = ROOT / "voice"
 PACK = VOICE / "packs" / "jiayi"
@@ -113,6 +115,8 @@ class GpuVoice:
         self._ready = False
         self._error = ""
         self._process: subprocess.Popen[str] | None = None
+        self._results: queue.Queue[str | None] = queue.Queue()
+        self._reader_started = False
         self._gpu = self._probe_gpu()
         OUT.mkdir(parents=True, exist_ok=True)
         threading.Thread(target=self._boot, name="gpu-boot", daemon=True).start()
@@ -168,18 +172,13 @@ class GpuVoice:
             }
             assert self._process.stdin is not None
             assert self._process.stdout is not None
+            self._start_result_reader()
             self._process.stdin.write(json.dumps(request, ensure_ascii=False) + "\n")
             self._process.stdin.flush()
-            while True:
-                line = self._process.stdout.readline()
-                if not line:
-                    raise RuntimeError("语音进程退出了")
-                message = json.loads(line)
-                if message.get("id") != request_id:
-                    continue
-                if not message.get("ok"):
-                    raise RuntimeError(str(message.get("error") or "合成失败"))
-                return out_path
+            self._wait_result(request_id)
+            if not out_path.is_file() or out_path.stat().st_size < 44:
+                raise RuntimeError("语音没有返回音频")
+            return out_path
 
     def _probe_gpu(self) -> str:
         completed = subprocess.run(
@@ -249,9 +248,47 @@ class GpuVoice:
         if not message.get("ready"):
             self._error = str(message)
             return
+        self._start_result_reader()
         self._error = ""
         self._ready = True
         print(f"ready cuda {self._gpu}", flush=True)
+
+    def _start_result_reader(self) -> None:
+        if self._reader_started or self._process is None or self._process.stdout is None:
+            return
+        stdout = self._process.stdout
+        self._reader_started = True
+
+        def pump() -> None:
+            try:
+                for line in stdout:
+                    self._results.put(line)
+            finally:
+                self._results.put(None)
+
+        threading.Thread(target=pump, name="voice-results", daemon=True).start()
+
+    def _wait_result(self, request_id: int) -> dict:
+        deadline = time.monotonic() + SPEAK_TIMEOUT_SECONDS
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("语音合成超时，没有返回结果")
+            try:
+                line = self._results.get(timeout=remaining)
+            except queue.Empty:
+                raise TimeoutError("语音合成超时，没有返回结果")
+            if not line:
+                raise RuntimeError("语音进程退出了")
+            try:
+                message = json.loads(line)
+            except json.JSONDecodeError as error:
+                raise RuntimeError(f"语音返回的不是结果：{error}") from error
+            if message.get("id") != request_id:
+                continue
+            if not message.get("ok"):
+                raise RuntimeError(str(message.get("error") or "合成失败"))
+            return message
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -278,10 +315,12 @@ class Handler(BaseHTTPRequestHandler):
         try:
             body = json.loads(raw) if raw else {}
             path = self.voice.speak(body)
+            data = path.read_bytes()
+            if len(data) < 44:
+                raise RuntimeError("语音没有返回音频")
         except Exception as error:
             self._json(500, {"ok": False, "error": str(error)})
             return
-        data = path.read_bytes()
         self.send_response(200)
         self.send_header("Content-Type", "audio/wav")
         self.send_header("Content-Length", str(len(data)))
