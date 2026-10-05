@@ -10,7 +10,11 @@ from __future__ import annotations
 import json
 from typing import Optional
 
-from langchain_core.tools import tool
+try:
+    from langchain_core.tools import tool
+except ImportError:
+    def tool(func):
+        return func
 
 DEFAULT_SETTINGS = {
     "day_min": 5,

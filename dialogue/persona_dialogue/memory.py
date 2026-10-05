@@ -9,7 +9,11 @@ from __future__ import annotations
 import json
 import re
 
-from langchain_core.messages import HumanMessage, RemoveMessage
+try:
+    from langchain_core.messages import HumanMessage, RemoveMessage
+except ImportError:
+    HumanMessage = None
+    RemoveMessage = None
 
 from persona_dialogue.distill import PRIVACY_MARKERS
 from persona_dialogue.notebook import sanitize_facts
@@ -26,7 +30,16 @@ _COMPACT_PASSES = 4
 _STALE_EXAM = re.compile(r"考完|不考了|考试结束|考过了")
 
 
+def _from_user(message) -> bool:
+    if isinstance(message, dict):
+        return message.get("role") in {"user", "human"}
+    return HumanMessage is not None and isinstance(message, HumanMessage)
+
+
 def message_text(message) -> str:
+    if isinstance(message, dict):
+        content = message.get("text") or message.get("content") or ""
+        return " ".join(str(content).split()).strip()
     content = getattr(message, "content", "")
     if isinstance(content, list):
         content = "".join(
@@ -101,7 +114,7 @@ def expire_overflow(messages: list, cover: object) -> tuple[list, int]:
         return [], index
     drop = min(overflow, index)
     batch = messages[:drop]
-    if any(not getattr(message, "id", None) for message in batch):
+    if RemoveMessage is None or any(not getattr(message, "id", None) for message in batch):
         return [], index
     expired = [RemoveMessage(id=message.id) for message in batch]
     return expired, index - drop
@@ -155,7 +168,7 @@ def compaction_prompt(summary: str, facts: list[str], pending: list) -> str:
         lines.extend(f"- {fact}" for fact in facts)
     lines.append("这一截对话：")
     for message in pending:
-        role = "对方" if isinstance(message, HumanMessage) else "佳怡"
+        role = "对方" if _from_user(message) else "佳怡"
         lines.append(f"{role}：{message_text(message)}")
     return "\n".join(lines)
 
@@ -176,7 +189,7 @@ def heuristic_update(summary: str, facts: list[str], pending: list) -> tuple[str
         text = message_text(message)
         if not text:
             continue
-        if isinstance(message, HumanMessage):
+        if _from_user(message):
             bits.append("对方说" + text[:48])
         else:
             bits.append("她说" + text[:36])
@@ -201,7 +214,7 @@ def fold_pending(summary: str, facts: list[str], pending: list, model_text: str 
 
 def retire_stale(facts: list[str], pending: list) -> list[str]:
     human = "\n".join(
-        message_text(message) for message in pending if isinstance(message, HumanMessage)
+        message_text(message) for message in pending if _from_user(message)
     )
     if not _STALE_EXAM.search(human):
         return list(facts)
