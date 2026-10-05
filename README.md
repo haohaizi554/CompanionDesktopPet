@@ -16,7 +16,9 @@ Windows x64 WPF 桌宠，以及配套的可审计中文角色语料系统。自�
 
 ## 当前公开版本
 
-最新 Release 是 [v1.6.0](https://github.com/haohaizi554/CompanionDesktopPet/releases/tag/v1.6.0)，2026-09-27 发布。标签指向 `6d8eebf1487c4bd08121dc71165e785cf39ba95e`，主程序 `ProductVersion` 为 `1.6.0+6d8eebf1487c4bd08121dc71165e785cf39ba95e`。这是带本地语音的安装版：装完后同一目录里有主程序、语音运行时和对话程序。安装包由本机 Inno Setup 6.7.3 从当时的 `outputs\standalone` 打出，不由下面的单 EXE 流水线生成。安装程序和主程序都没有 Authenticode 签名，从网络下载时 Windows SmartScreen 或安全软件可能提示信誉不足。
+最新 Release 是 [v1.7.0](https://github.com/haohaizi554/CompanionDesktopPet/releases/tag/v1.7.0)，2026-10-05。标签 `v1.7.0` 指向 `eae7ebd4bd71573b43e63bc2952c307e4ca050ae`。这一版在桌面版之外增加 Android 浮窗，包名 `com.jiayi.companionpet`，显示版本 1.7.0。工程在 `src/CompanionDesktopPet.Android/`，不加入 Windows 解决方案。`android/jiayi-agent/` 用 Chaquopy 把 `dialogue/persona_dialogue` 打进 APK。对话在手机上按桌面 agent 的顺序完成：关系设定、记忆、检索、审计和设置。关系写在应用私有目录的 `persona-setting.json`，不写进会被系统清掉的缓存；默认带上「她是对方的女朋友」。说「做我女朋友」仍走本地回合，回复「好，我做你女朋友。」回车和发送都会送出这一句。点人物可以单击、长按和拖动；浮窗平时不占键盘，只有点进输入框才取焦点，退格留在这个输入框里，点外面就放开。气泡底部留出行距。语音固定发到 `http://43.138.138.200:8765`，由这台电脑的显卡合成；不再探测空闲端口，非模拟器也不再沿用局域网或 `10.0.2.2`。模拟器仍可使用 `10.0.2.2`。平板对话不再依赖本机 `8766`。Windows 单 EXE 仍由该 tag 的流水线发布。本地调试签名 APK 的字节数和 SHA-256 写在 `docs/release/v1.7.0.md`。
+
+带本地语音的 Windows 安装包仍是 [v1.6.0](https://github.com/haohaizi554/CompanionDesktopPet/releases/tag/v1.6.0)，2026-09-27 发布。标签指向 `6d8eebf1487c4bd08121dc71165e785cf39ba95e`，主程序 `ProductVersion` 为 `1.6.0+6d8eebf1487c4bd08121dc71165e785cf39ba95e`。装完后同一目录里有主程序、语音运行时和对话程序。安装包由本机 Inno Setup 6.7.3 从当时的 `outputs\standalone` 打出，不由下面的单 EXE 流水线生成。安装程序和主程序都没有 Authenticode 签名，从网络下载时 Windows SmartScreen 或安全软件可能提示信誉不足。
 
 GitHub 单个附件不能超过 2GB，所以安装包分成四段。四段都要下到同一个文件夹，再运行 `Jiayi-Desktop-Pet-Setup.exe`。缺任何一段都装不完。`SHA256SUMS.txt` 中的哈希是：
 
@@ -49,7 +51,7 @@ outputs/CompanionDesktopPet/使用说明.txt
 - 气泡与人物之间保持 30 DIP 的视觉距离；鼠标停在人物或气泡上时，只暂停当前气泡剩余的消失倒计时，移开后从剩余时间继续。
 - 右键人物：在人物旁边打开卡哇伊风格控制面板，可说句话、`打个招呼♡`、暂停/继续动画、调整大小、切换置顶、设置开机自启动、恢复位置、藏到托盘或退出。v1.5.0 起菜单不再挡住佳怡；开发者模式可以按分类查看语料，测试参数在「开发者模式 → 测试参数」里。
 - 本地语音：v1.6.0 安装版在本机合成。连续点击会立刻把气泡换成最新一句，还没开始推理的旧句子不再接着读。把她明显挪开再松开，不会当成想让她说话；原地点击仍会说话。没有语音运行时的单 EXE 会保持安静的文字气泡。
-- 对话：默认关闭，开关在本地语音旁边。打开后可以用输入框说话，也可以用对话技能改间隔、气泡、语速和菜单状态。审计不过的模型原文不会拿去朗读。
+- 对话：默认关闭，开关在本地语音旁边。打开后可以用输入框说话，也可以用对话技能改间隔、气泡、语速和菜单状态。审计不过的模型原文不会拿去朗读。Android 浮窗用同一套步骤，记忆和关系写在应用私有目录，长按人物打开菜单，点输入框才占用键盘，退格删的是这句草稿。
 - 托盘：双击图标切换显示/隐藏；右键菜单可显示/隐藏、说句话、暂停/继续、切换开机自启动或退出。
 - v1.1.0 已支持 Windows 高对比度模式：气泡与控制面板会采用系统颜色和无阴影样式，关闭后恢复卡哇伊主题。
 
@@ -100,6 +102,8 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run
 
 ```text
 src/CompanionDesktopPet/       WPF 桌宠
+src/CompanionDesktopPet.Android/ Android 浮窗，不加入 Windows 解决方案
+android/jiayi-agent/          把对话 Python 打进 APK 的库；构建缓存不入库
 src/persona_corpus/            离线语料流水线、选择器与模拟器
 dialogue/                      可选对话服务；默认不启动，密钥不入库
 voice/                         本地语音脚本与参考音频；推理运行时不入库
@@ -123,7 +127,7 @@ outputs/CompanionDesktopPet/   单 EXE 交付；不含语音与对话运行时
 - .NET SDK 9.0.301（由根目录 `global.json` 精确锁定）
 - Python 3.11 或更高版本。语料流水线只使用标准库；对话测试另需 `dialogue/requirements.txt` 里钉住的包
 
-运行 v1.5.0 单 EXE 不需要 Python 或 .NET SDK。v1.6.0 安装包自带语音运行时和对话程序，也不需要用户另装 Python 或 .NET SDK。下面的工具只用于源码验证、重新构建，以及在没有安装包时自己组装语音或对话环境。
+运行 v1.5.0 单 EXE 不需要 Python 或 .NET SDK。v1.6.0 安装包自带语音运行时和对话程序，也不需要用户另装 Python 或 .NET SDK。Android 包在手机上自带对话步骤，语音仍由电脑显卡合成。下面的工具只用于源码验证、重新构建，以及在没有安装包时自己组装语音或对话环境。
 
 ## 新鲜验证
 
@@ -213,7 +217,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
 - legacy 内容只进入 archive/review/PII review；运行时只接受通过安全规则、authorship manifest 与逐行 ledger 校验的 `curated_authored` 行。空的 surface manifest 是“零 legacy runtime surface”的可验证证据。
 - 身份彩蛋只有精确列入 editorial manifest、且 ID、来源、允许的身份 marker、文本 SHA-256、分类、冷却和每日上限全部匹配时才可进入 `PersonaCorpus`；宽泛 marker 命中或 EXE 字节扫描不是批准。应用启动自校验该 exact manifest，Python validator 和程序集测试共同阻止未审批身份或隐私内容进入运行时。
 - IDE 前台、连续活跃和空闲返回仍是未采集的未来信号，默认未知。全屏是当前唯一已采集的窗口上下文，只按本文开头公开的 HWND/可见性/样式、DWM 几何与显示器边界判断；失败保持原始 `unknown`，不读取标题、进程、输入、剪贴板、用户文件、像素或网络数据。
-- 对话开关默认关闭。打开并填好接口之后，用户写下的句子会离开本机，发往该接口；接口密钥只放在被 gitignore 的 `config/llm.runtime.json`，不进入安装包。语音合成、自动台词和点击回复仍然留在本机。对话草稿先经过审计，不通过就改写一次，仍然不通过就改说本地短句，不把模型原文送去朗读。
+- 对话开关默认关闭。打开并填好接口之后，用户写下的句子会离开本机，发往该接口；接口密钥只放在被 gitignore 的 `config/llm.runtime.json`，不进入安装包。桌面版的语音合成、自动台词和点击回复仍然留在本机。Android 上写出的句子发给同一套公网模型，语音文本发到这台电脑的显卡，关系、记事和最近对话写在应用私有目录，不写进系统缓存。对话草稿先经过审计，不通过就改写一次，仍然不通过就改说本地短句，不把模型原文送去朗读。
 - 自动检查不能替代人物授权、虚构身份、关系边界和再分发权利的人工审批。
 
 ## 许可
@@ -221,13 +225,3 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Verify-Publish.ps1 `
 本仓库采用分层许可：可分离的技术代码按 [PolyForm Noncommercial License 1.0.0](LICENSE.md) 提供，可用于非商业学习、研究、实验、修改与按条款分发。由于该许可限制商业用途，本项目属于 **source-available（源码可见）**，不是 OSI 定义的开源软件。仓库使用 `LICENSE.md` 让 GitHub 正常渲染许可正文；Release 包中仍以标准文件名 `LICENSE` 携带同一份逐字节一致的原文。
 
 桌宠形象、图标、姓名与昵称、人格、口吻、背景、关系设定、全部语料、语义分组、剧情/决策树、行为森林和编辑性编排均不随技术代码授权，原则上保留全部权利。官方 Release 仅额外允许非商业的私下运行，不授权抽取、复用、转载、改编、训练/微调模型、制作数据集或衍生角色。完整边界见 [LICENSE-SCOPE.md](LICENSE-SCOPE.md)、[ASSET_AND_PERSONA_RIGHTS.md](ASSET_AND_PERSONA_RIGHTS.md) 与 [NOTICE](NOTICE)。
-
-## v1.7.0 增补
-
-2026-10-05。上面各节保持原样。annotated tag `v1.7.0` 指向 `eae7ebd`，Windows 单 EXE 仍由该 tag 的流水线发布；带语音运行时的安装包仍是 v1.6.0。运行库仍是 82,132 条、1,723 个语义场景，SHA-256 仍为 `339358c524785db30badf420a3bdc2b89c7753486e907ff1a5216f68ca5d7ece`。
-
-这次增加的是 Android 浮窗，包名 `com.jiayi.companionpet`，显示版本 1.7.0，version code 2。工程在 `src/CompanionDesktopPet.Android/`，不加入 Windows 解决方案。`android/jiayi-agent/` 用 Chaquopy 把 `dialogue/persona_dialogue` 打进 APK，对话按桌面 agent 的顺序在手机上完成：关系设定、记忆压缩、检索、审计和设置。本机 `persona.json` 里的「她是对方的女朋友」在打包时带上；说「做我女朋友」仍走本地回合，回复「好，我做你女朋友。」回车和发送按钮都会送出这一句。浮窗平时不占键盘，只有点进输入框才取焦点，点外面就放开。气泡底部留出行距，最后一行不再被裁掉。
-
-语音不再探测空闲端口，也不再把非模拟器上保存的局域网或 `10.0.2.2` 地址留着。手机固定把文本发到 `http://43.138.138.200:8765`，由这台电脑的显卡合成后经 frp 转出。模拟器仍可使用 `10.0.2.2`。对话不再要求平板去连本机 `8766`。
-
-本地调试签名 APK 为 116,374,976 字节，SHA-256 为 `9fc1b9218c68ed2cc7842693ff5ca8845d7f65009e7f1f7a501f1d1392968bdd`。仓库忽略 `outputs/`、`voice/gpu-host.log`、`voice/gpu-out/`，以及 Android 的 `build/`、`.gradle/` 和 `local.properties`。
