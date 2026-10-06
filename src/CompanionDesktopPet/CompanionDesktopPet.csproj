@@ -31,6 +31,9 @@
     <Resource Include="Assets\character.png;Assets\character-blink-closed.png;Assets\mouth-mid.png;Assets\mouth-open.png;Assets\pet.ico" />
     <EmbeddedResource Include="../../data/optimized/persona-corpus-v2.tsv"
                       LogicalName="CompanionDesktopPet.Assets.persona-corpus-v2.tsv" />
+    <EmbeddedResource Include="..\..\packaging\voice-host.txt"
+                      LogicalName="CompanionDesktopPet.voice-host.txt"
+                      Condition="'$(SharedVoicePublish)' == 'true'" />
     <Compile Remove="Services/PersonaCorpus.EasterEggs.cs;Services/PersonaCorpus.Growth.cs;Services/PersonaCorpus.Life.cs;Services/PersonaCorpus.Technical.cs" />
   </ItemGroup>
 
@@ -43,18 +46,22 @@
     <Content Include="..\..\voice\infer_stdio.py"
              Link="voice\infer_stdio.py"
              CopyToOutputDirectory="PreserveNewest"
-             CopyToPublishDirectory="PreserveNewest" />
+             CopyToPublishDirectory="PreserveNewest"
+             Condition="'$(SharedVoicePublish)' != 'true'" />
     <Content Include="..\..\voice\packs\jiayi\manifest.json"
              Link="voice\packs\jiayi\manifest.json"
              CopyToOutputDirectory="PreserveNewest"
-             CopyToPublishDirectory="PreserveNewest" />
+             CopyToPublishDirectory="PreserveNewest"
+             Condition="'$(SharedVoicePublish)' != 'true'" />
     <Content Include="..\..\voice\packs\jiayi\refs\*.wav"
              Link="voice\packs\jiayi\refs\%(Filename)%(Extension)"
              CopyToOutputDirectory="PreserveNewest"
-             CopyToPublishDirectory="PreserveNewest" />
+             CopyToPublishDirectory="PreserveNewest"
+             Condition="'$(SharedVoicePublish)' != 'true'" />
     <Content Include="..\..\voice\packs\jiayi\weights\*"
              Link="voice\packs\jiayi\weights\%(Filename)%(Extension)"
              CopyToOutputDirectory="Never"
-             CopyToPublishDirectory="PreserveNewest" />
+             CopyToPublishDirectory="PreserveNewest"
+             Condition="'$(SharedVoicePublish)' != 'true'" />
   </ItemGroup>
 </Project>

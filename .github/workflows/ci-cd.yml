@@ -938,6 +938,13 @@ jobs:
             'Jiayi-Desktop-Pet.exe'
           )
           $assets = @($assetNames | ForEach-Object { Join-Path 'release-assets' $_ })
+          function Test-LocalReleaseAsset([string] $Name) {
+            return $Name -ceq 'Jiayi-Desktop-Pet-Setup.exe' -or
+              $Name -ceq 'Jiayi-Desktop-Pet-Setup-SharedVoice.exe' -or
+              $Name -ceq 'com.jiayi.companionpet-Signed.apk' -or
+              $Name -ceq 'SHA256SUMS-installers.txt' -or
+              $Name -cmatch '^Jiayi-Desktop-Pet-Setup-[0-9]+\.bin$'
+          }
           $releaseExe = Join-Path 'release-assets' 'Jiayi-Desktop-Pet.exe'
           $releaseExeBytes = (Get-Item -LiteralPath $releaseExe).Length
           $releaseExeSha256 = (Get-FileHash -LiteralPath $releaseExe -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -963,7 +970,7 @@ jobs:
           ## 发布亮点
 
           - 右键菜单在人物旁边打开。开发者模式可以按分类查看语料库，测试参数放在「开发者模式 → 测试参数」里，只影响这一次运行。
-          - 对话开关默认关闭。本工作流发布的单 EXE 不附带语音运行时或对话 Python；带这两份运行时的安装版是已发布的 v1.6.0，由本机 Inno Setup 分段上传。
+          - 对话开关默认关闭。本工作流发布的单 EXE 不附带语音运行时或对话 Python。同一标签另由本机上传全量安装包、共用语音的轻量安装包和 Android APK；全量安装包超过 2GB，分成多段。
           - 打开对话并填写接口后，句子发往该接口；语音合成留在本机。审计不过的模型原文不会拿去朗读。
           - 运行库仍是 v1.4.0 的 82,132 条、1,723 个语义场景，SHA-256 仍为 339358c524785db30badf420a3bdc2b89c7753486e907ff1a5216f68ca5d7ece。
 
@@ -1036,7 +1043,11 @@ jobs:
                 Sort-Object
             )
             $expectedAssetNames = @($assetNames | Sort-Object)
-            if (($existingAssetNames -join "`n") -cne ($expectedAssetNames -join "`n")) {
+            $unexpectedAssets = @($existingAssetNames | Where-Object {
+              $assetNames -notcontains $_ -and -not (Test-LocalReleaseAsset $_)
+            })
+            $missingCoreAssets = @($assetNames | Where-Object { $existingAssetNames -notcontains $_ })
+            if ($unexpectedAssets.Count -ne 0 -or $missingCoreAssets.Count -ne 0) {
               throw "Existing GitHub Release $tag has a different asset manifest and is immutable: $($existingAssetNames -join ', ')"
             }
 
@@ -1045,9 +1056,11 @@ jobs:
               Remove-Item -LiteralPath $existingAssetDirectory -Recurse -Force
             }
             New-Item -ItemType Directory -Path $existingAssetDirectory | Out-Null
-            & gh release download $tag --repo $repository --dir $existingAssetDirectory
-            if ($LASTEXITCODE -ne 0) {
-              throw "Could not download existing immutable GitHub Release assets for $tag."
+            foreach ($assetName in $assetNames) {
+              & gh release download $tag --repo $repository --dir $existingAssetDirectory --pattern $assetName --clobber
+              if ($LASTEXITCODE -ne 0) {
+                throw "Could not download existing immutable GitHub Release asset ${assetName} for $tag."
+              }
             }
 
             $downloadedDirectories = @(Get-ChildItem -LiteralPath $existingAssetDirectory -Directory -Force -Recurse)
@@ -1058,7 +1071,7 @@ jobs:
             )
             if ($downloadedDirectories.Count -ne 0 -or
                 ($downloadedAssetNames -join "`n") -cne ($expectedAssetNames -join "`n")) {
-              throw "Downloaded existing GitHub Release $tag does not have the exact immutable asset manifest."
+              throw "Downloaded existing GitHub Release $tag does not have the exact immutable core asset manifest."
             }
 
             foreach ($assetName in $assetNames) {
@@ -1090,7 +1103,11 @@ jobs:
             throw "Could not verify published GitHub Release assets for $tag."
           }
           $expectedAssetNames = @($assetNames | Sort-Object)
-          if (($publishedAssetNames -join "`n") -cne ($expectedAssetNames -join "`n")) {
+          $unexpectedPublished = @($publishedAssetNames | Where-Object {
+            $assetNames -notcontains $_ -and -not (Test-LocalReleaseAsset $_)
+          })
+          $missingPublished = @($assetNames | Where-Object { $publishedAssetNames -notcontains $_ })
+          if ($unexpectedPublished.Count -ne 0 -or $missingPublished.Count -ne 0) {
             throw "Published GitHub Release assets were renamed or are incomplete: $($publishedAssetNames -join ', ')"
           }
 

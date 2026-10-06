@@ -292,7 +292,13 @@ class GpuVoice:
 
 
 class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
     voice: GpuVoice
+
+    def end_headers(self) -> None:
+        self.close_connection = True
+        self.send_header("Connection", "close")
+        super().end_headers()
 
     def do_GET(self) -> None:
         if urlparse(self.path).path != "/health":

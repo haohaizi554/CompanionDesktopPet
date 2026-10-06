@@ -61,7 +61,8 @@ public partial class App : System.Windows.Application
                 AutoStartService = _autoStartService,
                 VoiceSpeaker = _smokeTest
                     ? null
-                    : JiayiVoiceSpeaker.TryCreate(AppContext.BaseDirectory)
+                    : (IVoiceSpeaker?)GpuHostVoiceSpeaker.TryCreate(AppContext.BaseDirectory)
+                        ?? JiayiVoiceSpeaker.TryCreate(AppContext.BaseDirectory)
             }.Build());
             if (_smokeTest)
             {

@@ -1,35 +1,32 @@
-﻿; 佳怡桌宠安装包。语音运行时和对话程序与主程序装在同一目录。
+; 佳怡桌宠精简安装包。语音走公网转发，不打包本机语音运行时。
 ; 密钥文件 config\llm.runtime.json 不进入安装包。
 
-#define MyAppName "佳怡桌宠"
+#define MyAppName "佳怡桌宠（共用语音）"
 #define MyAppVersion "1.8.0"
 #define MyAppExeName "CompanionDesktopPet.exe"
 #define RepoRoot "D:\desktop\CompanionDesktopPet"
-#define SliceBytes "1800000000"
 
 [Setup]
-AppId={{8F3A6C21-5B74-4E19-9C0D-2A7E4B91D6F0}
+AppId={{C4E91B72-6A38-4D05-8F17-3B6D2E90A1C8}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher=haohaizi554
-DefaultDirName={autopf}\CompanionDesktopPet
+DefaultDirName={autopf}\CompanionDesktopPet-SharedVoice
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
-OutputDir={#RepoRoot}\outputs\installer
-OutputBaseFilename=Jiayi-Desktop-Pet-Setup
+OutputDir={#RepoRoot}\outputs\installer-shared-voice
+OutputBaseFilename=Jiayi-Desktop-Pet-Setup-SharedVoice
 SetupIconFile={#RepoRoot}\src\CompanionDesktopPet\Assets\pet.ico
 Compression=lzma2
 SolidCompression=yes
 LZMAUseSeparateProcess=yes
 LZMANumBlockThreads=2
-DiskSpanning=yes
-DiskSliceSize={#SliceBytes}
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
 WizardStyle=modern
 UninstallDisplayIcon={app}\{#MyAppExeName}
-InfoBeforeFile={#RepoRoot}\packaging\install-notes-zh.txt
+InfoBeforeFile={#RepoRoot}\packaging\install-notes-shared-voice-zh.txt
 CloseApplications=yes
 VersionInfoVersion=1.8.0.0
 VersionInfoProductVersion=1.8.0
@@ -41,8 +38,7 @@ Name: "chinesesimp"; MessagesFile: "{#RepoRoot}\packaging\ChineseSimplified.islu
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加图标:"; Flags: checkedonce
 
 [Files]
-Source: "{#RepoRoot}\outputs\standalone\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#RepoRoot}\outputs\standalone\voice\*"; DestDir: "{app}\voice"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "*\__pycache__\*,*.pyc"
+Source: "{#RepoRoot}\outputs\standalone-shared-voice\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#RepoRoot}\dialogue\serve.py"; DestDir: "{app}\dialogue"; Flags: ignoreversion
 Source: "{#RepoRoot}\dialogue\persona_dialogue\*"; DestDir: "{app}\dialogue\persona_dialogue"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "*\__pycache__\*,*.pyc"
 Source: "{#RepoRoot}\dialogue\python\*"; DestDir: "{app}\dialogue\python"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "*\__pycache__\*,*.pyc"

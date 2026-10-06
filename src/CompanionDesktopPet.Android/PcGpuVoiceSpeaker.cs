@@ -64,7 +64,8 @@ internal sealed class PcGpuVoiceSpeaker : IVoiceSpeaker
     private readonly HttpClient _http = new(new SocketsHttpHandler
     {
         UseProxy = false,
-        ConnectTimeout = TimeSpan.FromSeconds(8)
+        ConnectTimeout = TimeSpan.FromSeconds(8),
+        PooledConnectionLifetime = TimeSpan.Zero
     })
     { Timeout = Timeout.InfiniteTimeSpan };
     private readonly Handler _main = new(Looper.MainLooper!);
@@ -90,6 +91,7 @@ internal sealed class PcGpuVoiceSpeaker : IVoiceSpeaker
         _context = context;
         _baseUrl = baseUrl.TrimEnd('/');
         _cache = cache;
+        _http.DefaultRequestHeaders.ConnectionClose = true;
         Directory.CreateDirectory(cache);
         _tick = new MouthTick(this);
     }
@@ -143,9 +145,8 @@ internal sealed class PcGpuVoiceSpeaker : IVoiceSpeaker
             Interlocked.Increment(ref _generation);
             previous = _requestCancel;
             _requestCancel = new CancellationTokenSource();
+            previous?.Cancel();
         }
-
-        previous?.Cancel();
         Interlocked.Exchange(ref _pending, 1);
         SynthesisStarted?.Invoke(text);
         if (Interlocked.CompareExchange(ref _pump, 1, 0) == 0)
@@ -193,49 +194,59 @@ internal sealed class PcGpuVoiceSpeaker : IVoiceSpeaker
                 continue;
             }
 
-            try
+            var sent = false;
+            for (var attempt = 0; attempt < 2 && !sent; attempt++)
             {
-                request.CancelAfter(TimeSpan.FromSeconds(45));
-                var payload = JsonSerializer.Serialize(new
+                try
                 {
-                    text,
-                    tone,
-                    trigger,
-                    speed_factor = _speed,
-                    temperature = _temperature,
-                    repetition_penalty = _repetition,
-                    top_k = _topK,
-                    top_p = _topP
-                });
-                using var response = await _http.PostAsync(
-                    _baseUrl + "/v1/speak",
-                    new StringContent(payload, System.Text.Encoding.UTF8, "application/json"),
-                    request.Token).ConfigureAwait(false);
-                var bytes = await response.Content.ReadAsByteArrayAsync(request.Token).ConfigureAwait(false);
-                if (!response.IsSuccessStatusCode || bytes.Length < 44)
-                {
-                    throw new HttpRequestException("voice returned no audio");
-                }
+                    request.CancelAfter(TimeSpan.FromSeconds(80));
+                    var payload = JsonSerializer.Serialize(new
+                    {
+                        text,
+                        tone,
+                        trigger,
+                        speed_factor = _speed,
+                        temperature = _temperature,
+                        repetition_penalty = _repetition,
+                        top_k = _topK,
+                        top_p = _topP
+                    });
+                    using var response = await _http.PostAsync(
+                        _baseUrl + "/v1/speak",
+                        new StringContent(payload, System.Text.Encoding.UTF8, "application/json"),
+                        request.Token).ConfigureAwait(false);
+                    var bytes = await response.Content.ReadAsByteArrayAsync(request.Token).ConfigureAwait(false);
+                    if (!response.IsSuccessStatusCode || bytes.Length < 44)
+                    {
+                        throw new HttpRequestException("voice returned no audio");
+                    }
 
-                if (generation != Volatile.Read(ref _generation))
-                {
-                    continue;
-                }
+                    if (generation != Volatile.Read(ref _generation))
+                    {
+                        break;
+                    }
 
-                var path = Path.Combine(_cache, generation + ".wav");
-                await File.WriteAllBytesAsync(path, bytes, request.Token).ConfigureAwait(false);
-                var levels = SpeechMouthTimeline.FromWav(path);
-                PlaybackReady?.Invoke(new VoiceClip(text, path));
-                _main.Post(() => Play(path, generation, levels));
-            }
-            catch (Exception)
-            {
-                if (generation == Volatile.Read(ref _generation))
+                    var path = Path.Combine(_cache, generation + ".wav");
+                    await File.WriteAllBytesAsync(path, bytes, request.Token).ConfigureAwait(false);
+                    var levels = SpeechMouthTimeline.FromWav(path);
+                    PlaybackReady?.Invoke(new VoiceClip(text, path));
+                    _main.Post(() => Play(path, generation, levels));
+                    sent = true;
+                }
+                catch (Exception) when (attempt == 0 && generation == Volatile.Read(ref _generation) && !request.IsCancellationRequested)
                 {
-                    Failed?.Invoke("这句话的语音没回来。对话还能继续，你接着说就行。");
-                    Finish(generation);
+                }
+                catch (Exception)
+                {
+                    if (generation == Volatile.Read(ref _generation))
+                    {
+                        Failed?.Invoke("这句话的语音没回来。对话还能继续，你接着说就行。");
+                        Finish(generation);
+                    }
                 }
             }
+
+            ReleaseRequest(request);
         }
     }
 
@@ -258,9 +269,8 @@ internal sealed class PcGpuVoiceSpeaker : IVoiceSpeaker
             generation = Interlocked.Increment(ref _generation);
             previous = _requestCancel;
             _requestCancel = null;
+            previous?.Cancel();
         }
-
-        previous?.Cancel();
         Interlocked.Exchange(ref _pending, 0);
         _main.Post(() => CompleteOnMain(generation));
     }
@@ -345,6 +355,19 @@ internal sealed class PcGpuVoiceSpeaker : IVoiceSpeaker
             {
             }
         });
+    }
+
+    private void ReleaseRequest(CancellationTokenSource request)
+    {
+        lock (_speechGate)
+        {
+            if (ReferenceEquals(_requestCancel, request))
+            {
+                _requestCancel = null;
+            }
+        }
+
+        request.Dispose();
     }
 
     private void Finish(int generation)
