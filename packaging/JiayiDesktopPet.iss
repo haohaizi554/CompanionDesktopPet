@@ -2,7 +2,7 @@
 ; 密钥文件 config\llm.runtime.json 不进入安装包。
 
 #define MyAppName "佳怡桌宠"
-#define MyAppVersion "1.8.0"
+#define MyAppVersion "1.8.1"
 #define MyAppExeName "CompanionDesktopPet.exe"
 #define RepoRoot "D:\desktop\CompanionDesktopPet"
 #define SliceBytes "1800000000"
@@ -31,8 +31,8 @@ WizardStyle=modern
 UninstallDisplayIcon={app}\{#MyAppExeName}
 InfoBeforeFile={#RepoRoot}\packaging\install-notes-zh.txt
 CloseApplications=yes
-VersionInfoVersion=1.8.0.0
-VersionInfoProductVersion=1.8.0
+VersionInfoVersion=1.8.1.0
+VersionInfoProductVersion=1.8.1
 
 [Languages]
 Name: "chinesesimp"; MessagesFile: "{#RepoRoot}\packaging\ChineseSimplified.islu"

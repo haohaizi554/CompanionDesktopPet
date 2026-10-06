@@ -47,25 +47,21 @@
              Link="voice\infer_stdio.py"
              CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest"
-             ExcludeFromSingleFile="true"
-             Condition="'$(SharedVoicePublish)' != 'true'" />
+             Condition="'$(SharedVoicePublish)' != 'true' and '$(SkipBundledVoice)' != 'true'" />
     <Content Include="..\..\voice\packs\jiayi\manifest.json"
              Link="voice\packs\jiayi\manifest.json"
              CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest"
-             ExcludeFromSingleFile="true"
-             Condition="'$(SharedVoicePublish)' != 'true'" />
+             Condition="'$(SharedVoicePublish)' != 'true' and '$(SkipBundledVoice)' != 'true'" />
     <Content Include="..\..\voice\packs\jiayi\refs\*.wav"
              Link="voice\packs\jiayi\refs\%(Filename)%(Extension)"
              CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest"
-             ExcludeFromSingleFile="true"
-             Condition="'$(SharedVoicePublish)' != 'true'" />
+             Condition="'$(SharedVoicePublish)' != 'true' and '$(SkipBundledVoice)' != 'true'" />
     <Content Include="..\..\voice\packs\jiayi\weights\*"
              Link="voice\packs\jiayi\weights\%(Filename)%(Extension)"
              CopyToOutputDirectory="Never"
              CopyToPublishDirectory="PreserveNewest"
-             ExcludeFromSingleFile="true"
-             Condition="'$(SharedVoicePublish)' != 'true'" />
+             Condition="'$(SharedVoicePublish)' != 'true' and '$(SkipBundledVoice)' != 'true'" />
   </ItemGroup>
 </Project>
